@@ -22,7 +22,7 @@ import { type AMTConfiguration } from '../models/index.js'
 import { randomUUID } from 'node:crypto'
 import { Error } from './error.js'
 import { type CommonContext, invokeWsmanCall } from './common.js'
-import { type Models } from '@open-amt-cloud-toolkit/wsman-messages/amt'
+import { type Models } from '@open-amt-cloud-toolkit/wsman-messages/amt/models.js'
 
 export interface CIRAConfigContext extends CommonContext {
   status: 'success' | 'error' | 'wsman' | 'heartbeat_request'
