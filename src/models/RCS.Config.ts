@@ -4,7 +4,7 @@
  **********************************************************************/
 
 import { type AMT } from '@open-amt-cloud-toolkit/wsman-messages'
-import { type Types } from '@open-amt-cloud-toolkit/wsman-messages/amt'
+import { type Types } from '@open-amt-cloud-toolkit/wsman-messages/amt/types.js'
 import { type DigestChallenge } from '@open-amt-cloud-toolkit/wsman-messages/models/common.js'
 import type Server from 'ws'
 import { type AMTConfiguration, type AMTDomain, type ProvisioningCertObj } from './index.js'
