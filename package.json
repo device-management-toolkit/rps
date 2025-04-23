@@ -87,7 +87,7 @@
     "jest-mock": "^29.7.0",
     "jest-sinon": "^1.1.0",
     "jest-transform-stub": "^2.0.0",
-    "nodemon": "^3.1.9",
+    "nodemon": "^3.1.10",
     "prettier-config-standard": "^7.0.0",
     "prettier-plugin-multiline-arrays": "^4.0.3",
     "sinon": "^20.0.0",
