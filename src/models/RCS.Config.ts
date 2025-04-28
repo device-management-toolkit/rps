@@ -4,7 +4,6 @@
  **********************************************************************/
 
 import { type AMT } from '@open-amt-cloud-toolkit/wsman-messages'
-import { type Types } from '@open-amt-cloud-toolkit/wsman-messages/amt'
 import { type DigestChallenge } from '@open-amt-cloud-toolkit/wsman-messages/models/common.js'
 import type Server from 'ws'
 import { type AMTConfiguration, type AMTDomain, type ProvisioningCertObj } from './index.js'
@@ -70,8 +69,8 @@ export interface CIRAConfig {
   username: string
   password?: string
   commonName: string
-  serverAddressFormat: Types.MPServer.InfoFormat // IPv4 (3), IPv6 (4), FQDN (201)
-  authMethod: Types.MPServer.AuthMethod // Mutual Auth (1), Username/Password (2) (We only support 2)
+  serverAddressFormat: AMT.Types.MPServer.InfoFormat // IPv4 (3), IPv6 (4), FQDN (201)
+  authMethod: AMT.Types.MPServer.AuthMethod // Mutual Auth (1), Username/Password (2) (We only support 2)
   mpsRootCertificate: string // Assumption is Root Cert for MPS. Need to validate.
   proxyDetails: string
   tenantId: string
