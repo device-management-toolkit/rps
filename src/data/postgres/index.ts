@@ -4,7 +4,7 @@
  **********************************************************************/
 
 import { type IDB } from '../../interfaces/database/IDb.js'
-import pg from 'pg'
+import { Pool, type QueryResultRow, type QueryResult } from 'pg'
 import Logger from '../../Logger.js'
 import { CiraConfigTable } from './tables/ciraConfigs.js'
 import { ProfilesTable } from './tables/profiles.js'
@@ -14,7 +14,7 @@ import { WirelessProfilesTable } from './tables/wirelessProfiles.js'
 import { IEEE8021xProfilesTable } from './tables/ieee8021xProfiles.js'
 
 export default class Db implements IDB {
-  pool: pg.Pool
+  pool: InstanceType<typeof Pool>
   ciraConfigs: CiraConfigTable
   domains: DomainsTable
   profiles: ProfilesTable
@@ -25,7 +25,7 @@ export default class Db implements IDB {
   log: Logger = new Logger('PostgresDb')
 
   constructor(connectionString: string) {
-    this.pool = new pg.Pool({
+    this.pool = new Pool({
       connectionString
     })
     this.ciraConfigs = new CiraConfigTable(this)
@@ -36,7 +36,7 @@ export default class Db implements IDB {
     this.ieee8021xProfiles = new IEEE8021xProfilesTable(this)
   }
 
-  async query<T extends pg.QueryResultRow>(text: string, params?: any): Promise<pg.QueryResult<T>> {
+  async query<T extends QueryResultRow>(text: string, params?: any): Promise<QueryResult<T>> {
     const start = Date.now()
     const res = await this.pool.query<T>(text, params)
     const duration = Date.now() - start
