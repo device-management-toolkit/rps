@@ -6,12 +6,11 @@
 import { sendParent, setup } from 'xstate'
 import { HttpHandler } from '../HttpHandler.js'
 import { devices } from '../devices.js'
-import { type HttpZResponseModel } from 'http-z'
 import Logger from '../Logger.js'
 
 const httpHandler = new HttpHandler()
 export interface ErrorContext {
-  message: HttpZResponseModel | null
+  message: any | null
   clientId: string
 }
 

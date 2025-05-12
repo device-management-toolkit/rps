@@ -10,7 +10,7 @@ import { ClientMethods, type ClientMsg } from './models/RCS.Config.js'
 import { RPSError } from './utils/RPSError.js'
 import type { IValidator } from './interfaces/IValidator.js'
 import { HttpHandler } from './HttpHandler.js'
-import pkg, { type HttpZResponseModel } from 'http-z'
+import { parse } from 'http-z'
 import { Deactivation } from './stateMachines/deactivation.js'
 import { Maintenance, type MaintenanceEvent } from './stateMachines/maintenance/maintenance.js'
 import { Activation, type ActivationEvent } from './stateMachines/activation.js'
@@ -123,14 +123,18 @@ export class DataProcessor {
   async handleResponse(clientMsg: ClientMsg, clientId: string): Promise<void> {
     const clientObj = devices[clientId]
     let resolveValue = null
-    let rejectValue: UnexpectedParseError | HttpZResponseModel | null = null
+    let rejectValue: UnexpectedParseError | any | null = null
     let statusCode = -1
     try {
-      const { parse } = pkg
-      const httpRsp = parse(clientMsg.payload) as HttpZResponseModel
+      const httpRsp = parse(clientMsg.payload)
+
+      if (!('statusCode' in httpRsp)) {
+        throw new Error('Invalid message format: missing statusCode')
+      }
+
       statusCode = httpRsp.statusCode
       if (statusCode === 200) {
-        const xmlBody = parseChunkedMessage(httpRsp.body.text)
+        const xmlBody = httpRsp.body?.text ? parseChunkedMessage(httpRsp.body.text) : ''
         resolveValue = this.httpHandler.parseXML(xmlBody)
         if (!xmlBody || !resolveValue) {
           // AMT fulfilled the request, but there is some problem with the response
