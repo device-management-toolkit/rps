@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { type AMT, type CIM, Common, type IPS } from '@open-amt-cloud-toolkit/wsman-messages'
+import { type AMT, type CIM, Common, type IPS } from '@device-management-toolkit/wsman-messages'
 import Logger from '../Logger.js'
 import { assign, setup, fromPromise } from 'xstate'
 import {

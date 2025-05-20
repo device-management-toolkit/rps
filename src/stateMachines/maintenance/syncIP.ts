@@ -5,7 +5,7 @@
 
 import { assign, setup, sendTo, fromPromise } from 'xstate'
 import { coalesceMessage, type CommonMaintenanceContext, type EnumerationContext } from '../common.js'
-import { AMT } from '@open-amt-cloud-toolkit/wsman-messages'
+import { AMT } from '@device-management-toolkit/wsman-messages'
 import { doneFail, doneSuccess } from './doneResponse.js'
 import Logger from '../../Logger.js'
 import { UNEXPECTED_PARSE_ERROR } from '../../utils/constants.js'

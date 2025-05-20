@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { type AMT, type Common } from '@open-amt-cloud-toolkit/wsman-messages'
+import { type AMT, type Common } from '@device-management-toolkit/wsman-messages'
 import { HttpResponseError, coalesceMessage } from '../common.js'
 import { type DoneResponse, StatusFailed, StatusSuccess } from './doneResponse.js'
 import { config, setupTestClient } from '../../test/helper/Config.js'

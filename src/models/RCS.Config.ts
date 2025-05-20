@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { type AMT } from '@open-amt-cloud-toolkit/wsman-messages'
-import { type DigestChallenge } from '@open-amt-cloud-toolkit/wsman-messages/models/common.js'
+import { type AMT } from '@device-management-toolkit/wsman-messages'
+import { type DigestChallenge } from '@device-management-toolkit/wsman-messages/models/common.js'
 import type Server from 'ws'
 import { type AMTConfiguration, type AMTDomain, type ProvisioningCertObj } from './index.js'
 

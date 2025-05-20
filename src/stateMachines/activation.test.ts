@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { AMT, CIM, IPS } from '@open-amt-cloud-toolkit/wsman-messages'
+import { AMT, CIM, IPS } from '@device-management-toolkit/wsman-messages'
 import { randomUUID } from 'node:crypto'
 // import { devices } from '../WebSocketListener.js'
 import { devices } from '../devices.js'
