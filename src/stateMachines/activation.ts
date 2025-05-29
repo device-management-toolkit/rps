@@ -449,14 +449,15 @@ export class Activation {
         context.profile != null ? context.profile.activation === ClientAction.ADMINCTLMODE : false,
       isSHBC: ({ context }) => {
         const device = devices[context.clientId]
-                if(context.profile != null) {
-                  if(context.profile.activation === ClientAction.ADMINCTLMODE && 
-                    device.action === ClientAction.CLIENTCTLMODE) {
-                      return true
-                    }
-                } 
-               return false
-              },
+        if (context.profile != null && device.ClientData?.payload?.ver) {
+          return (
+            context.profile.activation === ClientAction.ADMINCTLMODE &&
+            parseFloat(device.ClientData.payload.ver) >= 19 &&
+            device.ClientData.payload.currentMode === 0
+          )
+        }
+        return false
+      },
       isCertExtracted: ({ context }) => context.certChainPfx != null,
       isValidCert: ({ context }) => devices[context.clientId].certObj != null,
       isDigestRealmInvalid: ({ context }) =>
@@ -472,8 +473,9 @@ export class Activation {
       isDeviceClientModeActivated: ({ context }) => context.message.Envelope.Body?.Setup_OUTPUT?.ReturnValue === 0,
       isDeviceActivatedInACM: ({ context }) =>
         context.message.Envelope.Body?.IPS_HostBasedSetupService?.CurrentControlMode === 2,
-      isDeviceActivatedInCCM: ({ context }) =>
-        context.message.Envelope.Body?.CommitChanges_OUTPUT.ReturnValue === 0,
+      isDeviceCommittedInCCM: ({ context }) =>
+        context.message.Envelope.Body?.CommitChanges_OUTPUT.ReturnValue === 0 &&
+        parseFloat(devices[context.clientId].ClientData.payload.ver) >= 19,
       isCertNotAdded: ({ context }) => context.message.Envelope.Body.AddNextCertInChain_OUTPUT.ReturnValue !== 0,
       isGeneralSettings: ({ context }) => context.targetAfterError === 'GET_GENERAL_SETTINGS',
       isMebxPassword: ({ context }) => context.targetAfterError === 'SET_MEBX_PASSWORD',
@@ -486,10 +488,9 @@ export class Activation {
       canUpgrade: ({ context }) =>
         context.profile != null && context.isActivated != null
           ? context.isActivated &&
-            (devices[context.clientId].ClientData.payload.currentMode === 1 || 
-              (devices[context.clientId].ClientData.payload.currentMode === 0 && 
-              devices[context.clientId].ClientData.payload.ver >= 19
-              )) &&
+            (devices[context.clientId].ClientData.payload.currentMode === 1 ||
+              (devices[context.clientId].ClientData.payload.currentMode === 0 &&
+                parseFloat(devices[context.clientId].ClientData.payload.ver) >= 19)) &&
             context.profile.activation === ClientAction.ADMINCTLMODE
           : false
     },
@@ -878,10 +879,17 @@ export class Activation {
           src: 'sendClientSetup',
           input: ({ context }) => context,
           id: 'send-setup',
-          onDone: {
-            actions: assign({ message: ({ event }) => event.output }),
-            target: 'UPDATE_CREDENTIALS'
-          },
+          onDone: [
+            {
+              guard: 'isSHBC',
+              actions: ['Update AMT Credentials'],
+              target: 'COMMIT_CHANGES'
+            },
+            {
+              actions: assign({ message: ({ event }) => event.output }),
+              target: 'CHECK_SETUP'
+            }
+          ],
           onError: [
             {
               guard: ({ event }) => event.error instanceof GATEWAY_TIMEOUT_ERROR,
@@ -918,7 +926,7 @@ export class Activation {
       CHECK_SETUP: {
         always: [
           {
-            guard: 'isDeviceActivatedInCCM',
+            guard: 'isDeviceCommittedInCCM',
             actions: [
               ({ context }) => {
                 devices[context.clientId].status.Status = 'Client control mode.'
@@ -977,25 +985,12 @@ export class Activation {
       },
       DELAYED_TRANSITION: {
         after: {
-          DELAY_TIME_ACTIVATION_SYNC: [
-            { 
-              guard: 'isSHBC',
-              actions: assign({ hasToUpgrade: () => true }),
-              target: 'GET_AMT_DOMAIN_CERT'
-            },
-            { 
-              target: 'UPDATE_CREDENTIALS' 
-            }
-          ]
+          DELAY_TIME_ACTIVATION_SYNC: { target: 'UPDATE_CREDENTIALS' }
         }
       },
       UPDATE_CREDENTIALS: {
         entry: ['Update AMT Credentials'],
         always: [
-          {
-            guard: 'isSHBC',
-            target: 'COMMIT_CHANGES'
-          },
           {
             guard: 'isAdminMode',
             target: 'SET_MEBX_PASSWORD'
@@ -1037,7 +1032,14 @@ export class Activation {
           src: 'saveDeviceInfoToMPS',
           input: ({ context }) => context,
           id: 'save-device-to-mps',
-          onDone: 'UNCONFIGURATION',
+          onDone: [
+            {
+              guard: 'isSHBC',
+              actions: assign({ hasToUpgrade: () => true }),
+              target: 'GET_AMT_DOMAIN_CERT'
+            },
+            { target: 'UNCONFIGURATION' }
+          ],
           onError: 'SAVE_DEVICE_TO_MPS_FAILURE'
         }
       },
