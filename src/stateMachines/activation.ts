@@ -454,7 +454,8 @@ export class Activation {
           return (
             context.profile.activation === ClientAction.ADMINCTLMODE &&
             parseFloat(device.ClientData.payload.ver) >= 19 &&
-            device.ClientData.payload.currentMode === 0 && !context.shbcCCMComplete
+            device.ClientData.payload.currentMode === 0 &&
+            !context.shbcCCMComplete
           )
         }
         return false
@@ -492,13 +493,14 @@ export class Activation {
       hasToUpgrade: ({ context }) => (context.hasToUpgrade != null ? context.hasToUpgrade : false),
       canUpgrade: ({ context }) => {
         if (context.profile != null && context.isActivated != null) {
-          return  (devices[context.clientId].ClientData.payload.currentMode === 1 ||
-              context.shbcCCMComplete === true) &&
+          return (
+            (devices[context.clientId].ClientData.payload.currentMode === 1 || context.shbcCCMComplete === true) &&
             context.profile.activation === ClientAction.ADMINCTLMODE
-              }
-
-          return false
+          )
         }
+
+        return false
+      }
     },
     actions: {
       'Reset Unauth Count': ({ context }) => {
@@ -806,14 +808,14 @@ export class Activation {
       CHECK_ADMIN_SETUP: {
         always: [
           {
-            guard: 'isDeviceActivatedInACM',
+            guard: 'isSHBCCMComplete',
             actions: [
               ({ context }) => {
                 devices[context.clientId].status.Status = 'Admin control mode.'
               },
               'Set activation status'
             ],
-            target: 'UPDATE_CREDENTIALS'
+            target: 'COMMIT_CHANGES'
           },
           {
             guard: 'isDeviceAdminModeActivated',
@@ -855,6 +857,16 @@ export class Activation {
       },
       CHECK_UPGRADE: {
         always: [
+          {
+            guard: 'isDeviceActivatedInACM',
+            actions: [
+              ({ context }) => {
+                devices[context.clientId].status.Status = 'Upgraded to admin control mode.'
+              },
+              'Set activation status'
+            ],
+            target: 'CHANGE_AMT_PASSWORD'
+          },
           {
             guard: 'isDeviceActivatedInACM',
             actions: [
@@ -913,12 +925,20 @@ export class Activation {
           src: 'commitChanges',
           input: ({ context }) => context,
           id: 'commit-changes',
-          onDone: {
-            actions: [
-              assign({ message: ({ event }) => event.output })
-            ],
-            target: 'CHECK_SETUP'
-          },
+          onDone: [
+            {
+              guard: 'isSHBC',
+              actions: [
+                assign({ message: ({ event }) => event.output })
+              ],
+              target: 'CHECK_SETUP'
+            },
+            {
+              guard: 'isSHBC',
+              actions: [assign({ message: ({ event }) => event.output }) ],
+              target: 'SET_MEBX_PASSWORD'
+            }
+          ],
           onError: [
             {
               guard: ({ event }) => event.error instanceof GATEWAY_TIMEOUT_ERROR,
@@ -936,9 +956,9 @@ export class Activation {
             guard: 'isDeviceCommittedInCCM',
             actions: [
               ({ context }) => {
-                devices[context.clientId].status.Status = 'Client control mode.',
-                context.shbcCCMComplete = true,
-                context.isActivated = true
+                ;(devices[context.clientId].status.Status = 'Client control mode.'),
+                  (context.shbcCCMComplete = true),
+                  (context.isActivated = true)
               },
               'Set activation status'
             ],
