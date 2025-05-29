@@ -47,6 +47,7 @@ export interface ActivationContext extends CommonContext {
   tenantId: string
   canActivate: boolean
   shbcCCMComplete: boolean
+  shbcACMComplete: boolean
   friendlyName?: string | null
 }
 
@@ -464,6 +465,10 @@ export class Activation {
         const device = devices[context.clientId]
         return context.shbcCCMComplete === true
       },
+       isSHBCACMComplete: ({ context }) => {
+        const device = devices[context.clientId]
+        return context.shbcACMComplete === true
+      },
       isCertExtracted: ({ context }) => context.certChainPfx != null,
       isValidCert: ({ context }) => devices[context.clientId].certObj != null,
       isDigestRealmInvalid: ({ context }) =>
@@ -527,6 +532,7 @@ export class Activation {
       canActivate: input.canActivate,
       hasToUpgrade: input.hasToUpgrade,
       shbcCCMComplete: input.shbcCCMComplete,
+      shbcACMComplete: input.shbcACMComplete,
       generalSettings: input.generalSettings,
       targetAfterError: input.targetAfterError,
       httpHandler: new HttpHandler(),
@@ -858,14 +864,14 @@ export class Activation {
       CHECK_UPGRADE: {
         always: [
           {
-            guard: 'isDeviceActivatedInACM',
+            guard: 'isSHBCCMComplete',
             actions: [
               ({ context }) => {
-                devices[context.clientId].status.Status = 'Upgraded to admin control mode.'
+                devices[context.clientId].status.Status = 'admin control mode.'
               },
               'Set activation status'
             ],
-            target: 'CHANGE_AMT_PASSWORD'
+            target: 'COMMIT_CHANGES'
           },
           {
             guard: 'isDeviceActivatedInACM',
@@ -934,7 +940,7 @@ export class Activation {
               target: 'CHECK_SETUP'
             },
             {
-              guard: 'isSHBC',
+              guard: 'isSHBCCMComplete',
               actions: [assign({ message: ({ event }) => event.output }) ],
               target: 'SET_MEBX_PASSWORD'
             }
@@ -1039,10 +1045,17 @@ export class Activation {
           src: 'setMEBxPassword',
           input: ({ context }) => context,
           id: 'send-mebx-password',
-          onDone: {
-            actions: [assign({ message: ({ event }) => event.output }), 'Reset Unauth Count'],
-            target: 'SAVE_DEVICE_TO_SECRET_PROVIDER'
-          },
+          onDone: [
+            {
+               guard: 'isSHBCCMComplete',
+                actions: ({ context }) => { context.shbcACMComplete = true  },
+                target: 'SAVE_DEVICE_TO_SECRET_PROVIDER'
+            },
+            {
+              actions: [assign({ message: ({ event }) => event.output }), 'Reset Unauth Count'],
+              target: 'SAVE_DEVICE_TO_SECRET_PROVIDER'
+            }            
+          ],
           onError: {
             actions: assign({
               message: ({ event }) => event.error,
@@ -1067,6 +1080,11 @@ export class Activation {
           input: ({ context }) => context,
           id: 'save-device-to-mps',
           onDone: [
+            {
+               guard: 'isSHBCACMComplete',
+                actions: ({ context }) => { context.shbcACMComplete = true  },
+                target: 'UNCONFIGURATION'
+            },
             {
               guard: 'isSHBCCMComplete',
               actions: assign({ hasToUpgrade: () => true }),
