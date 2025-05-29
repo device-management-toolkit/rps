@@ -46,6 +46,7 @@ export interface ActivationContext extends CommonContext {
   certChainPfx: any
   tenantId: string
   canActivate: boolean
+  shbcCCMComplete: boolean
   friendlyName?: string | null
 }
 
@@ -453,10 +454,14 @@ export class Activation {
           return (
             context.profile.activation === ClientAction.ADMINCTLMODE &&
             parseFloat(device.ClientData.payload.ver) >= 19 &&
-            device.ClientData.payload.currentMode === 0
+            device.ClientData.payload.currentMode === 0 && !context.shbcCCMComplete
           )
         }
         return false
+      },
+      isSHBCCMComplete: ({ context }) => {
+        const device = devices[context.clientId]
+        return context.shbcCCMComplete === true
       },
       isCertExtracted: ({ context }) => context.certChainPfx != null,
       isValidCert: ({ context }) => devices[context.clientId].certObj != null,
@@ -485,14 +490,15 @@ export class Activation {
       isActivated: ({ context }) => (context.isActivated != null ? context.isActivated : false),
       canActivate: ({ context }) => context.canActivate,
       hasToUpgrade: ({ context }) => (context.hasToUpgrade != null ? context.hasToUpgrade : false),
-      canUpgrade: ({ context }) =>
-        context.profile != null && context.isActivated != null
-          ? context.isActivated &&
-            (devices[context.clientId].ClientData.payload.currentMode === 1 ||
-              (devices[context.clientId].ClientData.payload.currentMode === 0 &&
-                parseFloat(devices[context.clientId].ClientData.payload.ver) >= 19)) &&
+      canUpgrade: ({ context }) => {
+        if (context.profile != null && context.isActivated != null) {
+          return  (devices[context.clientId].ClientData.payload.currentMode === 1 ||
+              context.shbcCCMComplete === true) &&
             context.profile.activation === ClientAction.ADMINCTLMODE
-          : false
+              }
+
+          return false
+        }
     },
     actions: {
       'Reset Unauth Count': ({ context }) => {
@@ -518,6 +524,7 @@ export class Activation {
       tenantId: input.tenantId,
       canActivate: input.canActivate,
       hasToUpgrade: input.hasToUpgrade,
+      shbcCCMComplete: input.shbcCCMComplete,
       generalSettings: input.generalSettings,
       targetAfterError: input.targetAfterError,
       httpHandler: new HttpHandler(),
@@ -929,7 +936,9 @@ export class Activation {
             guard: 'isDeviceCommittedInCCM',
             actions: [
               ({ context }) => {
-                devices[context.clientId].status.Status = 'Client control mode.'
+                devices[context.clientId].status.Status = 'Client control mode.',
+                context.shbcCCMComplete = true,
+                context.isActivated = true
               },
               'Set activation status'
             ],
@@ -992,6 +1001,11 @@ export class Activation {
         entry: ['Update AMT Credentials'],
         always: [
           {
+            guard: 'isSHBCCMComplete',
+            actions: assign({ hasToUpgrade: () => true }),
+            target: 'SAVE_DEVICE_TO_SECRET_PROVIDER'
+          },
+          {
             guard: 'isAdminMode',
             target: 'SET_MEBX_PASSWORD'
           },
@@ -1034,7 +1048,7 @@ export class Activation {
           id: 'save-device-to-mps',
           onDone: [
             {
-              guard: 'isSHBC',
+              guard: 'isSHBCCMComplete',
               actions: assign({ hasToUpgrade: () => true }),
               target: 'GET_AMT_DOMAIN_CERT'
             },

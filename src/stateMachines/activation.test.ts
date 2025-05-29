@@ -129,6 +129,7 @@ describe('Activation State Machine', () => {
       generalSettings: {},
       tenantId: '',
       canActivate: true,
+      shbcCCMComplete: true,
       message: '',
       clientId,
       xmlMessage: '',
