@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { type AMT } from '@open-amt-cloud-toolkit/wsman-messages'
+import { type AMT } from '@device-management-toolkit/wsman-messages'
 import { assign, fromPromise, setup } from 'xstate'
 import { CertManager } from '../certManager.js'
 import { Configurator } from '../Configurator.js'
@@ -22,7 +22,6 @@ import { type AMTConfiguration } from '../models/index.js'
 import { randomUUID } from 'node:crypto'
 import { Error } from './error.js'
 import { type CommonContext, invokeWsmanCall } from './common.js'
-import { type Models } from '@open-amt-cloud-toolkit/wsman-messages/amt'
 
 export interface CIRAConfigContext extends CommonContext {
   status: 'success' | 'error' | 'wsman' | 'heartbeat_request'
@@ -192,7 +191,7 @@ export class CIRAConfiguration {
 
   addMPS = async ({ input }: { input: CIRAConfigContext }): Promise<any> => {
     if (input.amt != null) {
-      const server: Models.MPServer = {
+      const server: AMT.Models.MPServer = {
         AccessInfo: input.ciraConfig?.mpsServerAddress,
         InfoFormat: input.ciraConfig?.serverAddressFormat,
         Port: input.ciraConfig?.mpsPort,

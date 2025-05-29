@@ -1,3 +1,10 @@
+# [2.24.0](https://github.com/device-management-toolkit/rps/compare/v2.23.1...v2.24.0) (2025-03-17)
+
+
+### Features
+
+* enable multiarch build ([80f19cc](https://github.com/device-management-toolkit/rps/commit/80f19cc496ea1c6cf45c86cf287c7b4bb00a4288))
+
 ## [2.23.1](https://github.com/device-management-toolkit/rps/compare/v2.23.0...v2.23.1) (2025-03-10)
 
 # [2.23.0](https://github.com/device-management-toolkit/rps/compare/v2.22.15...v2.23.0) (2025-03-10)

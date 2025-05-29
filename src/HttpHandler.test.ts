@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { CIM, type Common } from '@open-amt-cloud-toolkit/wsman-messages'
+import { CIM, type Common } from '@device-management-toolkit/wsman-messages'
 import { HttpHandler } from './HttpHandler.js'
 
 const httpHandler = new HttpHandler()

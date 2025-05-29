@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { AMT } from '@open-amt-cloud-toolkit/wsman-messages'
+import { AMT } from '@device-management-toolkit/wsman-messages'
 import { assign, createActor, sendTo, fromPromise, setup } from 'xstate'
 import { Configurator } from '../Configurator.js'
 import { HttpHandler } from '../HttpHandler.js'

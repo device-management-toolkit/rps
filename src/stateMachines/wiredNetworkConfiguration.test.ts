@@ -15,7 +15,7 @@ import {
   type WiredConfiguration as WiredConfigurationType
 } from './wiredNetworkConfiguration.js'
 import { HttpHandler } from '../HttpHandler.js'
-import { AMT, CIM, IPS } from '@open-amt-cloud-toolkit/wsman-messages'
+import { AMT, CIM, IPS } from '@device-management-toolkit/wsman-messages'
 import { jest } from '@jest/globals'
 import { spyOn } from 'jest-mock'
 import { HttpResponseError, coalesceMessage, isDigestRealmValid } from './common.js'

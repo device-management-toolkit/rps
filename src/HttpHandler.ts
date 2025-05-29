@@ -5,7 +5,7 @@
 
 import { createHash } from 'node:crypto'
 import xml2js from 'xml2js'
-import { type DigestChallenge } from '@open-amt-cloud-toolkit/wsman-messages/models/common.js'
+import { type DigestChallenge } from '@device-management-toolkit/wsman-messages/models/common.js'
 import Logger from './Logger.js'
 import { type connectionParams } from './models/RCS.Config.js'
 
