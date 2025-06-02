@@ -461,14 +461,8 @@ export class Activation {
         }
         return false
       },
-      isSHBCCMComplete: ({ context }) => {
-        const device = devices[context.clientId]
-        return context.shbcCCMComplete === true
-      },
-       isSHBCACMComplete: ({ context }) => {
-        const device = devices[context.clientId]
-        return context.shbcACMComplete === true
-      },
+      isSHBCCMComplete: ({ context }) => context.shbcCCMComplete === true,
+      isSHBCACMComplete: ({ context }) => context.shbcACMComplete === true,
       isCertExtracted: ({ context }) => context.certChainPfx != null,
       isValidCert: ({ context }) => devices[context.clientId].certObj != null,
       isDigestRealmInvalid: ({ context }) =>
@@ -484,9 +478,18 @@ export class Activation {
       isDeviceClientModeActivated: ({ context }) => context.message.Envelope.Body?.Setup_OUTPUT?.ReturnValue === 0,
       isDeviceActivatedInACM: ({ context }) =>
         context.message.Envelope.Body?.IPS_HostBasedSetupService?.CurrentControlMode === 2,
-      isDeviceCommittedInCCM: ({ context }) =>
-        context.message.Envelope.Body?.CommitChanges_OUTPUT.ReturnValue === 0 &&
-        parseFloat(devices[context.clientId].ClientData.payload.ver) >= 19,
+      // ADD this missing guard to your guards section:
+      isDeviceActivatedInCCM: ({ context }) =>
+        context.message.Envelope.Body?.IPS_HostBasedSetupService?.CurrentControlMode === 1,
+      isDeviceCommittedInCCM: ({ context }) => {
+        const device = devices[context.clientId]
+        return (
+          context.message.Envelope.Body?.CommitChanges_OUTPUT?.ReturnValue === 0 &&
+          parseFloat(device.ClientData.payload.ver) >= 19 &&
+          context.profile?.activation === ClientAction.ADMINCTLMODE &&
+          !context.shbcACMComplete
+        ) // Only for SHBC CCM phase, not ACM phase
+      },
       isCertNotAdded: ({ context }) => context.message.Envelope.Body.AddNextCertInChain_OUTPUT.ReturnValue !== 0,
       isGeneralSettings: ({ context }) => context.targetAfterError === 'GET_GENERAL_SETTINGS',
       isMebxPassword: ({ context }) => context.targetAfterError === 'SET_MEBX_PASSWORD',
@@ -941,7 +944,7 @@ export class Activation {
             },
             {
               guard: 'isSHBCCMComplete',
-              actions: [assign({ message: ({ event }) => event.output }) ],
+              actions: [assign({ message: ({ event }) => event.output })],
               target: 'SET_MEBX_PASSWORD'
             }
           ],
@@ -959,18 +962,31 @@ export class Activation {
       CHECK_SETUP: {
         always: [
           {
+            // For SHBC CCM flow (AMT >= 19) - check CommitChanges response
             guard: 'isDeviceCommittedInCCM',
             actions: [
               ({ context }) => {
-                ;(devices[context.clientId].status.Status = 'Client control mode.'),
-                  (context.shbcCCMComplete = true),
-                  (context.isActivated = true)
+                devices[context.clientId].status.Status = 'Client control mode (SHBC Phase 1).'
+                context.shbcCCMComplete = true
+                context.isActivated = true
               },
               'Set activation status'
             ],
             target: 'DELAYED_TRANSITION'
           },
           {
+            // For regular CCM flow - check CurrentControlMode === 1
+            guard: 'isDeviceActivatedInCCM',
+            actions: [
+              ({ context }) => {
+                devices[context.clientId].status.Status = 'Client control mode.'
+              },
+              'Set activation status'
+            ],
+            target: 'DELAYED_TRANSITION'
+          },
+          {
+            // Fallback - check Setup_OUTPUT.ReturnValue === 0
             guard: 'isDeviceClientModeActivated',
             actions: [
               ({ context }) => {
@@ -1047,14 +1063,16 @@ export class Activation {
           id: 'send-mebx-password',
           onDone: [
             {
-               guard: 'isSHBCCMComplete',
-                actions: ({ context }) => { context.shbcACMComplete = true  },
-                target: 'SAVE_DEVICE_TO_SECRET_PROVIDER'
+              guard: 'isSHBCCMComplete',
+              actions: assign({
+                shbcACMComplete: () => true
+              }),
+              target: 'SAVE_DEVICE_TO_SECRET_PROVIDER'
             },
             {
               actions: [assign({ message: ({ event }) => event.output }), 'Reset Unauth Count'],
               target: 'SAVE_DEVICE_TO_SECRET_PROVIDER'
-            }            
+            }
           ],
           onError: {
             actions: assign({
@@ -1081,9 +1099,8 @@ export class Activation {
           id: 'save-device-to-mps',
           onDone: [
             {
-               guard: 'isSHBCACMComplete',
-                actions: ({ context }) => { context.shbcACMComplete = true  },
-                target: 'UNCONFIGURATION'
+              guard: 'isSHBCACMComplete',
+              target: 'UNCONFIGURATION'
             },
             {
               guard: 'isSHBCCMComplete',
