@@ -129,6 +129,8 @@ describe('Activation State Machine', () => {
       generalSettings: {},
       tenantId: '',
       canActivate: true,
+      shbcCCMComplete: false,
+      shbcACMComplete: false,
       message: '',
       clientId,
       xmlMessage: '',
@@ -233,6 +235,15 @@ describe('Activation State Machine', () => {
               Envelope: {
                 Header: {},
                 Body: { SetAdminAclEntryEx_OUTPUT: { ReturnValue: 0 } }
+              }
+            })
+        ),
+        commitChanges: fromPromise(
+          async ({ input }) =>
+            await Promise.resolve({
+              Envelope: {
+                Header: {},
+                Body: { CommitChanges_OUTPUT: { ReturnValue: 0 } }
               }
             })
         ),
@@ -673,6 +684,35 @@ describe('Activation State Machine', () => {
     })
     it('should eventually reach PROVISIONED for ccm activation TLS', (done) => {
       jest.useFakeTimers()
+
+      context.shbcCCMComplete = false
+      context.shbcACMComplete = false
+      context.profile.activation = 'ccmactivate'
+      devices[clientId].ClientData.payload.ver = '12.0.92'
+      devices[clientId].ClientData.payload.action = ClientAction.CLIENTCTLMODE
+
+      config.guards = {
+        isAdminMode: () => false,
+        isSHBC: () => false,
+        isDeviceClientModeActivated: () => true,
+        hasCIRAProfile: () => false,
+        isDigestRealmInvalid: () => false,
+        canActivate: () => true,
+        isActivated: () => false
+      }
+
+      config.actors!.getAMTProfile = fromPromise(
+        async ({ input }) =>
+          await Promise.resolve({
+            clientId,
+            profile: {
+              profileName: 'ccm-profile',
+              activation: 'ccmactivate',
+              amtPassword: 'Intel123!'
+            }
+          })
+      )
+
       const mockActivationMachine = activation.machine.provide(config)
       const flowStates = [
         'UNPROVISIONED',
@@ -1243,26 +1283,78 @@ describe('Activation State Machine', () => {
       acmActivationService.send({ type: 'ACTIVATION', clientId, tenantId: '', friendlyName: null as any })
       jest.runAllTicks()
     })
-
     it('should eventually reach PROVISIONED if device is upgraded to ACM on AMT15 device', (done) => {
       jest.useFakeTimers()
-      context.certChainPfx = { provisioningCertificateObj: { certChain: [
+
+      context.certChainPfx = {
+        provisioningCertificateObj: {
+          certChain: [
             'leaf',
             'inter1',
             'root'
-          ], privateKey:
-            null }, fingerprint: { sha256: '82f2ed575db4abe462499cf550dbff9584980d70a0272894639c3653b9ad932c', sha1: '47d7b7db23f3e300189f54802482b1bd18b945ef' }, hashAlgorithm: 'sha256' }
+          ],
+          privateKey: null
+        },
+        fingerprint: {
+          sha256: '82f2ed575db4abe462499cf550dbff9584980d70a0272894639c3653b9ad932c',
+          sha1: '47d7b7db23f3e300189f54802482b1bd18b945ef'
+        },
+        hashAlgorithm: 'sha256'
+      }
       devices[context.clientId].certObj = context.certChainPfx.provisioningCertificateObj
+      devices[context.clientId].ClientData.payload.currentMode = 1
+      devices[context.clientId].ClientData.payload.ver = '15.0.0' // AMT15 device
+
+      // Set up profile for ACM activation
+      context.profile = {
+        profileName: 'acm-profile',
+        activation: ClientAction.ADMINCTLMODE,
+        amtPassword: 'Intel123!',
+        ciraConfigName: 'cira-config',
+        tags: ['acm']
+      } as any
+
+      // Configure guards for upgrade scenario
       config.guards = {
         isAdminMode: () => true,
         maxCertLength: () => false,
+        canUpgrade: () => true,
+        hasToUpgrade: () => true,
+        isUpgraded: () => true,
         hasCIRAProfile: () => true,
         isDeviceActivatedInACM: () => true,
-        hasToUpgrade: () => false
+        isDeviceActivatedInCCM: () => true
       }
-      config.actors!.sendAdminSetup = fromPromise(
+
+      config.actors!.sendUpgradeClientToAdmin = fromPromise(
         async ({ input }) => await Promise.reject(new GATEWAY_TIMEOUT_ERROR())
       )
+
+      config.actors!.getActivationStatus = fromPromise(async ({ input }) => {
+        return {
+          Envelope: {
+            Header: {},
+            Body: {
+              IPS_HostBasedSetupService: {
+                CurrentControlMode: 2,
+                AllowedControlModes: [2, 1],
+                ConfigurationNonce: 'SkqopmngrtkhdvcteznRbEdgqpc='
+              }
+            }
+          }
+        }
+      })
+      config.actors!.getAMTProfile = fromPromise(async ({ input }) => await Promise.resolve(context.profile))
+      config.actors!.changeAMTPassword = fromPromise(
+        async ({ input }) =>
+          await Promise.resolve({
+            Envelope: {
+              Header: {},
+              Body: { SetAdminAclEntryEx_OUTPUT: { ReturnValue: 0 } }
+            }
+          })
+      )
+
       const mockActivationMachine = activation.machine.provide(config)
       const flowStates = [
         'UNPROVISIONED',
@@ -1271,8 +1363,9 @@ describe('Activation State Machine', () => {
         'GET_GENERAL_SETTINGS',
         'IPS_HOST_BASED_SETUP_SERVICE',
         'ADD_NEXT_CERT_IN_CHAIN',
-        'ADMIN_SETUP',
+        'UPGRADE_TO_ADMIN_SETUP',
         'CHECK_ACTIVATION_ON_AMT',
+        'CHANGE_AMT_PASSWORD',
         'SET_MEBX_PASSWORD',
         'SAVE_DEVICE_TO_SECRET_PROVIDER',
         'SAVE_DEVICE_TO_MPS',
@@ -1282,13 +1375,12 @@ describe('Activation State Machine', () => {
         'CIRA',
         'PROVISIONED'
       ]
+
       const acmActivationService = createActor(mockActivationMachine, { input: context })
       acmActivationService.subscribe((state) => {
         const expectedState: any = flowStates[currentStateIndex++]
         expect(state.matches(expectedState)).toBe(true)
-        if (state.matches('DELAYED_TRANSITION')) {
-          jest.advanceTimersByTime(10000)
-        } else if (state.matches('PROVISIONED') && currentStateIndex === flowStates.length) {
+        if (state.matches('PROVISIONED') && currentStateIndex === flowStates.length) {
           done()
         }
       })
@@ -1298,26 +1390,72 @@ describe('Activation State Machine', () => {
       jest.runAllTicks()
     })
 
-    it('should eventually reach PROVISIONED if device is upgraded to ACM on AMT15 device', (done) => {
+    it('should eventually reach ERROR if MEBx password setting fails during AMT15 upgrade', (done) => {
       jest.useFakeTimers()
-      context.certChainPfx = { provisioningCertificateObj: { certChain: [
+
+      context.certChainPfx = {
+        provisioningCertificateObj: {
+          certChain: [
             'leaf',
             'inter1',
             'root'
-          ], privateKey:
-            null }, fingerprint: { sha256: '82f2ed575db4abe462499cf550dbff9584980d70a0272894639c3653b9ad932c', sha1: '47d7b7db23f3e300189f54802482b1bd18b945ef' }, hashAlgorithm: 'sha256' }
+          ],
+          privateKey: null
+        },
+        fingerprint: {
+          sha256: '82f2ed575db4abe462499cf550dbff9584980d70a0272894639c3653b9ad932c',
+          sha1: '47d7b7db23f3e300189f54802482b1bd18b945ef'
+        },
+        hashAlgorithm: 'sha256'
+      }
       devices[context.clientId].certObj = context.certChainPfx.provisioningCertificateObj
+      devices[context.clientId].ClientData.payload.currentMode = 1
+      devices[context.clientId].ClientData.payload.ver = '15.0.0'
+
       config.guards = {
         isAdminMode: () => true,
         maxCertLength: () => false,
+        canUpgrade: () => true,
+        hasToUpgrade: () => true,
+        isUpgraded: () => true,
         hasCIRAProfile: () => true,
-        isDeviceActivatedInACM: () => true,
-        hasToUpgrade: () => false
+        isDeviceActivatedInACM: ({ context }) => {
+          return context.message?.Envelope?.Body?.IPS_HostBasedSetupService?.CurrentControlMode === 2
+        },
+        isDeviceActivatedInCCM: () => true
       }
-      config.actors!.sendAdminSetup = fromPromise(
+
+      config.actors!.sendUpgradeClientToAdmin = fromPromise(
         async ({ input }) => await Promise.reject(new GATEWAY_TIMEOUT_ERROR())
       )
-      config.actors!.setMEBxPassword = fromPromise(async ({ input }) => await Promise.reject(new Error()))
+      config.actors!.getActivationStatus = fromPromise(async ({ input }) => {
+        return {
+          Envelope: {
+            Header: {},
+            Body: {
+              IPS_HostBasedSetupService: {
+                CurrentControlMode: 2,
+                AllowedControlModes: [2, 1],
+                ConfigurationNonce: 'SkqopmngrtkhdvcteznRbEdgqpc='
+              }
+            }
+          }
+        }
+      })
+
+      config.actors!.changeAMTPassword = fromPromise(
+        async ({ input }) =>
+          await Promise.resolve({
+            Envelope: {
+              Header: {},
+              Body: { SetAdminAclEntryEx_OUTPUT: { ReturnValue: 0 } }
+            }
+          })
+      )
+
+      config.actors!.setMEBxPassword = fromPromise(
+        async ({ input }) => await Promise.reject(new Error('MEBx password setting failed'))
+      )
       const mockActivationMachine = activation.machine.provide(config)
       const flowStates = [
         'UNPROVISIONED',
@@ -1326,18 +1464,19 @@ describe('Activation State Machine', () => {
         'GET_GENERAL_SETTINGS',
         'IPS_HOST_BASED_SETUP_SERVICE',
         'ADD_NEXT_CERT_IN_CHAIN',
-        'ADMIN_SETUP',
+        'UPGRADE_TO_ADMIN_SETUP',
         'CHECK_ACTIVATION_ON_AMT',
+        'CHANGE_AMT_PASSWORD',
         'SET_MEBX_PASSWORD',
         'ERROR'
       ]
+
       const acmActivationService = createActor(mockActivationMachine, { input: context })
       acmActivationService.subscribe((state) => {
         const expectedState: any = flowStates[currentStateIndex++]
         expect(state.matches(expectedState)).toBe(true)
-        if (state.matches('DELAYED_TRANSITION')) {
-          jest.advanceTimersByTime(10000)
-        } else if (state.matches('ERROR') && currentStateIndex === flowStates.length) {
+
+        if (state.matches('ERROR') && currentStateIndex === flowStates.length) {
           done()
         }
       })
@@ -1347,30 +1486,180 @@ describe('Activation State Machine', () => {
       jest.runAllTicks()
     })
 
-    it('should eventually reach PROVISIONED if device is activated in ACM', (done) => {
+    it('should eventually reach PROVISIONED if device is activated in ACM with SHBC', (done) => {
       jest.useFakeTimers()
-      context.certChainPfx = { provisioningCertificateObj: { certChain: [
+
+      context.certChainPfx = {
+        provisioningCertificateObj: {
+          certChain: [
             'leaf',
             'inter1',
             'root'
-          ], privateKey:
-            null }, fingerprint: { sha256: '82f2ed575db4abe462499cf550dbff9584980d70a0272894639c3653b9ad932c', sha1: '47d7b7db23f3e300189f54802482b1bd18b945ef' }, hashAlgorithm: 'sha256' }
+          ],
+          privateKey: null
+        },
+        fingerprint: {
+          sha256: '82f2ed575db4abe462499cf550dbff9584980d70a0272894639c3653b9ad932c',
+          sha1: '47d7b7db23f3e300189f54802482b1bd18b945ef'
+        },
+        hashAlgorithm: 'sha256'
+      }
       devices[context.clientId].certObj = context.certChainPfx.provisioningCertificateObj
+      devices[context.clientId].ClientData.payload.currentMode = 0
+      devices[context.clientId].ClientData.payload.ver = '19.0.0'
+
+      context.profile = {
+        profileName: 'shbc-acm-profile',
+        activation: ClientAction.ADMINCTLMODE,
+        amtPassword: 'Intel123!',
+        mebxPassword: 'Intel123!',
+        ciraConfigName: 'cira-config',
+        tags: ['shbc', 'acm']
+      } as any
+
+      // Initialize SHBC flags
+      context.shbcCCMComplete = false
+      context.shbcACMComplete = false
+
+      // Configure guards for SHBC two-phase flow
       config.guards = {
         isAdminMode: () => true,
+
+        isSHBC: ({ context }) => {
+          const device = devices[context.clientId]
+          return (
+            context.profile?.activation === ClientAction.ADMINCTLMODE &&
+            parseFloat(device.ClientData.payload.ver) >= 19 &&
+            device.ClientData.payload.currentMode === 0 &&
+            !context.shbcCCMComplete
+          )
+        },
+
+        isSHBCCMComplete: ({ context }) => context.shbcCCMComplete === true,
+        isSHBCACMComplete: ({ context }) => context.shbcACMComplete === true,
+
+        isDeviceCommittedInCCM: ({ context }) => {
+          const device = devices[context.clientId]
+          return (
+            context.message?.Envelope?.Body?.CommitChanges_OUTPUT?.ReturnValue === 0 &&
+            parseFloat(device.ClientData.payload.ver) >= 19 &&
+            context.profile?.activation === ClientAction.ADMINCTLMODE &&
+            !context.shbcACMComplete
+          )
+        },
+        isDeviceAdminModeActivated: ({ context }) => {
+          return context.message?.Envelope?.Body?.AdminSetup_OUTPUT?.ReturnValue === 0
+        },
         maxCertLength: () => false,
         hasCIRAProfile: () => true,
-        isDeviceActivatedInACM: () => true
+        hasToUpgrade: ({ context }) => {
+          return context.shbcCCMComplete && !context.shbcACMComplete
+        },
+        canActivate: () => true,
+        canUpgrade: ({ context }) => {
+          const device = devices[context.clientId]
+          return (
+            (device.ClientData.payload.currentMode === 1 || context.shbcCCMComplete === true) &&
+            context.profile?.activation === ClientAction.ADMINCTLMODE
+          )
+        },
+        isUpgraded: ({ context }) => {
+          return context.message?.Envelope?.Body?.UpgradeClientToAdmin_OUTPUT?.ReturnValue === 0
+        },
+        isActivated: () => false,
+        isCertExtracted: ({ context }) => context.certChainPfx != null,
+        isValidCert: ({ context }) => devices[context.clientId].certObj != null,
+        isCertNotAdded: ({ context }) => {
+          return context.message?.Envelope?.Body?.AddNextCertInChain_OUTPUT?.ReturnValue !== 0
+        }
       }
+
+      config.actors!.getAMTProfile = fromPromise(async ({ input }) => await Promise.resolve(context.profile))
+      config.actors!.sendClientSetup = fromPromise(async ({ input }) => {
+        const device = devices[input.clientId]
+        device.connectionParams.username = AMTUserName
+        device.connectionParams.password = device.amtPassword ?? ''
+
+        return await Promise.resolve({
+          Envelope: {
+            Header: {},
+            Body: { Setup_OUTPUT: { ReturnValue: 0 } }
+          }
+        })
+      })
+      config.actors!.commitChanges = fromPromise(
+        async ({ input }) =>
+          await Promise.resolve({
+            Envelope: {
+              Header: {},
+              Body: { CommitChanges_OUTPUT: { ReturnValue: 0 } }
+            }
+          })
+      )
+      config.actors!.sendAdminSetup = fromPromise(
+        async ({ input }) =>
+          await Promise.resolve({
+            Envelope: {
+              Header: {},
+              Body: { AdminSetup_OUTPUT: { ReturnValue: 0 } }
+            }
+          })
+      )
+      config.actors!.sendUpgradeClientToAdmin = fromPromise(
+        async ({ input }) =>
+          await Promise.resolve({
+            Envelope: {
+              Header: {},
+              Body: { UpgradeClientToAdmin_OUTPUT: { ReturnValue: 0 } }
+            }
+          })
+      )
+      config.actors!.changeAMTPassword = fromPromise(
+        async ({ input }) =>
+          await Promise.resolve({
+            Envelope: {
+              Header: {},
+              Body: { SetAdminAclEntryEx_OUTPUT: { ReturnValue: 0 } }
+            }
+          })
+      )
+      config.actors!.setMEBxPassword = fromPromise(
+        async ({ input }) =>
+          await Promise.resolve({
+            Envelope: {
+              Header: {},
+              Body: { SetMEBXPassword_OUTPUT: { ReturnValue: 0 } }
+            }
+          })
+      )
+      config.actors!.saveDeviceInfoToSecretProvider = fromPromise(async ({ input }) => await Promise.resolve(true))
+      config.actors!.saveDeviceInfoToMPS = fromPromise(async ({ input }) => await Promise.resolve(true))
+      config.actors!.unconfiguration = fromPromise(
+        async ({ input }) => await Promise.resolve({ clientId: input.clientId })
+      )
+      config.actors!.networkConfiguration = fromPromise(
+        async ({ input }) => await Promise.resolve({ clientId: input.clientId })
+      )
+      config.actors!.featuresConfiguration = fromPromise(
+        async ({ input }) => await Promise.resolve({ clientId: input.clientId })
+      )
+      config.actors!.cira = fromPromise(async ({ input }) => await Promise.resolve({ clientId: input.clientId }))
       const mockActivationMachine = activation.machine.provide(config)
       const flowStates = [
         'UNPROVISIONED',
         'GET_AMT_PROFILE',
+        'GET_GENERAL_SETTINGS',
+        'SETUP',
+        'COMMIT_CHANGES',
+        'DELAYED_TRANSITION',
+        'SAVE_DEVICE_TO_SECRET_PROVIDER',
+        'SAVE_DEVICE_TO_MPS',
         'GET_AMT_DOMAIN_CERT',
         'GET_GENERAL_SETTINGS',
         'IPS_HOST_BASED_SETUP_SERVICE',
         'ADD_NEXT_CERT_IN_CHAIN',
-        'ADMIN_SETUP',
+        'UPGRADE_TO_ADMIN_SETUP',
+        'CHANGE_AMT_PASSWORD',
         'SET_MEBX_PASSWORD',
         'SAVE_DEVICE_TO_SECRET_PROVIDER',
         'SAVE_DEVICE_TO_MPS',
@@ -1380,14 +1669,28 @@ describe('Activation State Machine', () => {
         'CIRA',
         'PROVISIONED'
       ]
+
       const acmActivationService = createActor(mockActivationMachine, { input: context })
       acmActivationService.subscribe((state) => {
         const expectedState: any = flowStates[currentStateIndex++]
+        if (state.matches('CHECK_SETUP') && !context.shbcCCMComplete) {
+          context.shbcCCMComplete = true
+        } else if (state.matches('UPDATE_CREDENTIALS') && context.shbcCCMComplete && !context.shbcACMComplete) {
+          context.hasToUpgrade = true
+        } else if (state.matches('CHECK_UPGRADE') && context.shbcCCMComplete && !context.shbcACMComplete) {
+          context.shbcACMComplete = true
+        }
+
         expect(state.matches(expectedState)).toBe(true)
+
+        // Handle timers
         if (state.matches('DELAYED_TRANSITION')) {
           jest.advanceTimersByTime(10000)
         } else if (state.matches('PROVISIONED') && currentStateIndex === flowStates.length) {
+          console.log('SHBC ACM flow completed successfully')
           done()
+        } else if (state.matches('FAILED') || state.matches('ERROR')) {
+          console.log(`Unexpected failure state: ${state.value}`)
         }
       })
 

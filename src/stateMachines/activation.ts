@@ -46,6 +46,8 @@ export interface ActivationContext extends CommonContext {
   certChainPfx: any
   tenantId: string
   canActivate: boolean
+  shbcCCMComplete: boolean
+  shbcACMComplete: boolean
   friendlyName?: string | null
 }
 
@@ -407,6 +409,11 @@ export class Activation {
     return false
   }
 
+  commitChanges = async ({ input }: { input: ActivationContext }): Promise<any> => {
+    input.xmlMessage = input.amt.SetupAndConfigurationService.CommitChanges()
+    return await invokeWsmanCall(input)
+  }
+
   machine = setup({
     types: {} as {
       context: ActivationContext
@@ -423,6 +430,7 @@ export class Activation {
       sendAdminSetup: fromPromise(this.sendAdminSetup.bind(this)),
       sendUpgradeClientToAdmin: fromPromise(this.sendUpgradeClientToAdmin.bind(this)),
       sendClientSetup: fromPromise(this.sendClientSetup.bind(this)),
+      commitChanges: fromPromise(this.commitChanges),
       getActivationStatus: fromPromise(this.getActivationStatus.bind(this)),
       setMEBxPassword: fromPromise(this.setMEBxPassword.bind(this)),
       saveDeviceInfoToSecretProvider: fromPromise(this.saveDeviceInfoToSecretProvider.bind(this)),
@@ -441,6 +449,20 @@ export class Activation {
     guards: {
       isAdminMode: ({ context }) =>
         context.profile != null ? context.profile.activation === ClientAction.ADMINCTLMODE : false,
+      isSHBC: ({ context }) => {
+        const device = devices[context.clientId]
+        if (context.profile != null && device.ClientData?.payload?.ver) {
+          return (
+            context.profile.activation === ClientAction.ADMINCTLMODE &&
+            parseFloat(device.ClientData.payload.ver) >= 19 &&
+            device.ClientData.payload.currentMode === 0 &&
+            !context.shbcCCMComplete
+          )
+        }
+        return false
+      },
+      isSHBCCMComplete: ({ context }) => context.shbcCCMComplete === true,
+      isSHBCACMComplete: ({ context }) => context.shbcACMComplete === true,
       isCertExtracted: ({ context }) => context.certChainPfx != null,
       isValidCert: ({ context }) => devices[context.clientId].certObj != null,
       isDigestRealmInvalid: ({ context }) =>
@@ -458,6 +480,15 @@ export class Activation {
         context.message.Envelope.Body?.IPS_HostBasedSetupService?.CurrentControlMode === 2,
       isDeviceActivatedInCCM: ({ context }) =>
         context.message.Envelope.Body?.IPS_HostBasedSetupService?.CurrentControlMode === 1,
+      isDeviceCommittedInCCM: ({ context }) => {
+        const device = devices[context.clientId]
+        return (
+          context.message.Envelope.Body?.CommitChanges_OUTPUT?.ReturnValue === 0 &&
+          parseFloat(device.ClientData.payload.ver) >= 19 &&
+          context.profile?.activation === ClientAction.ADMINCTLMODE &&
+          !context.shbcACMComplete
+        )
+      },
       isCertNotAdded: ({ context }) => context.message.Envelope.Body.AddNextCertInChain_OUTPUT.ReturnValue !== 0,
       isGeneralSettings: ({ context }) => context.targetAfterError === 'GET_GENERAL_SETTINGS',
       isMebxPassword: ({ context }) => context.targetAfterError === 'SET_MEBX_PASSWORD',
@@ -467,12 +498,16 @@ export class Activation {
       isActivated: ({ context }) => (context.isActivated != null ? context.isActivated : false),
       canActivate: ({ context }) => context.canActivate,
       hasToUpgrade: ({ context }) => (context.hasToUpgrade != null ? context.hasToUpgrade : false),
-      canUpgrade: ({ context }) =>
-        context.profile != null && context.isActivated != null
-          ? context.isActivated &&
-            devices[context.clientId].ClientData.payload.currentMode === 1 &&
+      canUpgrade: ({ context }) => {
+        if (context.profile != null && context.isActivated != null) {
+          return (
+            (devices[context.clientId].ClientData.payload.currentMode === 1 || context.shbcCCMComplete === true) &&
             context.profile.activation === ClientAction.ADMINCTLMODE
-          : false
+          )
+        }
+
+        return false
+      }
     },
     actions: {
       'Reset Unauth Count': ({ context }) => {
@@ -498,6 +533,8 @@ export class Activation {
       tenantId: input.tenantId,
       canActivate: input.canActivate,
       hasToUpgrade: input.hasToUpgrade,
+      shbcCCMComplete: input.shbcCCMComplete,
+      shbcACMComplete: input.shbcACMComplete,
       generalSettings: input.generalSettings,
       targetAfterError: input.targetAfterError,
       httpHandler: new HttpHandler(),
@@ -555,6 +592,10 @@ export class Activation {
             target: 'CHECK_TENANT_ACCESS'
           },
           {
+            guard: 'isSHBC',
+            target: 'GET_GENERAL_SETTINGS'
+          },
+          {
             guard: 'isAdminMode',
             target: 'GET_AMT_DOMAIN_CERT'
           },
@@ -579,6 +620,10 @@ export class Activation {
       },
       DETERMINE_CAN_ACTIVATE: {
         always: [
+          {
+            guard: 'isSHBC',
+            target: 'GET_GENERAL_SETTINGS'
+          },
           {
             guard: 'canUpgrade',
             actions: assign({ hasToUpgrade: () => true }),
@@ -685,6 +730,10 @@ export class Activation {
             target: 'CHANGE_AMT_PASSWORD'
           },
           {
+            guard: 'isSHBC',
+            target: 'SETUP'
+          },
+          {
             guard: 'isAdminMode',
             target: 'IPS_HOST_BASED_SETUP_SERVICE'
           },
@@ -767,14 +816,14 @@ export class Activation {
       CHECK_ADMIN_SETUP: {
         always: [
           {
-            guard: 'isDeviceActivatedInACM',
+            guard: 'isSHBCCMComplete',
             actions: [
               ({ context }) => {
                 devices[context.clientId].status.Status = 'Admin control mode.'
               },
               'Set activation status'
             ],
-            target: 'UPDATE_CREDENTIALS'
+            target: 'COMMIT_CHANGES'
           },
           {
             guard: 'isDeviceAdminModeActivated',
@@ -817,6 +866,16 @@ export class Activation {
       CHECK_UPGRADE: {
         always: [
           {
+            guard: 'isSHBCCMComplete',
+            actions: [
+              ({ context }) => {
+                devices[context.clientId].status.Status = 'admin control mode.'
+              },
+              'Set activation status'
+            ],
+            target: 'COMMIT_CHANGES'
+          },
+          {
             guard: 'isDeviceActivatedInACM',
             actions: [
               ({ context }) => {
@@ -847,10 +906,47 @@ export class Activation {
           src: 'sendClientSetup',
           input: ({ context }) => context,
           id: 'send-setup',
-          onDone: {
-            actions: assign({ message: ({ event }) => event.output }),
-            target: 'CHECK_SETUP'
-          },
+          onDone: [
+            {
+              guard: 'isSHBC',
+              actions: ['Update AMT Credentials'],
+              target: 'COMMIT_CHANGES'
+            },
+            {
+              actions: assign({ message: ({ event }) => event.output }),
+              target: 'CHECK_SETUP'
+            }
+          ],
+          onError: [
+            {
+              guard: ({ event }) => event.error instanceof GATEWAY_TIMEOUT_ERROR,
+              target: 'CHECK_ACTIVATION_ON_AMT'
+            },
+            {
+              target: 'ERROR'
+            }
+          ]
+        }
+      },
+      COMMIT_CHANGES: {
+        invoke: {
+          src: 'commitChanges',
+          input: ({ context }) => context,
+          id: 'commit-changes',
+          onDone: [
+            {
+              guard: 'isSHBC',
+              actions: [
+                assign({ message: ({ event }) => event.output })
+              ],
+              target: 'CHECK_SETUP'
+            },
+            {
+              guard: 'isSHBCCMComplete',
+              actions: [assign({ message: ({ event }) => event.output })],
+              target: 'SET_MEBX_PASSWORD'
+            }
+          ],
           onError: [
             {
               guard: ({ event }) => event.error instanceof GATEWAY_TIMEOUT_ERROR,
@@ -865,6 +961,20 @@ export class Activation {
       CHECK_SETUP: {
         always: [
           {
+            // For SHBC CCM flow (AMT >= 19) - check CommitChanges response
+            guard: 'isDeviceCommittedInCCM',
+            actions: [
+              ({ context }) => {
+                devices[context.clientId].status.Status = 'Client control mode (SHBC Phase 1).'
+                context.shbcCCMComplete = true
+                context.isActivated = true
+              },
+              'Set activation status'
+            ],
+            target: 'DELAYED_TRANSITION'
+          },
+          {
+            // For regular CCM flow - check CurrentControlMode === 1
             guard: 'isDeviceActivatedInCCM',
             actions: [
               ({ context }) => {
@@ -931,6 +1041,11 @@ export class Activation {
         entry: ['Update AMT Credentials'],
         always: [
           {
+            guard: 'isSHBCCMComplete',
+            actions: assign({ hasToUpgrade: () => true }),
+            target: 'SAVE_DEVICE_TO_SECRET_PROVIDER'
+          },
+          {
             guard: 'isAdminMode',
             target: 'SET_MEBX_PASSWORD'
           },
@@ -944,10 +1059,19 @@ export class Activation {
           src: 'setMEBxPassword',
           input: ({ context }) => context,
           id: 'send-mebx-password',
-          onDone: {
-            actions: [assign({ message: ({ event }) => event.output }), 'Reset Unauth Count'],
-            target: 'SAVE_DEVICE_TO_SECRET_PROVIDER'
-          },
+          onDone: [
+            {
+              guard: 'isSHBCCMComplete',
+              actions: assign({
+                shbcACMComplete: () => true
+              }),
+              target: 'SAVE_DEVICE_TO_SECRET_PROVIDER'
+            },
+            {
+              actions: [assign({ message: ({ event }) => event.output }), 'Reset Unauth Count'],
+              target: 'SAVE_DEVICE_TO_SECRET_PROVIDER'
+            }
+          ],
           onError: {
             actions: assign({
               message: ({ event }) => event.error,
@@ -971,7 +1095,18 @@ export class Activation {
           src: 'saveDeviceInfoToMPS',
           input: ({ context }) => context,
           id: 'save-device-to-mps',
-          onDone: 'UNCONFIGURATION',
+          onDone: [
+            {
+              guard: 'isSHBCACMComplete',
+              target: 'UNCONFIGURATION'
+            },
+            {
+              guard: 'isSHBCCMComplete',
+              actions: assign({ hasToUpgrade: () => true }),
+              target: 'GET_AMT_DOMAIN_CERT'
+            },
+            { target: 'UNCONFIGURATION' }
+          ],
           onError: 'SAVE_DEVICE_TO_MPS_FAILURE'
         }
       },

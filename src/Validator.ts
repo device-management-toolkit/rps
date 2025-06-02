@@ -88,7 +88,11 @@ export class Validator implements IValidator {
     payload.profile = profile
     clientObj.uuid = payload.uuid
     if (profile.activation === ClientAction.ADMINCTLMODE) {
-      clientObj.action = ClientAction.ADMINCTLMODE
+      if (parseFloat(msg.payload.ver) >= 19) {
+        clientObj.action = ClientAction.CLIENTCTLMODE
+      } else {
+        clientObj.action = ClientAction.ADMINCTLMODE
+      }
     } else if (profile.activation === ClientAction.CLIENTCTLMODE) {
       clientObj.action = ClientAction.CLIENTCTLMODE
     }
