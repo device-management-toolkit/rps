@@ -1,10 +1,10 @@
 # Remote Provisioning Server
 
-![CodeQL](https://img.shields.io/github/actions/workflow/status/device-manageement-toolkit/rps/codeql-analysis.yml?style=for-the-badge&label=CodeQL&logo=github)
-![API Tests](https://img.shields.io/github/actions/workflow/status/device-manageement-toolkit/rps/api-test.yml?style=for-the-badge&label=API%20Test&logo=postman)
-![Build](https://img.shields.io/github/actions/workflow/status/device-manageement-toolkit/rps/node.js.yml?style=for-the-badge&logo=github)
-![Codecov](https://img.shields.io/codecov/c/github/device-manageement-toolkit/rps?style=for-the-badge&logo=codecov)
-[![OSSF-Scorecard Score](https://img.shields.io/ossf-scorecard/github.com/device-manageement-toolkit/rps?style=for-the-badge&label=OSSF%20Score)](https://api.securityscorecards.dev/projects/github.com/device-manageement-toolkit/rps)
+![CodeQL](https://img.shields.io/github/actions/workflow/status/device-management-toolkit/rps/codeql-analysis.yml?style=for-the-badge&label=CodeQL&logo=github)
+![API Tests](https://img.shields.io/github/actions/workflow/status/device-management-toolkit/rps/api-test.yml?style=for-the-badge&label=API%20Test&logo=postman)
+![Build](https://img.shields.io/github/actions/workflow/status/device-management-toolkit/rps/node.js.yml?style=for-the-badge&logo=github)
+![Codecov](https://img.shields.io/codecov/c/github/device-management-toolkit/rps?style=for-the-badge&logo=codecov)
+[![OSSF-Scorecard Score](https://img.shields.io/ossf-scorecard/github.com/device-management-toolkit/rps?style=for-the-badge&label=OSSF%20Score)](https://api.securityscorecards.dev/projects/github.com/device-management-toolkit/rps)
 [![Discord](https://img.shields.io/discord/1063200098680582154?style=for-the-badge&label=Discord&logo=discord&logoColor=white&labelColor=%235865F2&link=https%3A%2F%2Fdiscord.gg%2FDKHeUNEWVH)](https://discord.gg/DKHeUNEWVH)
 [![Docker Pulls](https://img.shields.io/docker/pulls/intel/oact-rps?style=for-the-badge&logo=docker)](https://hub.docker.com/r/intel/oact-rps)
 
@@ -104,6 +104,6 @@ If you want debug in vscode devcontainer, try to open the project with devcontai
 
 - Find a bug? Or have ideas for new features? [Open a new Issue](https://github.com/device-management-toolkit/rps/issues).
 
-- Need additional support or want to get the latest news and events about Open AMT? Connect with the team directly through Discord.
+- Need additional support or want to get the latest news and events about Device Management Toolkit? Connect with the team directly through Discord.
 
   [![Discord Banner 1](https://discordapp.com/api/guilds/1063200098680582154/widget.png?style=banner2)](https://discord.gg/DKHeUNEWVH)
