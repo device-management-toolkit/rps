@@ -1,8 +1,8 @@
+name: Bug Report
 description: Bug report
+title: "[Bug]: <title>"
 labels: 
  - bug
-
-title: "[Bug]: <title>"
 body:
   - type: markdown
     attributes:
