@@ -7,7 +7,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        <!--🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅
+        <!--🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅-->
         Hello there! 😄
         To expedite issue processing please search open and closed issues before submitting a new one.
         Existing issues often contain information about workarounds, resolution, or progress updates.
@@ -46,11 +46,37 @@ body:
       description: "If applicable, add screenshots to help explain your problem."
       placeholder: "Upload screenshots"
   - type: input
+    id: amt_version
+    attributes:
+      label: "AMT Version"
+      description: "Specify the AMT version."
+      placeholder: "e.g., 11.8.5, 12.0.45"
+    validations:
+      required: true
+  - type: dropdown
+    id: configuration_mode
+    attributes:
+      label: "Configuration Mode"
+      description: "Select the AMT Configuration Mode."
+      options:
+        - CCM
+        - ACM
+    validations:
+      required: true
+  - type: input
+    id: operating_system
+    attributes:
+      label: "Operating System"
+      description: "Specify the operating system."
+      placeholder: "e.g., Linux Kernel & Version"
+    validations:
+      required: true
+  - type: input
     id: amt_device_info
     attributes:
       label: "AMT Device Information"
       description: "Details about the AMT device."
-      placeholder: "OS, AMT Version, Configuration Mode, Network Configuration"
+      placeholder: "Network Configuration"
   - type: input
     id: service_deployment_info
     attributes:
@@ -62,4 +88,4 @@ body:
     attributes:
       label: "Additional context"
       description: "Add any other context about the problem here."
-      placeholder: "Additional context"
+      placeholder: "Additional context, log files, etc..."
