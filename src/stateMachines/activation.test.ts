@@ -860,11 +860,12 @@ describe('Activation State Machine', () => {
       devices[context.clientId].certObj = context.certChainPfx.provisioningCertificateObj
 
       config.guards = {
-        isActivated: () => true,
+        isActivated: () => false,
         isAdminMode: () => true,
         maxCertLength: () => false,
         canUpgrade: () => true,
-        isUpgraded: () => true
+        isUpgraded: () => true,
+        isSHBC: () => false
       }
 
       config.actors!.getAMTDomainCert = fromPromise(async ({ input }) => await Promise.reject(new Error()))
@@ -872,9 +873,8 @@ describe('Activation State Machine', () => {
       const flowStates = [
         'UNPROVISIONED',
         'GET_AMT_PROFILE',
-        'CHECK_TENANT_ACCESS',
         'GET_AMT_DOMAIN_CERT',
-        'FAILED'
+        'FINAL'
       ]
       const acmActivationService = createActor(mockActivationMachine, { input: context })
       acmActivationService.subscribe((state) => {
@@ -882,7 +882,7 @@ describe('Activation State Machine', () => {
         expect(state.matches(expectedState)).toBe(true)
         if (state.matches('DELAYED_TRANSITION')) {
           jest.advanceTimersByTime(10000)
-        } else if (state.matches('FAILED') && currentStateIndex === flowStates.length) {
+        } else if (state.matches('FINAL') && currentStateIndex === flowStates.length) {
           done()
         }
       })
@@ -1164,7 +1164,7 @@ describe('Activation State Machine', () => {
         'IPS_HOST_BASED_SETUP_SERVICE',
         'ADD_NEXT_CERT_IN_CHAIN',
         'ADMIN_SETUP',
-        'FAILED'
+        'FINAL'
       ]
       const acmActivationService = createActor(mockActivationMachine, { input: context })
       acmActivationService.subscribe((state) => {
@@ -1172,7 +1172,7 @@ describe('Activation State Machine', () => {
         expect(state.matches(expectedState)).toBe(true)
         if (state.matches('DELAYED_TRANSITION')) {
           jest.advanceTimersByTime(10000)
-        } else if (state.matches('FAILED') && currentStateIndex === flowStates.length) {
+        } else if (state.matches('FINAL') && currentStateIndex === flowStates.length) {
           done()
         }
       })
@@ -1652,8 +1652,6 @@ describe('Activation State Machine', () => {
         'SETUP',
         'COMMIT_CHANGES',
         'DELAYED_TRANSITION',
-        'SAVE_DEVICE_TO_SECRET_PROVIDER',
-        'SAVE_DEVICE_TO_MPS',
         'GET_AMT_DOMAIN_CERT',
         'GET_GENERAL_SETTINGS',
         'IPS_HOST_BASED_SETUP_SERVICE',
@@ -1758,13 +1756,13 @@ describe('Activation State Machine', () => {
       const flowStates = [
         'UNPROVISIONED',
         'GET_AMT_PROFILE',
-        'FAILED'
+        'FINAL'
       ]
       const acmActivationService = createActor(mockActivationMachine, { input: context })
       acmActivationService.subscribe((state) => {
         const expectedState: any = flowStates[currentStateIndex++]
         expect(state.matches(expectedState)).toBe(true)
-        if (state.matches('FAILED') && currentStateIndex === flowStates.length) {
+        if (state.matches('FINAL') && currentStateIndex === flowStates.length) {
           done()
         }
       })
@@ -1783,13 +1781,13 @@ describe('Activation State Machine', () => {
       const flowStates = [
         'UNPROVISIONED',
         'GET_AMT_PROFILE',
-        'FAILED'
+        'FINAL'
       ]
       const acmActivationService = createActor(mockActivationMachine, { input: context })
       acmActivationService.subscribe((state) => {
         const expectedState: any = flowStates[currentStateIndex++]
         expect(state.matches(expectedState)).toBe(true)
-        if (state.matches('FAILED') && currentStateIndex === flowStates.length) {
+        if (state.matches('FINAL') && currentStateIndex === flowStates.length) {
           done()
         }
       })
@@ -1809,13 +1807,13 @@ describe('Activation State Machine', () => {
         'UNPROVISIONED',
         'GET_AMT_PROFILE',
         'GET_AMT_DOMAIN_CERT',
-        'FAILED'
+        'FINAL'
       ]
       const acmActivationService = createActor(mockActivationMachine, { input: context })
       acmActivationService.subscribe((state) => {
         const expectedState: any = flowStates[currentStateIndex++]
         expect(state.matches(expectedState)).toBe(true)
-        if (state.matches('FAILED') && currentStateIndex === flowStates.length) {
+        if (state.matches('FINAL') && currentStateIndex === flowStates.length) {
           done()
         }
       })
@@ -1845,13 +1843,13 @@ describe('Activation State Machine', () => {
         'GET_GENERAL_SETTINGS',
         'IPS_HOST_BASED_SETUP_SERVICE',
         'ADD_NEXT_CERT_IN_CHAIN',
-        'FAILED'
+        'FINAL'
       ]
       const acmActivationService = createActor(mockActivationMachine, { input: context })
       acmActivationService.subscribe((state) => {
         const expectedState: any = flowStates[currentStateIndex++]
         expect(state.matches(expectedState)).toBe(true)
-        if (state.matches('FAILED') && currentStateIndex === flowStates.length) {
+        if (state.matches('FINAL') && currentStateIndex === flowStates.length) {
           done()
         }
       })

@@ -414,6 +414,11 @@ export class Activation {
     return await invokeWsmanCall(input)
   }
 
+  invokeUnprovision = async ({ input }: { input: ActivationContext }): Promise<any> => {
+    input.xmlMessage = input.amt.SetupAndConfigurationService.Unprovision(1)
+    return await invokeWsmanCall(input)
+  }
+
   machine = setup({
     types: {} as {
       context: ActivationContext
@@ -436,6 +441,7 @@ export class Activation {
       saveDeviceInfoToSecretProvider: fromPromise(this.saveDeviceInfoToSecretProvider.bind(this)),
       saveDeviceInfoToMPS: fromPromise(this.saveDeviceInfoToMPS.bind(this)),
       changeAMTPassword: fromPromise(this.changeAMTPassword.bind(this)),
+      invokeUnprovision: fromPromise(this.invokeUnprovision),
       unconfiguration: this.unconfiguration.machine,
       networkConfiguration: this.networkConfiguration.machine,
       featuresConfiguration: this.featuresConfiguration.machine,
@@ -460,6 +466,14 @@ export class Activation {
           )
         }
         return false
+      },
+      isSHBCACMPhase: ({ context }) => {
+        const device = devices[context.clientId]
+        return (
+          context.shbcCCMComplete === true &&
+          context.profile?.activation === ClientAction.ADMINCTLMODE &&
+          parseFloat(device.ClientData.payload.ver) >= 19
+        )
       },
       isSHBCCMComplete: ({ context }) => context.shbcCCMComplete === true,
       isSHBCACMComplete: ({ context }) => context.shbcACMComplete === true,
@@ -507,6 +521,13 @@ export class Activation {
         }
 
         return false
+      },
+      shouldDeactivate: ({ context }) => {
+        return (
+          context.shbcCCMComplete === true &&
+          context.shbcACMComplete !== true &&
+          context.profile?.activation === ClientAction.ADMINCTLMODE
+        )
       }
     },
     actions: {
@@ -804,6 +825,21 @@ export class Activation {
           },
           onError: [
             {
+              guard: ({ context, event }) =>
+                event.error instanceof GATEWAY_TIMEOUT_ERROR &&
+                context.shbcCCMComplete === true &&
+                context.shbcACMComplete !== true &&
+                context.profile?.activation === ClientAction.ADMINCTLMODE,
+              target: 'CHECK_ACTIVATION_ON_AMT'
+            },
+            {
+              guard: 'isSHBCACMPhase',
+              actions: assign({
+                errorMessage: ({ context }) => `SHBC ACM setup failed for device ${devices[context.clientId].uuid}`
+              }),
+              target: 'DEACTIVATION'
+            },
+            {
               guard: ({ event }) => event.error instanceof GATEWAY_TIMEOUT_ERROR,
               target: 'CHECK_ACTIVATION_ON_AMT'
             },
@@ -836,6 +872,10 @@ export class Activation {
             target: 'DELAYED_TRANSITION'
           },
           {
+            guard: 'shouldDeactivate',
+            target: 'DEACTIVATION'
+          },
+          {
             actions: assign({ errorMessage: 'Failed to activate in admin control mode.' }),
             target: 'FAILED'
           }
@@ -853,6 +893,21 @@ export class Activation {
             }
           ],
           onError: [
+            {
+              guard: ({ context, event }) =>
+                event.error instanceof GATEWAY_TIMEOUT_ERROR &&
+                context.shbcCCMComplete === true &&
+                context.shbcACMComplete !== true &&
+                context.profile?.activation === ClientAction.ADMINCTLMODE,
+              target: 'CHECK_ACTIVATION_ON_AMT'
+            },
+            {
+              guard: 'isSHBCACMPhase',
+              actions: assign({
+                errorMessage: ({ context }) => `SHBC ACM setup failed for device ${devices[context.clientId].uuid}`
+              }),
+              target: 'DEACTIVATION'
+            },
             {
               guard: ({ event }) => event.error instanceof GATEWAY_TIMEOUT_ERROR,
               target: 'CHECK_ACTIVATION_ON_AMT'
@@ -894,6 +949,10 @@ export class Activation {
               'Set activation status'
             ],
             target: 'CHANGE_AMT_PASSWORD'
+          },
+          {
+            guard: 'shouldDeactivate',
+            target: 'DEACTIVATION'
           },
           {
             actions: assign({ errorMessage: 'Failed to upgrade to admin control mode.' }),
@@ -1043,7 +1102,7 @@ export class Activation {
           {
             guard: 'isSHBCCMComplete',
             actions: assign({ hasToUpgrade: () => true }),
-            target: 'SAVE_DEVICE_TO_SECRET_PROVIDER'
+            target: 'GET_AMT_DOMAIN_CERT'
           },
           {
             guard: 'isAdminMode',
@@ -1072,13 +1131,22 @@ export class Activation {
               target: 'SAVE_DEVICE_TO_SECRET_PROVIDER'
             }
           ],
-          onError: {
-            actions: assign({
-              message: ({ event }) => event.error,
-              targetAfterError: () => 'SET_MEBX_PASSWORD'
-            }),
-            target: 'ERROR'
-          }
+          onError: [
+            {
+              guard: 'isSHBCACMPhase',
+              actions: assign({
+                errorMessage: ({ context }) => `SHBC ACM setup failed for device ${devices[context.clientId].uuid}`
+              }),
+              target: 'DEACTIVATION'
+            },
+            {
+              actions: assign({
+                message: ({ event }) => event.error,
+                targetAfterError: () => 'SET_MEBX_PASSWORD'
+              }),
+              target: 'ERROR'
+            }
+          ]
         }
       },
       SAVE_DEVICE_TO_SECRET_PROVIDER: {
@@ -1095,18 +1163,7 @@ export class Activation {
           src: 'saveDeviceInfoToMPS',
           input: ({ context }) => context,
           id: 'save-device-to-mps',
-          onDone: [
-            {
-              guard: 'isSHBCACMComplete',
-              target: 'UNCONFIGURATION'
-            },
-            {
-              guard: 'isSHBCCMComplete',
-              actions: assign({ hasToUpgrade: () => true }),
-              target: 'GET_AMT_DOMAIN_CERT'
-            },
-            { target: 'UNCONFIGURATION' }
-          ],
+          onDone: 'UNCONFIGURATION',
           onError: 'SAVE_DEVICE_TO_MPS_FAILURE'
         }
       },
@@ -1127,10 +1184,19 @@ export class Activation {
             actions: assign({ message: ({ event }) => event.output }),
             target: 'UPDATE_CREDENTIALS'
           },
-          onError: {
-            actions: assign({ message: ({ event }) => event.error }),
-            target: 'ERROR'
-          }
+          onError: [
+            {
+              guard: 'isSHBCACMPhase',
+              actions: assign({
+                errorMessage: ({ context }) => `SHBC ACM setup failed for device ${devices[context.clientId].uuid}`
+              }),
+              target: 'DEACTIVATION'
+            },
+            {
+              actions: assign({ message: ({ event }) => event.error }),
+              target: 'ERROR'
+            }
+          ]
         }
       },
       UNCONFIGURATION: {
@@ -1233,6 +1299,26 @@ export class Activation {
           onDone: 'PROVISIONED'
         }
       },
+      DEACTIVATION: {
+        invoke: {
+          src: 'invokeUnprovision',
+          input: ({ context }) => context,
+          id: 'send-unprovision-message',
+          onDone: {
+            actions: assign({
+              status: () => 'error',
+              errorMessage: ({ context }) => `${context.errorMessage}.ACM activation failed.`
+            }),
+            target: 'FINAL'
+          },
+          onError: {
+            actions: assign({
+              errorMessage: ({ context }) => `Failed to deactivate device after ACM failure: ${context.errorMessage}`
+            }),
+            target: 'FINAL'
+          }
+        }
+      },
       PROVISIONED: {
         entry: [
           assign({ status: () => 'success' }),
@@ -1252,14 +1338,24 @@ export class Activation {
           onDone: 'NEXT_STATE'
         },
         on: {
-          ONFAILED: {
-            actions: assign({ errorMessage: ({ event }) => event.output }),
-            target: 'FAILED'
-          }
+          ONFAILED: [
+            {
+              guard: 'shouldDeactivate',
+              target: 'DEACTIVATION'
+            },
+            {
+              actions: assign({ errorMessage: ({ event }) => event.output }),
+              target: 'FAILED'
+            }
+          ]
         }
       },
       NEXT_STATE: {
         always: [
+          {
+            guard: 'shouldDeactivate',
+            target: 'DEACTIVATION'
+          },
           {
             guard: 'isGeneralSettings',
             target: 'GET_GENERAL_SETTINGS'
@@ -1285,6 +1381,17 @@ export class Activation {
         }
       },
       FAILED: {
+        always: [
+          {
+            guard: 'shouldDeactivate',
+            target: 'DEACTIVATION'
+          },
+          {
+            target: 'FINAL'
+          }
+        ]
+      },
+      FINAL: {
         entry: [
           assign({ status: () => 'error' }),
           'Send Message to Device'
