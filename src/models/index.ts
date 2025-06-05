@@ -92,6 +92,10 @@ export interface RPSConfig {
   secrets_provider: string
   db_provider: string
   connection_string: string
+  postgres_ssl_ca?: string
+  postgres_ssl_cert?: string
+  postgres_ssl_key?: string
+  postgres_ssl_reject_unauthorized?: boolean
   cors_origin: string
   cors_headers: string
   cors_methods: string
