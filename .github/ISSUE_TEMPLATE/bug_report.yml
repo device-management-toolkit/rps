@@ -1,0 +1,91 @@
+name: Bug Report
+description: Bug report
+title: "[Bug]: <title>"
+labels: 
+ - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        <!--🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅-->
+        Hello there! 😄
+        To expedite issue processing please search open and closed issues before submitting a new one.
+        Existing issues often contain information about workarounds, resolution, or progress updates.
+        🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅🔅-->
+  - type: input
+    id: bug_description
+    attributes:
+      label: "Describe the bug"
+      description: "A clear and concise description of what the bug is."
+      placeholder: "Bug description"
+    validations:
+      required: true
+  - type: textarea
+    id: steps_to_reproduce
+    attributes:
+      label: "Steps to reproduce"
+      description: "Steps to reproduce the behavior."
+      placeholder: "1. Go to '...'
+        2. Click on '...'
+        3. Scroll down to '...'
+        4. See error"
+    validations:
+      required: true
+  - type: input
+    id: expected_behavior
+    attributes:
+      label: "Expected behavior"
+      description: "A clear and concise description of what you expected to happen."
+      placeholder: "Expected behavior"
+    validations:
+      required: true
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: "Screenshots"
+      description: "If applicable, add screenshots to help explain your problem."
+      placeholder: "Upload screenshots"
+  - type: input
+    id: amt_version
+    attributes:
+      label: "AMT Version"
+      description: "Specify the AMT version."
+      placeholder: "e.g., 11.8.5, 12.0.45"
+    validations:
+      required: true
+  - type: dropdown
+    id: configuration_mode
+    attributes:
+      label: "Configuration Mode"
+      description: "Select the AMT Configuration Mode."
+      options:
+        - CCM
+        - ACM
+    validations:
+      required: true
+  - type: input
+    id: operating_system
+    attributes:
+      label: "Operating System"
+      description: "Specify the operating system."
+      placeholder: "e.g., Linux Kernel & Version"
+    validations:
+      required: true
+  - type: input
+    id: amt_device_info
+    attributes:
+      label: "AMT Device Information"
+      description: "Details about the AMT device."
+      placeholder: "Network Configuration"
+  - type: input
+    id: service_deployment_info
+    attributes:
+      label: "Service Deployment Information"
+      description: "Details about the service deployment."
+      placeholder: "Deployment Type, Node Version, Component & Version"
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: "Additional context"
+      description: "Add any other context about the problem here."
+      placeholder: "Additional context, log files, etc..."

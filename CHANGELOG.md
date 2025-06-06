@@ -1,3 +1,10 @@
+## [2.25.1](https://github.com/device-management-toolkit/rps/compare/v2.25.0...v2.25.1) (2025-06-05)
+
+
+### Bug Fixes
+
+* deactivates when shbc acm fails ([#2167](https://github.com/device-management-toolkit/rps/issues/2167)) ([fe47416](https://github.com/device-management-toolkit/rps/commit/fe474162893e6cc13c4befabfbdec28d5224a3c4))
+
 # [2.25.0](https://github.com/device-management-toolkit/rps/compare/v2.24.0...v2.25.0) (2025-06-02)
 
 
