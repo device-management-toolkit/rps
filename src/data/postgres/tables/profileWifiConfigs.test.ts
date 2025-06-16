@@ -8,12 +8,12 @@ import { API_UNEXPECTED_EXCEPTION } from '../../../utils/constants.js'
 import { type ProfileWifiConfigs } from '../../../models/RCS.Config.js'
 import { ProfilesWifiConfigsTable } from './profileWifiConfigs.js'
 import { jest } from '@jest/globals'
-import { type SpyInstance, spyOn } from 'jest-mock'
+import { spyOn } from 'jest-mock'
 
 describe('profilewificonfig tests', () => {
   let db: PostgresDb
   let profilesWifiConfigsTable: ProfilesWifiConfigsTable
-  let querySpy: SpyInstance<any>
+  let querySpy: jest.Spied<any>
   const wifiConfigs: ProfileWifiConfigs[] = [{ profileName: 'wirelessConfig', priority: 1 } as any]
   const profileName = 'profileName'
   const tenantId = 'tenantId'
@@ -31,8 +31,8 @@ describe('profilewificonfig tests', () => {
       querySpy.mockResolvedValueOnce({ rows: [{}], rowCount: 1 })
       const result = await profilesWifiConfigsTable.getProfileWifiConfigs(profileName)
       expect(result).toStrictEqual([{}])
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
     SELECT 
       priority as "priority",
@@ -49,8 +49,8 @@ describe('profilewificonfig tests', () => {
       querySpy.mockResolvedValueOnce({ rows: [{}], rowCount: 1 })
       const result = await profilesWifiConfigsTable.deleteProfileWifiConfigs(profileName)
       expect(result).toBe(true)
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
     DELETE
     FROM profiles_wirelessconfigs
@@ -62,8 +62,8 @@ describe('profilewificonfig tests', () => {
       querySpy.mockResolvedValueOnce({ rows: [{}], rowCount: 1 })
       const result = await profilesWifiConfigsTable.deleteProfileWifiConfigs(profileName, tenantId)
       expect(result).toBe(true)
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
     DELETE
     FROM profiles_wirelessconfigs
@@ -77,8 +77,8 @@ describe('profilewificonfig tests', () => {
       querySpy.mockResolvedValueOnce({ rows: [{}], rowCount: 1 })
       const result = await profilesWifiConfigsTable.createProfileWifiConfigs(wifiConfigs, profileName)
       expect(result).toBe(true)
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(`
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(`
       INSERT INTO
       profiles_wirelessconfigs (wireless_profile_name, profile_name, priority, tenant_id)
       VALUES ('wirelessConfig', 'profileName', '1', '')`)

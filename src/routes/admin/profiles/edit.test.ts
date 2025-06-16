@@ -16,13 +16,12 @@ import {
 } from './edit.js'
 import { ClientAction, TlsMode, TlsSigningAuthority } from '../../../models/RCS.Config.js'
 import { jest } from '@jest/globals'
-import { type SpyInstance } from 'jest-mock'
 
 describe('AMT Profile - Edit', () => {
   let resSpy
   let req
-  let getByNameSpy: SpyInstance
-  let writeSecretWithObjectSpy: SpyInstance
+  let getByNameSpy: jest.Spied<any>
+  let writeSecretWithObjectSpy: jest.Spied<any>
 
   beforeEach(() => {
     resSpy = createSpyObj('Response', [

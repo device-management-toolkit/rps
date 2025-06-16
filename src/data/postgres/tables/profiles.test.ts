@@ -17,12 +17,12 @@ import {
 import { RPSError } from '../../../utils/RPSError.js'
 import { ProfilesTable } from './profiles.js'
 import { jest } from '@jest/globals'
-import { type SpyInstance, spyOn } from 'jest-mock'
+import { spyOn } from 'jest-mock'
 
 describe('profiles tests', () => {
   let db: PostgresDb
   let profilesTable: ProfilesTable
-  let querySpy: SpyInstance<any>
+  let querySpy: jest.Spied<any>
   let amtConfig: AMTConfiguration
   const profileName = 'profileName'
   const tenantId = 'tenantId'
@@ -102,8 +102,8 @@ describe('profiles tests', () => {
       querySpy.mockResolvedValueOnce({ rows, rowCount: rows.length })
       const result = await profilesTable.get()
       expect(result).toStrictEqual(rows)
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
     SELECT 
       p.profile_name as "profileName", 
@@ -160,8 +160,8 @@ describe('profiles tests', () => {
       querySpy.mockResolvedValueOnce({ rows: [{}], rowCount: rows.length })
       const result = await profilesTable.getByName(profileName)
       expect(result).toStrictEqual(rows[0])
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
     SELECT 
       p.profile_name as "profileName",
@@ -236,8 +236,8 @@ describe('profiles tests', () => {
       const result = await profilesTable.delete(profileName, tenantId)
       expect(result).toBeTruthy()
       expect(wirelessConfigSpy).toHaveBeenLastCalledWith(profileName, tenantId)
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
       DELETE 
       FROM profiles 
@@ -275,8 +275,8 @@ describe('profiles tests', () => {
         amtConfig.tenantId
       )
       expect(getByNameSpy).toHaveBeenCalledWith(amtConfig.profileName, amtConfig.tenantId)
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
         INSERT INTO profiles(
           profile_name, activation,
@@ -325,8 +325,8 @@ describe('profiles tests', () => {
         amtConfig.tenantId
       )
       expect(getByNameSpy).toHaveBeenCalledWith(amtConfig.profileName, amtConfig.tenantId)
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
         INSERT INTO profiles(
           profile_name, activation,
@@ -389,8 +389,8 @@ describe('profiles tests', () => {
 
       const result = await profilesTable.update(amtConfig)
       expect(result).toBe(amtConfig)
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
       UPDATE profiles 
       SET activation=$2, amt_password=$3, generate_random_password=$4, cira_config_name=$5,
@@ -434,8 +434,8 @@ describe('profiles tests', () => {
 
       const result = await profilesTable.update(amtConfig)
       expect(result).toBe(amtConfig)
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
       UPDATE profiles 
       SET activation=$2, amt_password=$3, generate_random_password=$4, cira_config_name=$5,

@@ -13,7 +13,7 @@ import { randomUUID } from 'node:crypto'
 import { WSEnterpriseAssistantListener, enterpriseAssistantSocket, promises } from '../WSEnterpriseAssistantListener.js'
 import { config } from '../test/helper/Config.js'
 import { jest } from '@jest/globals'
-import { type SpyInstance, spyOn } from 'jest-mock'
+import { spyOn } from 'jest-mock'
 import {
   invokeEnterpriseAssistantCall,
   invokeEnterpriseAssistantCallInternal,
@@ -25,9 +25,9 @@ Environment.Config = config
 describe('Common', () => {
   const clientId = randomUUID()
   let sendSpy
-  let responseMessageSpy: SpyInstance<any>
-  let wrapItSpy: SpyInstance<any>
-  let enterpriseAssistantSocketSendSpy: SpyInstance<any>
+  let responseMessageSpy: jest.Spied<any>
+  let wrapItSpy: jest.Spied<any>
+  let enterpriseAssistantSocketSendSpy: jest.Spied<any>
   const context = {
     message: '',
     clientId,

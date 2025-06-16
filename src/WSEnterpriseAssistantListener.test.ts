@@ -7,13 +7,13 @@ import Logger from './Logger.js'
 import { type ILogger } from './interfaces/ILogger.js'
 import { promises, enterpriseAssistantSocket, WSEnterpriseAssistantListener } from './WSEnterpriseAssistantListener.js'
 import { jest } from '@jest/globals'
-import { type SpyInstance, spyOn } from 'jest-mock'
+import { spyOn } from 'jest-mock'
 
 describe('Websocket Listener', () => {
   const log: ILogger = new Logger('WebSocketListener')
   let server: WSEnterpriseAssistantListener
   let isConnected: boolean
-  let onSpy: SpyInstance<any>
+  let onSpy: jest.Spied<any>
   let serverStub
   beforeEach(() => {
     serverStub = {

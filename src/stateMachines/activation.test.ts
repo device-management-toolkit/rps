@@ -20,7 +20,7 @@ import { type MachineImplementationsSimplified, createActor, fromPromise } from 
 import { AMTUserName, GATEWAY_TIMEOUT_ERROR } from '../utils/constants.js'
 import got from 'got'
 import { jest } from '@jest/globals'
-import { type SpyInstance, spyOn } from 'jest-mock'
+import { spyOn } from 'jest-mock'
 import { HttpResponseError, coalesceMessage, isDigestRealmValid } from './common.js'
 import {
   type ActivationEvent,
@@ -44,11 +44,11 @@ Environment.Config = config
 describe('Activation State Machine', () => {
   let activation: ActivationType
   let context: ActivationContextType
-  let responseMessageSpy: SpyInstance
-  let sendSpy: SpyInstance
-  let signStringSpy: SpyInstance
-  let getPasswordSpy: SpyInstance
-  let gotSpy: SpyInstance<any>
+  let responseMessageSpy: jest.Spied<any>
+  let sendSpy: jest.Spied<any>
+  let signStringSpy: jest.Spied<any>
+  let getPasswordSpy: jest.Spied<any>
+  let gotSpy: jest.Spied<any>
   let config: MachineImplementationsSimplified<ActivationContextType, ActivationEvent>
   let currentStateIndex: number
   const cert =

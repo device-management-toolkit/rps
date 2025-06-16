@@ -17,12 +17,12 @@ import { IEEE8021xProfilesTable } from './ieee8021xProfiles.js'
 import { PostgresErr } from '../errors.js'
 import { RPSError } from '../../../utils/RPSError.js'
 import { jest } from '@jest/globals'
-import { type SpyInstance, spyOn } from 'jest-mock'
+import { spyOn } from 'jest-mock'
 
 describe('8021x profiles tests', () => {
   let db: PostgresDb
   let ieee8021xprofilesTable: IEEE8021xProfilesTable
-  let querySpy: SpyInstance<any>
+  let querySpy: jest.Spied<any>
   let ieee8021xConfig: Ieee8021xConfig
   const profileName = 'profileName'
   beforeEach(() => {
@@ -93,14 +93,14 @@ describe('8021x profiles tests', () => {
       querySpy.mockResolvedValueOnce({ rows: [{}], rowCount: 1 })
       const result = await ieee8021xprofilesTable.get()
       expect(result).toStrictEqual([{}])
-      expect(querySpy).toBeCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledTimes(1)
     })
     test('should get by name', async () => {
       const rows = [{}]
       querySpy.mockResolvedValueOnce({ rows: [{}], rowCount: rows.length })
       const result = await ieee8021xprofilesTable.getByName(profileName)
       expect(result).toStrictEqual(rows[0])
-      expect(querySpy).toBeCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledTimes(1)
     })
     test('should NOT get by name when no profiles exists', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 0 })
@@ -110,13 +110,13 @@ describe('8021x profiles tests', () => {
     test('should check profile exist', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 0 })
       const result = await ieee8021xprofilesTable.checkProfileExits(profileName)
-      expect(querySpy).toBeCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledTimes(1)
       expect(result).toBeFalsy()
     })
     test('should check profile exist', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 0 })
       const result = await ieee8021xprofilesTable.checkProfileExits(profileName)
-      expect(querySpy).toBeCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledTimes(1)
       expect(result).toBeFalsy()
     })
   })
@@ -125,7 +125,7 @@ describe('8021x profiles tests', () => {
       querySpy.mockImplementation(() => ({ rows: [], rowCount: 1 }))
       const result = await ieee8021xprofilesTable.delete(profileName)
       expect(result).toBeTruthy()
-      expect(querySpy).toBeCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledTimes(1)
     })
     test('should not delete if associated with amt profile', async () => {
       const dbErr = {
@@ -163,7 +163,7 @@ describe('8021x profiles tests', () => {
       const result = await ieee8021xprofilesTable.insert(ieee8021xConfig)
 
       expect(result).toBe(ieee8021xConfig)
-      expect(querySpy).toBeCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledTimes(1)
     })
     test('should get a null if insert returns no rows (should throw error actually)', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 0 })
@@ -192,7 +192,7 @@ describe('8021x profiles tests', () => {
       getByNameSpy.mockResolvedValue(ieee8021xConfig)
       const result = await ieee8021xprofilesTable.update(ieee8021xConfig)
       expect(result).toBe(ieee8021xConfig)
-      expect(querySpy).toBeCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledTimes(1)
     })
     test('should NOT update when unexpected error', async () => {
       querySpy.mockRejectedValueOnce('unknown')
@@ -205,7 +205,7 @@ describe('8021x profiles tests', () => {
       const getByNameSpy = spyOn(ieee8021xprofilesTable, 'getByName')
       getByNameSpy.mockResolvedValue(ieee8021xConfig)
       await expect(ieee8021xprofilesTable.update(ieee8021xConfig)).rejects.toThrow(CONCURRENCY_MESSAGE)
-      expect(querySpy).toBeCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledTimes(1)
     })
   })
 })

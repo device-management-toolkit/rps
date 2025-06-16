@@ -6,12 +6,12 @@
 import { createSpyObj } from '../../../test/helper/jest.js'
 import { getIEEE8021xProfile } from './get.js'
 import { jest } from '@jest/globals'
-import { type SpyInstance, spyOn } from 'jest-mock'
+import { spyOn } from 'jest-mock'
 
 describe('Checks - getIEEE8021xProfile', () => {
   let resSpy
   let req
-  let getByNameSpy: SpyInstance<any>
+  let getByNameSpy: jest.Spied<any>
 
   beforeEach(() => {
     resSpy = createSpyObj('Response', [

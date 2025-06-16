@@ -10,12 +10,12 @@ import { config } from '../../test/helper/Config.js'
 import { Environment } from '../../utils/Environment.js'
 import { type DeviceCredentials } from '../../interfaces/ISecretManagerService.js'
 import { jest } from '@jest/globals'
-import { type SpyInstance, spyOn } from 'jest-mock'
+import { spyOn } from 'jest-mock'
 
 let secretManagerService: VaultService = null as any
 Environment.Config = config
-let gotSpy: SpyInstance
-let gotFailSpy: SpyInstance<any>
+let gotSpy: jest.Spied<any>
+let gotFailSpy: jest.Spied<any>
 const logger: ILogger = new Logger('SecretManagerTests')
 const secretPath = '4c4c4544-004b-4210-8033-b6c04f504633'
 const secretCreds: DeviceCredentials = {

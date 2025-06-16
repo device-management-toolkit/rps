@@ -6,13 +6,13 @@
 import { createSpyObj } from '../../../test/helper/jest.js'
 import { DomainCreate } from './create.js'
 import { jest } from '@jest/globals'
-import { type SpyInstance, spyOn } from 'jest-mock'
+import { spyOn } from 'jest-mock'
 
 describe('Domain - Create', () => {
   let resSpy
   let req
-  let insertSpy: SpyInstance<any>
-  let secretManagerSpy: SpyInstance<any>
+  let insertSpy: jest.Spied<any>
+  let secretManagerSpy: jest.Spied<any>
   let dc: DomainCreate
 
   beforeEach(() => {
