@@ -6,12 +6,12 @@
 import { createSpyObj } from '../../../test/helper/jest.js'
 import { deleteDomain } from './delete.js'
 import { jest } from '@jest/globals'
-import { type SpyInstance, spyOn } from 'jest-mock'
+import { spyOn } from 'jest-mock'
 
 describe('CIRA Config - Delete', () => {
   let resSpy
   let req
-  let deleteSpy: SpyInstance<any>
+  let deleteSpy: jest.Spied<any>
 
   beforeEach(() => {
     resSpy = createSpyObj('Response', [

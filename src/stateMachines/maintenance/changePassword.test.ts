@@ -13,7 +13,7 @@ import { runTilDone } from '../../test/helper/xstate.js'
 import { config, setupTestClient } from '../../test/helper/Config.js'
 import { Environment } from '../../utils/Environment.js'
 import { jest } from '@jest/globals'
-import { type SpyInstance, spyOn } from 'jest-mock'
+import { spyOn } from 'jest-mock'
 import got from 'got'
 import { type MachineImplementationsSimplified, fromPromise } from 'xstate'
 
@@ -48,10 +48,10 @@ describe('ChangePassword State Machine', () => {
   let implementation: ChangePasswordType
   let implementationConfig: MachineImplementationsSimplified<ChangePasswordContext, ChangePasswordEvent>
   let setAdminACLEntryExResponse: SetAdminACLEntryExResponse
-  let secretWriterSpy: SpyInstance<any>
-  let secretGetterSpy: SpyInstance<any>
+  let secretWriterSpy: jest.Spied<any>
+  let secretGetterSpy: jest.Spied<any>
   let mpsRsp
-  let deleteSpy: SpyInstance<any>
+  let deleteSpy: jest.Spied<any>
   let context: ChangePasswordContext
 
   beforeEach(() => {

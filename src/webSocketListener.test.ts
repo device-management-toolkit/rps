@@ -34,7 +34,7 @@ describe('Websocket Listener', () => {
   const log: ILogger = new Logger('WebSocketListener')
   let server
   let isConnected: boolean
-  // let onSpy: SpyInstance<any>
+  // let onSpy: jest.Spied<any>
   let clientid: string
   beforeEach(() => {
     itshouldthrowerror = false

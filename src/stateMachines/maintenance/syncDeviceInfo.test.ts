@@ -8,7 +8,7 @@ import { config, setupTestClient } from '../../test/helper/Config.js'
 import { runTilDone } from '../../test/helper/xstate.js'
 import { Environment } from '../../utils/Environment.js'
 import { jest } from '@jest/globals'
-import { type SpyInstance, spyOn } from 'jest-mock'
+import { spyOn } from 'jest-mock'
 import { type MachineImplementationsSimplified } from 'xstate'
 import got from 'got'
 
@@ -43,7 +43,7 @@ describe('SyncDeviceInfo State Machine', () => {
   let implementationConfig: MachineImplementationsSimplified<SyncDeviceInfoContext, SyncDeviceInfoEvent>
   let deviceInfo: DeviceInfo
   let mpsRsp: any
-  let gotSpy: SpyInstance<any>
+  let gotSpy: jest.Spied<any>
 
   beforeEach(() => {
     jest.resetAllMocks()

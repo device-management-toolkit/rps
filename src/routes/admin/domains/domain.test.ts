@@ -26,7 +26,7 @@ describe('Domain Profile Validation', () => {
     pfxobj = passwordChecker(certManager, req)
     expect(() => {
       passwordChecker(certManager, req)
-    }).not.toThrowError(
+    }).not.toThrow(
       new Error(
         'Unable to decrypt provisioning certificate. Please check that the password is correct, and that the certificate is a valid certificate.'
       )
@@ -43,7 +43,7 @@ describe('Domain Profile Validation', () => {
     }
     expect(() => {
       passwordChecker(certManager, req)
-    }).toThrowError(
+    }).toThrow(
       new Error(
         'Unable to decrypt provisioning certificate. Please check that the password is correct, and that the certificate is a valid certificate.'
       )
@@ -54,46 +54,46 @@ describe('Domain Profile Validation', () => {
     value = 'vprodemo.com'
     expect(() => {
       domainSuffixChecker(pfxobj, value)
-    }).not.toThrowError(new Error('FQDN not associated with provisioning certificate'))
+    }).not.toThrow(new Error('FQDN not associated with provisioning certificate'))
   })
 
   test('domainSuffixChecker (subdomain) - success', () => {
     value = 'test.vprodemo.com'
     expect(() => {
       domainSuffixChecker(pfxobj, value)
-    }).not.toThrowError(new Error('FQDN not associated with provisioning certificate'))
+    }).not.toThrow(new Error('FQDN not associated with provisioning certificate'))
   })
 
   test('domainSuffixChecker (subdomain) - success', () => {
     value = 'intel.vprodemo.com'
     expect(() => {
       domainSuffixChecker(pfxobj, value)
-    }).not.toThrowError(new Error('FQDN not associated with provisioning certificate'))
+    }).not.toThrow(new Error('FQDN not associated with provisioning certificate'))
   })
 
   test('domainSuffixChecker (root) - failure', () => {
     value = 'wrong.com'
     expect(() => {
       domainSuffixChecker(pfxobj, value)
-    }).toThrowError(new Error('FQDN not associated with provisioning certificate'))
+    }).toThrow(new Error('FQDN not associated with provisioning certificate'))
   })
   test('domainSuffixChecker (subdomain) - failure', () => {
     value = 'test.wrong.com'
     expect(() => {
       domainSuffixChecker(pfxobj, value)
-    }).toThrowError(new Error('FQDN not associated with provisioning certificate'))
+    }).toThrow(new Error('FQDN not associated with provisioning certificate'))
   })
 
   test('expirationChecker - success', () => {
     expect(() => {
       expirationChecker(pfxobj)
-    }).not.toThrowError(new Error('Uploaded certificate has expired'))
+    }).not.toThrow(new Error('Uploaded certificate has expired'))
   })
 
   test('expirationChecker - failure', () => {
     pfxobj.certs[0].validity.notAfter = new Date(1478708162000)
     expect(() => {
       expirationChecker(pfxobj)
-    }).toThrowError(new Error('Uploaded certificate has expired'))
+    }).toThrow(new Error('Uploaded certificate has expired'))
   })
 })

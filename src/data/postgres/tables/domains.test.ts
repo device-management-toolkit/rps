@@ -14,12 +14,12 @@ import {
 import { type AMTDomain } from '../../../models/index.js'
 import PostgresDb from '../index.js'
 import { jest } from '@jest/globals'
-import { type SpyInstance, spyOn } from 'jest-mock'
+import { spyOn } from 'jest-mock'
 
 describe('domains tests', () => {
   let db: PostgresDb
   let domainsTable: DomainsTable
-  let querySpy: SpyInstance<any>
+  let querySpy: jest.Spied<any>
   let amtDomain: AMTDomain
   const profileName = 'profileName'
   beforeEach(() => {
@@ -87,8 +87,8 @@ describe('domains tests', () => {
       querySpy.mockResolvedValueOnce({ rows: [amtDomain], command: '', fields: null, rowCount: 1, oid: 0 })
       const domains: AMTDomain[] = await domainsTable.get()
       expect(domains[0]).toBe(amtDomain)
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
     SELECT 
       name as "profileName", 
@@ -117,8 +117,8 @@ describe('domains tests', () => {
       querySpy.mockResolvedValueOnce({ rows: [amtDomain], command: '', fields: null, rowCount: 1, oid: 0 })
       const result = await domainsTable.getByName(profileName)
       expect(result).toBe(amtDomain)
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
     SELECT 
       name as "profileName", 
@@ -155,8 +155,8 @@ describe('domains tests', () => {
       querySpy.mockResolvedValueOnce({ rows: [], command: '', fields: null, rowCount: 0, oid: 0 })
       const isDeleted: boolean = await domainsTable.delete(profileName)
       expect(isDeleted).toBe(false)
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
     DELETE 
     FROM domains 
@@ -168,8 +168,8 @@ describe('domains tests', () => {
       querySpy.mockResolvedValueOnce({ rows: [], command: '', fields: null, rowCount: 1, oid: 0 })
       const isDeleted: boolean = await domainsTable.delete(profileName)
       expect(isDeleted).toBe(true)
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
     DELETE 
     FROM domains 
@@ -184,8 +184,8 @@ describe('domains tests', () => {
       querySpy.mockResolvedValueOnce({ rows: [{ amtDomain }], command: '', fields: null, rowCount: 1, oid: 0 })
       getByName.mockResolvedValueOnce(amtDomain)
       const result = await domainsTable.insert(amtDomain)
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
       INSERT INTO domains(name, domain_suffix, provisioning_cert, provisioning_cert_storage_format, provisioning_cert_key, expiration_date, tenant_id)
       values($1, $2, $3, $4, $5, $6, $7)`,
@@ -199,7 +199,7 @@ describe('domains tests', () => {
           amtDomain.tenantId
         ]
       )
-      expect(getByName).toBeCalledTimes(1)
+      expect(getByName).toHaveBeenCalledTimes(1)
       expect(result).toBe(amtDomain)
     })
 
@@ -208,8 +208,8 @@ describe('domains tests', () => {
       querySpy.mockResolvedValueOnce({ rows: [{ amtDomain }], command: '', fields: null, rowCount: 0, oid: 0 })
       getByName.mockResolvedValueOnce(amtDomain)
       const result = await domainsTable.insert(amtDomain)
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
       INSERT INTO domains(name, domain_suffix, provisioning_cert, provisioning_cert_storage_format, provisioning_cert_key, expiration_date, tenant_id)
       values($1, $2, $3, $4, $5, $6, $7)`,
@@ -223,7 +223,7 @@ describe('domains tests', () => {
           amtDomain.tenantId
         ]
       )
-      expect(getByName).toBeCalledTimes(0)
+      expect(getByName).toHaveBeenCalledTimes(0)
       expect(result).toBe(null)
     })
 
@@ -244,8 +244,8 @@ describe('domains tests', () => {
       querySpy.mockResolvedValueOnce({ rows: [{ amtDomain }], command: '', fields: null, rowCount: 1, oid: 0 })
       getByName.mockResolvedValueOnce(amtDomain)
       const result = await domainsTable.update(amtDomain)
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
       UPDATE domains 
       SET domain_suffix=$2, provisioning_cert=$3, provisioning_cert_storage_format=$4, provisioning_cert_key=$5, expiration_date=$6 
@@ -261,7 +261,7 @@ describe('domains tests', () => {
           amtDomain.version
         ]
       )
-      expect(getByName).toBeCalledTimes(1)
+      expect(getByName).toHaveBeenCalledTimes(1)
       expect(result).toBe(amtDomain)
     })
     test('should NOT update when duplicate name', async () => {

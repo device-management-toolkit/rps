@@ -9,7 +9,7 @@ import { type DoneResponse, StatusFailed, StatusSuccess } from './doneResponse.j
 import { config, setupTestClient } from '../../test/helper/Config.js'
 import { runTilDone } from '../../test/helper/xstate.js'
 import { Environment } from '../../utils/Environment.js'
-import { type SpyInstance, spyOn } from 'jest-mock'
+import { spyOn } from 'jest-mock'
 import { jest } from '@jest/globals'
 import { type MachineImplementationsSimplified, fromPromise } from 'xstate'
 import got from 'got'
@@ -28,7 +28,7 @@ jest.unstable_mockModule('../common.js', () => ({
 }))
 
 const { SyncHostName, SyncHostNameEventType } = await import('./syncHostName.js')
-let gotSpy: SpyInstance<any>
+let gotSpy: jest.Spied<any>
 
 jest.mock('got')
 

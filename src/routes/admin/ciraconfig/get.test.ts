@@ -6,12 +6,12 @@
 import { createSpyObj } from '../../../test/helper/jest.js'
 import { getCiraConfig } from './get.js'
 import { jest } from '@jest/globals'
-import { type SpyInstance, spyOn } from 'jest-mock'
+import { spyOn } from 'jest-mock'
 
 describe('CIRA Config - Get', () => {
   let resSpy
   let req
-  let getByNameSpy: SpyInstance<any>
+  let getByNameSpy: jest.Spied<any>
 
   beforeEach(() => {
     resSpy = createSpyObj('Response', [

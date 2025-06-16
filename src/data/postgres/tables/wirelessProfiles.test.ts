@@ -17,12 +17,12 @@ import {
 import { WirelessProfilesTable } from './wirelessProfiles.js'
 import { RPSError } from '../../../utils/RPSError.js'
 import { jest } from '@jest/globals'
-import { type SpyInstance, spyOn } from 'jest-mock'
+import { spyOn } from 'jest-mock'
 
 describe('wireless profiles tests', () => {
   let db: PostgresDb
   let wirelessProfilesTable: WirelessProfilesTable
-  let querySpy: SpyInstance<any>
+  let querySpy: jest.Spied<any>
   let wirelessConfig: WirelessConfig
   const profileName = 'profileName'
   beforeEach(() => {
@@ -90,8 +90,8 @@ describe('wireless profiles tests', () => {
       querySpy.mockResolvedValueOnce({ rows: [{}], rowCount: 1 })
       const result = await wirelessProfilesTable.get()
       expect(result).toStrictEqual([{}])
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
     SELECT 
       wireless_profile_name as "profileName", 
@@ -121,8 +121,8 @@ describe('wireless profiles tests', () => {
       querySpy.mockResolvedValueOnce({ rows: [{}], rowCount: rows.length })
       const result = await wirelessProfilesTable.getByName(profileName)
       expect(result).toStrictEqual(rows[0])
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
     SELECT 
       wireless_profile_name as "profileName", 
@@ -148,8 +148,8 @@ describe('wireless profiles tests', () => {
     test('should check profile exist', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 0 })
       const result = await wirelessProfilesTable.checkProfileExits(profileName)
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
     SELECT 1
     FROM wirelessconfigs 
@@ -165,7 +165,7 @@ describe('wireless profiles tests', () => {
       querySpy.mockImplementation(() => ({ rows: [], rowCount: count++ }))
       const result = await wirelessProfilesTable.delete(profileName)
       expect(result).toBeTruthy()
-      expect(querySpy).toBeCalledTimes(2)
+      expect(querySpy).toHaveBeenCalledTimes(2)
       expect(querySpy).toHaveBeenNthCalledWith(
         1,
         `
@@ -188,8 +188,8 @@ describe('wireless profiles tests', () => {
       await expect(wirelessProfilesTable.delete(profileName)).rejects.toThrow(
         NETWORK_CONFIG_DELETION_FAILED_CONSTRAINT('Wireless', profileName)
       )
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
     SELECT 1
     FROM profiles_wirelessconfigs
@@ -233,8 +233,8 @@ describe('wireless profiles tests', () => {
 
       expect(result).toBe(wirelessConfig)
       expect(getByNameSpy).toHaveBeenCalledWith(wirelessConfig.profileName, wirelessConfig.tenantId)
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
         INSERT INTO wirelessconfigs
         (wireless_profile_name, authentication_method, encryption_method, ssid, psk_value, psk_passphrase, link_policy, creation_date, tenant_id, ieee8021x_profile_name)
@@ -283,8 +283,8 @@ describe('wireless profiles tests', () => {
       const result = await wirelessProfilesTable.update(wirelessConfig)
       expect(result).toBe(wirelessConfig)
       expect(getByNameSpy).toHaveBeenCalledWith(wirelessConfig.profileName, wirelessConfig.tenantId)
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
       UPDATE wirelessconfigs 
       SET authentication_method=$2, encryption_method=$3, ssid=$4, psk_value=$5, psk_passphrase=$6, link_policy=$7, ieee8021x_profile_name=$9 
@@ -330,8 +330,8 @@ describe('wireless profiles tests', () => {
       getByNameSpy.mockResolvedValue(wirelessConfig)
       await expect(wirelessProfilesTable.update(wirelessConfig)).rejects.toThrow(CONCURRENCY_MESSAGE)
       expect(getByNameSpy).toHaveBeenCalledWith(wirelessConfig.profileName, wirelessConfig.tenantId)
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
       UPDATE wirelessconfigs 
       SET authentication_method=$2, encryption_method=$3, ssid=$4, psk_value=$5, psk_passphrase=$6, link_policy=$7, ieee8021x_profile_name=$9 
