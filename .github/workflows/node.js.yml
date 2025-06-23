@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 # v2.12.0
+        uses: step-security/harden-runner@002fdce3c6a235733a90a27c80493a3241e56863 # v2.12.1
         with:
           egress-policy: audit
 
@@ -37,7 +37,7 @@ jobs:
       - run: npm run compile --if-present
       - run: npm test
       - name: Test Report
-        uses: dorny/test-reporter@6e6a65b7a0bd2c9197df7d0ae36ac5cee784230c # v1
+        uses: dorny/test-reporter@890a17cecf52a379fc869ab770a71657660be727 # v1
         if: success() || failure() # run this step even if previous step failed
         continue-on-error: true
         with:
@@ -45,7 +45,7 @@ jobs:
           path: junit.xml # Path to test results
           reporter: jest-junit # Format of test results
           fail-on-error: 'false'
-      - uses: codecov/codecov-action@ad3126e916f78f00edff4ed0317cf185271ccc2d # v5.4.2
+      - uses: codecov/codecov-action@18283e04ce6e62d37312384ff67231eb8fd56d24 # v5.4.3
         name: Upload Coverage Results
         if: ${{ matrix.node-version == '20.x' }}
       - run: mv junit.xml rps-unit-${{ matrix.node-version }}.xml

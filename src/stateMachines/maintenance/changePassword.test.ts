@@ -5,7 +5,7 @@
 
 import { isDigestRealmValid, HttpResponseError, coalesceMessage } from '../common.js'
 
-import { type AMT, type Common } from '@open-amt-cloud-toolkit/wsman-messages'
+import { type AMT, type Common } from '@device-management-toolkit/wsman-messages'
 import { SecretManagerCreatorFactory } from '../../factories/SecretManagerCreatorFactory.js'
 import { type DeviceCredentials, type ISecretManagerService } from '../../interfaces/ISecretManagerService.js'
 import { type DoneResponse, StatusFailed, StatusSuccess } from './doneResponse.js'

@@ -11,7 +11,7 @@ import {
   HttpResponseError,
   invokeWsmanCall
 } from '../common.js'
-import { AMT, type Common } from '@open-amt-cloud-toolkit/wsman-messages'
+import { AMT, type Common } from '@device-management-toolkit/wsman-messages'
 import { PasswordHelper } from '../../utils/PasswordHelper.js'
 import { SignatureHelper } from '../../utils/SignatureHelper.js'
 import { AMTUserName } from '../../utils/constants.js'

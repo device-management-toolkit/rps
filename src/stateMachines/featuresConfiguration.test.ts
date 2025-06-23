@@ -19,7 +19,7 @@ import { randomUUID } from 'node:crypto'
 import { devices } from '../devices.js'
 import { HttpHandler } from '../HttpHandler.js'
 import { type MachineImplementationsSimplified, createActor, fromPromise } from 'xstate'
-import { AMT, CIM, IPS } from '@open-amt-cloud-toolkit/wsman-messages'
+import { AMT, CIM, IPS } from '@device-management-toolkit/wsman-messages'
 import { jest } from '@jest/globals'
 
 const invokeWsmanCallSpy = jest.fn<any>()

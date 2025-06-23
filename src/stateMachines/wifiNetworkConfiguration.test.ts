@@ -15,7 +15,7 @@ import {
 } from './wifiNetworkConfiguration.js'
 import { type MachineImplementationsSimplified, createActor, fromPromise } from 'xstate'
 import { HttpHandler } from '../HttpHandler.js'
-import { AMT, CIM } from '@open-amt-cloud-toolkit/wsman-messages'
+import { AMT, CIM } from '@device-management-toolkit/wsman-messages'
 import { jest } from '@jest/globals'
 import { spyOn } from 'jest-mock'
 import { HttpResponseError, coalesceMessage, isDigestRealmValid } from './common.js'

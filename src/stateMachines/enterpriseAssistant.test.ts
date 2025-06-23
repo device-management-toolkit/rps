@@ -5,7 +5,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { HttpHandler } from '../HttpHandler.js'
-import { AMT, IPS } from '@open-amt-cloud-toolkit/wsman-messages'
+import { AMT, IPS } from '@device-management-toolkit/wsman-messages'
 import { devices } from '../devices.js'
 import { jest } from '@jest/globals'
 

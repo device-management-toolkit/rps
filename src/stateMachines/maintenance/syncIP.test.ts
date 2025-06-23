@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { type AMT } from '@open-amt-cloud-toolkit/wsman-messages'
+import { type AMT } from '@device-management-toolkit/wsman-messages'
 import { type DoneResponse, StatusFailed, StatusSuccess } from './doneResponse.js'
 import { runTilDone } from '../../test/helper/xstate.js'
 import { type MachineImplementationsSimplified } from 'xstate'
