@@ -14,6 +14,7 @@
   "delay_timer": 12,
   "mqtt_address": "",
   "disable_cira_domain_name": "",
+  "enterprise_assistant_url": "http://localhost:8000",
   "consul_enabled": false,
   "consul_host": "localhost",
   "consul_port": "8500",
