@@ -57,6 +57,41 @@ For detailed documentation about RPS, see the [docs](https://device-management-t
 
 <br>
 
+## Configuration
+
+### PostgreSQL SSL/TLS Support
+
+RPS supports secure connections to PostgreSQL databases using SSL/TLS certificates. To enable SSL support, configure the following environment variables or `.rpsrc` settings:
+
+- `postgres_ssl_ca`: Path to the SSL Certificate Authority (CA) certificate file
+- `postgres_ssl_cert`: Path to the SSL client certificate file  
+- `postgres_ssl_key`: Path to the SSL client private key file
+- `postgres_ssl_reject_unauthorized`: Whether to reject connections with invalid certificates (default: `true`)
+
+**Example configuration:**
+
+```json
+{
+  "connection_string": "postgresql://username:password@localhost:5432/rpsdb",
+  "postgres_ssl_ca": "/path/to/ca-certificate.crt",
+  "postgres_ssl_cert": "/path/to/client-certificate.crt", 
+  "postgres_ssl_key": "/path/to/client-key.key",
+  "postgres_ssl_reject_unauthorized": true
+}
+```
+
+**Environment variable format:**
+```bash
+RPS_POSTGRES_SSL_CA=/path/to/ca-certificate.crt
+RPS_POSTGRES_SSL_CERT=/path/to/client-certificate.crt
+RPS_POSTGRES_SSL_KEY=/path/to/client-key.key
+RPS_POSTGRES_SSL_REJECT_UNAUTHORIZED=true
+```
+
+If no SSL certificate paths are provided, RPS will use a standard non-SSL PostgreSQL connection.
+
+<br>
+
 ## Deploy with Docker and Run API Tests
 
 We leverage [Postman](https://www.postman.com/) and Docker for executing RESTful API tests. Once you have Postman and Docker installed, you can follow the steps below:
