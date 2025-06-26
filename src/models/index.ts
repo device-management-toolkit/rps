@@ -102,6 +102,7 @@ export interface RPSConfig {
   delay_tls_put_data_sync: number
   mqtt_address?: string
   disable_cira_domain_name?: string
+  enterprise_assistant_url?: string
   jwt_token_header: string
   jwt_tenant_property: string
 }
@@ -273,4 +274,84 @@ export interface OpenAMTEvent {
   methods: string[]
   guid?: string
   timestamp: number
+}
+
+// Export-specific interfaces for profile export functionality
+export interface ExportWifiConfig {
+  profileName: string
+  ssid: string
+  priority: number
+  authenticationMethod: number
+  encryptionMethod: number
+  pskPassphrase: string
+  ieee8021xProfileName: string
+}
+
+export interface ExportConfiguration {
+  id: number
+  name: string
+  configuration: {
+    generalSettings: {
+      sharedFQDN: boolean
+      networkInterfaceEnabled: number
+      pingResponseEnabled: boolean
+    }
+    network: {
+      wired: {
+        dhcpEnabled: boolean
+        ipSyncEnabled: boolean
+        sharedStaticIP: boolean
+        ipAddress: string
+        subnetMask: string
+        defaultGateway: string
+        primaryDNS: string
+        secondaryDNS: string
+        authentication: string
+        ieee8021x: Ieee8021xConfig | null
+      }
+      wireless: {
+        wifiSyncEnabled: boolean
+        profiles: ExportWifiConfig[]
+      }
+    }
+    tls: {
+      mutualAuthentication: boolean
+      enabled: boolean
+      trustedCN: string[]
+      allowNonTLS: boolean
+    }
+    redirection: {
+      enabled: boolean
+      services: {
+        kvm: boolean
+        sol: boolean
+        ider: boolean
+      }
+      userConsent: string
+    }
+    userAccounts: {
+      userAccounts: any[]
+    }
+    enterpriseAssistant: {
+      url: string
+      username: string
+      password: string
+    }
+    amtSpecific: {
+      controlMode: string
+      adminPassword: string
+      provisioningCert: string
+      provisioningCertPwd: string
+      mebxPassword: string
+    }
+    bmcSpecific: {
+      adminPassword: string
+    }
+    dashSpecific: {
+      adminPassword: string
+    }
+    redfishSpecific: {
+      adminPassword: string
+    }
+  }
 }
