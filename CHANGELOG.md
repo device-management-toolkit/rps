@@ -1,3 +1,11 @@
+# [2.26.0](https://github.com/device-management-toolkit/rps/compare/v2.25.1...v2.26.0) (2025-06-30)
+
+
+### Features
+
+* **api:** add export endpoint for local ([a0be4c5](https://github.com/device-management-toolkit/rps/commit/a0be4c5082972bfc3467e18253496a705e69ca7e))
+* enable export endpoint ([7615649](https://github.com/device-management-toolkit/rps/commit/7615649afb49ade581794a23012391e172a49a86))
+
 ## [2.25.1](https://github.com/device-management-toolkit/rps/compare/v2.25.0...v2.25.1) (2025-06-05)
 
 
