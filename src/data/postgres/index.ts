@@ -14,6 +14,8 @@ import { WirelessProfilesTable } from './tables/wirelessProfiles.js'
 import { IEEE8021xProfilesTable } from './tables/ieee8021xProfiles.js'
 import { readFileSync } from 'fs'
 import { Environment } from '../../utils/Environment.js'
+import { ProxiesProfilesTable } from './tables/proxiesProfiles.js'
+import { ProfilesProxiesConfigsTable } from './tables/profileProxyConfigs.js'
 
 export default class Db implements IDB {
   pool: InstanceType<typeof Pool>
@@ -23,6 +25,8 @@ export default class Db implements IDB {
   wirelessProfiles: WirelessProfilesTable
   profileWirelessConfigs: ProfilesWifiConfigsTable
   ieee8021xProfiles: IEEE8021xProfilesTable
+  proxiesProfiles: ProxiesProfilesTable
+  profileProxiesConfigs: ProfilesProxiesConfigsTable
 
   log: Logger = new Logger('PostgresDb')
 
@@ -79,6 +83,8 @@ export default class Db implements IDB {
     this.wirelessProfiles = new WirelessProfilesTable(this)
     this.profileWirelessConfigs = new ProfilesWifiConfigsTable(this)
     this.ieee8021xProfiles = new IEEE8021xProfilesTable(this)
+    this.proxiesProfiles = new ProxiesProfilesTable(this)
+    this.profileProxiesConfigs = new ProfilesProxiesConfigsTable(this)
   }
 
   async query<T extends QueryResultRow>(text: string, params?: any): Promise<QueryResult<T>> {
