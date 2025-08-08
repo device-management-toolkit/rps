@@ -53,7 +53,7 @@ export const API_UNEXPECTED_EXCEPTION = (message: string): string => `Operation 
 export const CONCURRENCY_EXCEPTION = 'Concurrency'
 export const CONCURRENCY_MESSAGE = 'No records were updated'
 export const NOT_FOUND_EXCEPTION = 'Not Found'
-export const NOT_FOUND_MESSAGE = (type: 'Domain' | 'Wireless' | '802.1x' | 'CIRA' | 'AMT', name: string): string =>
+export const NOT_FOUND_MESSAGE = (type: 'Domain' | 'Wireless' | '802.1x' | 'CIRA' | 'AMT' | 'Proxies', name: string): string =>
   `${type} profile ${name} Not Found`
 // JSON response
 export const API_RESPONSE = (data?: any, error?: string | null, message?: string): apiResponse => {
