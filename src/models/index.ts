@@ -9,7 +9,8 @@ import {
   type CIRAConfig,
   type ProfileWifiConfigs,
   type TlsMode,
-  type TlsSigningAuthority
+  type TlsSigningAuthority,
+  type ProfileProxyConfigs
 } from './RCS.Config.js'
 
 // guid: string, name: string, mpsuser: string, mpspass: string, amtuser: string, amtpassword: string, mebxpass: string) {
@@ -155,6 +156,7 @@ export class AMTConfiguration {
   ipSyncEnabled?: boolean
   localWifiSyncEnabled?: boolean
   wifiConfigs?: ProfileWifiConfigs[] | null
+  proxyConfigs?: ProfileProxyConfigs[] | null
   tenantId: string
   tlsMode?: TlsMode
   tlsCerts?: TLSCerts
