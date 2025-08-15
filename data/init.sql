@@ -99,24 +99,24 @@ CREATE TABLE IF NOT EXISTS domains(
   CONSTRAINT domainsuffix UNIQUE (domain_suffix, tenant_id),
   PRIMARY KEY (name, domain_suffix, tenant_id)
 );
-CREATE TABLE IF NOT EXISTS proxiesconfigs(
-  proxy_profile_name citext NOT NULL,
+CREATE TABLE IF NOT EXISTS proxyconfigs(
+  proxy_config_name citext NOT NULL,
   access_info varchar(256),
   info_format integer,
   port integer,
   network_dns_suffix varchar(192),
   creation_date timestamp,
   tenant_id varchar(36) NOT NULL,
-  PRIMARY KEY (proxy_profile_name, tenant_id)
+  PRIMARY KEY (proxy_config_name, tenant_id)
 );
-CREATE TABLE IF NOT EXISTS profiles_proxiesconfigs(
-  proxy_profile_name citext,
+CREATE TABLE IF NOT EXISTS profiles_proxyconfigs(
+  proxy_config_name citext,
   profile_name citext,
-  FOREIGN KEY (proxy_profile_name,tenant_id)  REFERENCES proxiesconfigs(proxy_profile_name,tenant_id),
+  FOREIGN KEY (proxy_config_name,tenant_id)  REFERENCES proxyconfigs(proxy_config_name,tenant_id),
   FOREIGN KEY (profile_name,tenant_id)  REFERENCES profiles(profile_name,tenant_id),
   priority integer,
   creation_date timestamp,
   created_by varchar(40),
   tenant_id varchar(36) NOT NULL,
-  PRIMARY KEY (proxy_profile_name, profile_name, priority, tenant_id)
+  PRIMARY KEY (proxy_config_name, profile_name, priority, tenant_id)
 );

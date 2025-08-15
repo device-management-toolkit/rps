@@ -17,18 +17,18 @@ export async function allProxyProfiles(req: Request, res: Response): Promise<voi
   const skip = Number(req.query.$skip)
   const includeCount = req.query.$count
   try {
-    const proxiesConfigs: ProxyConfig[] = await req.db.proxiesProfiles.get(top, skip, req.tenantId)
+    const proxyConfigs: ProxyConfig[] = await req.db.proxyConfigs.get(top, skip, req.tenantId)
     if (includeCount == null || includeCount === 'false') {
-      res.status(200).json(API_RESPONSE(proxiesConfigs)).end()
+      res.status(200).json(API_RESPONSE(proxyConfigs)).end()
     } else {
-      const count: number = await req.db.proxiesProfiles.getCount(req.tenantId)
+      const count: number = await req.db.proxyConfigs.getCount(req.tenantId)
       const dataWithCount: DataWithCount = {
-        data: proxiesConfigs,
+        data: proxyConfigs,
         totalCount: count
       }
       res.status(200).json(API_RESPONSE(dataWithCount)).end()
     }
-    MqttProvider.publishEvent('success', ['allProxiesProfiles'], 'Sent proxies profiles')
+    MqttProvider.publishEvent('success', ['allProxyConfigs'], 'Sent proxy configs')
   } catch (error) {
     handleError(log, '', req, res, error)
   }

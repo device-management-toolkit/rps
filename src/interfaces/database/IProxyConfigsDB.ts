@@ -6,6 +6,6 @@
 import { type ProxyConfig } from '../../models/RCS.Config.js'
 import { type ITable } from './ITable.js'
 
-export interface IProxiesProfilesTable extends ITable<ProxyConfig> {
+export interface IProxyConfigsTable extends ITable<ProxyConfig> {
   checkProfileExits: (configName: string, tenantId?: string) => Promise<boolean>
 }

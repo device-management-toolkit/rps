@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { type IProfilesProxiesConfigsTable } from '../../../interfaces/database/IProfileProxyConfigsDb.js'
+import { type IProfileProxyConfigsTable } from '../../../interfaces/database/IProfileProxyConfigsDb.js'
 import { type ProfileProxyConfigs } from '../../../models/RCS.Config.js'
 import { API_UNEXPECTED_EXCEPTION } from '../../../utils/constants.js'
 import { RPSError } from '../../../utils/RPSError.js'
@@ -11,7 +11,7 @@ import format from 'pg-format'
 import type PostgresDb from '../index.js'
 import { PostgresErr } from '../errors.js'
 
-export class ProfilesProxiesConfigsTable implements IProfilesProxiesConfigsTable {
+export class ProfileProxyConfigsTable implements IProfileProxyConfigsTable {
   db: PostgresDb
   constructor(db: PostgresDb) {
     this.db = db
@@ -27,8 +27,8 @@ export class ProfilesProxiesConfigsTable implements IProfilesProxiesConfigsTable
       `
     SELECT 
       priority as "priority",
-      proxy_profile_name as "profileName"
-    FROM profiles_proxiesconfigs
+      proxy_config_name as "profileName"
+    FROM profiles_proxyconfigs
     WHERE profile_name = $1 and tenant_id = $2
     ORDER BY priority`,
       [profileName, tenantId]
@@ -62,7 +62,7 @@ export class ProfilesProxiesConfigsTable implements IProfilesProxiesConfigsTable
         format(
           `
       INSERT INTO
-      profiles_proxiesconfigs (proxy_profile_name, profile_name, priority, tenant_id)
+      profiles_proxyconfigs (proxy_config_name, profile_name, priority, tenant_id)
       VALUES %L`,
           configs
         )
@@ -91,7 +91,7 @@ export class ProfilesProxiesConfigsTable implements IProfilesProxiesConfigsTable
     const deleteProfileWifiResults = await this.db.query(
       `
     DELETE
-    FROM profiles_proxiesconfigs
+    FROM profiles_proxyconfigs
     WHERE profile_name = $1 and tenant_id = $2`,
       [profileName, tenantId]
     )

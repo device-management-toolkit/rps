@@ -11,7 +11,7 @@ import version from './version/index.js'
 import wirelessconfigs from './wireless/index.js'
 import health from './health/index.js'
 import ieee8021x from './ieee8021x/index.js'
-import proxyconfigs from './proxies/index.js'
+import proxyconfigs from './proxy/index.js'
 
 const adminRouter: Router = Router()
 

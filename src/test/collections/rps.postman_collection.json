@@ -12694,7 +12694,7 @@
       ]
     },
     {
-      "name": "Proxies",
+      "name": "Proxy",
       "item": [
         {
           "name": "Create Proxy with empty access info",

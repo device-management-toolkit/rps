@@ -11,7 +11,7 @@ const ipv6 =
   '^((?:[0-9A-Fa-f]{1,4}))((?::[0-9A-Fa-f]{1,4}))*::((?:[0-9A-Fa-f]{1,4}))((?::[0-9A-Fa-f]{1,4}))*|((?:[0-9A-Fa-f]{1,4}))((?::[0-9A-Fa-f]{1,4})){7}$'
 const fqdn = '^(?=.{1,254}$)((?=[a-z0-9-]{1,63}\\.)(xn--+)?[a-z0-9]+(-[a-z0-9]+)*\\.)+[a-z]{2,63}$'
 
-export const proxiesValidator = (): any => [
+export const proxyValidator = (): any => [
   check('proxyName')
     .not()
     .isEmpty()
