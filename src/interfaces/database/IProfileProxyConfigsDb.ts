@@ -5,7 +5,7 @@
 
 import { type ProfileProxyConfigs } from '../../models/RCS.Config.js'
 
-export interface IProfilesProxiesConfigsTable {
+export interface IProfileProxyConfigsTable {
   getProfileProxyConfigs: (profileName: string) => Promise<ProfileProxyConfigs[]>
   deleteProfileProxyConfigs: (profileName: string, tenantId: string) => Promise<boolean>
   createProfileProxyConfigs: (

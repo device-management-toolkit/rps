@@ -82,7 +82,13 @@ describe('profiles tests', () => {
     })
     test('should get count of 0 on empty rows array', async () => {
       const expected = 0
-      querySpy.mockResolvedValueOnce({ rows: [], command: '', fields: null, rowCount: expected, oid: 0 })
+      querySpy.mockResolvedValueOnce({
+        rows: [],
+        command: '',
+        fields: null,
+        rowCount: expected,
+        oid: 0
+      })
       const count: number = await profilesTable.getCount()
       expect(count).toBe(expected)
     })
@@ -125,10 +131,10 @@ describe('profiles tests', () => {
       COALESCE(json_agg(json_build_object('profileName',wc.wireless_profile_name, 'priority', wc.priority)) FILTER (WHERE wc.wireless_profile_name IS NOT NULL), '[]') AS "wifiConfigs",
       ip_sync_enabled as "ipSyncEnabled",
       local_wifi_sync_enabled as "localWifiSyncEnabled",
-      COALESCE(json_agg(json_build_object('profileName',pc.proxy_profile_name, 'priority', pc.priority)) FILTER (WHERE pc.proxy_profile_name IS NOT NULL), '[]') AS "proxyConfigs"
+      COALESCE(json_agg(json_build_object('profileName',pc.proxy_config_name, 'priority', pc.priority)) FILTER (WHERE pc.proxy_config_name IS NOT NULL), '[]') AS "proxyConfigs"
     FROM profiles p
     LEFT JOIN profiles_wirelessconfigs wc ON wc.profile_name = p.profile_name AND wc.tenant_id = p.tenant_id
-    LEFT JOIN profiles_proxiesconfigs pc ON pc.profile_name = p.profile_name AND pc.tenant_id = p.tenant_id
+    LEFT JOIN profiles_proxyconfigs pc ON pc.profile_name = p.profile_name AND pc.tenant_id = p.tenant_id
     WHERE p.tenant_id = $3
     GROUP BY
       p.profile_name,
@@ -185,10 +191,10 @@ describe('profiles tests', () => {
       COALESCE(json_agg(json_build_object('profileName',wc.wireless_profile_name, 'priority', wc.priority)) FILTER (WHERE wc.wireless_profile_name IS NOT NULL), '[]') AS "wifiConfigs",
       ip_sync_enabled as "ipSyncEnabled",
       local_wifi_sync_enabled as "localWifiSyncEnabled",
-      COALESCE(json_agg(json_build_object('profileName',pc.proxy_profile_name, 'priority', pc.priority)) FILTER (WHERE pc.proxy_profile_name IS NOT NULL), '[]') AS "proxyConfigs"
+      COALESCE(json_agg(json_build_object('profileName',pc.proxy_config_name, 'priority', pc.priority)) FILTER (WHERE pc.proxy_config_name IS NOT NULL), '[]') AS "proxyConfigs"
     FROM profiles p
     LEFT JOIN profiles_wirelessconfigs wc ON wc.profile_name = p.profile_name AND wc.tenant_id = p.tenant_id
-    LEFT JOIN profiles_proxiesconfigs pc ON pc.profile_name = p.profile_name AND pc.tenant_id = p.tenant_id
+    LEFT JOIN profiles_proxyconfigs pc ON pc.profile_name = p.profile_name AND pc.tenant_id = p.tenant_id
     WHERE p.profile_name = $1 and p.tenant_id = $2
     GROUP BY
       p.profile_name,
@@ -237,7 +243,7 @@ describe('profiles tests', () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 1 })
       const wirelessConfigSpy = spyOn(db.profileWirelessConfigs, 'deleteProfileWifiConfigs')
       wirelessConfigSpy.mockResolvedValue(true)
-      const profileProxyConfigsSpy = spyOn(db.profileProxiesConfigs, 'deleteProfileProxyConfigs')
+      const profileProxyConfigsSpy = spyOn(db.profileProxyConfigs, 'deleteProfileProxyConfigs')
       profileProxyConfigsSpy.mockResolvedValue(true)
       const result = await profilesTable.delete(profileName, tenantId)
       expect(result).toBeTruthy()
@@ -256,7 +262,7 @@ describe('profiles tests', () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 0 })
       const wirelessConfigSpy = spyOn(db.profileWirelessConfigs, 'deleteProfileWifiConfigs')
       wirelessConfigSpy.mockResolvedValue(false)
-      const profileProxyConfigsSpy = spyOn(db.profileProxiesConfigs, 'deleteProfileProxyConfigs')
+      const profileProxyConfigsSpy = spyOn(db.profileProxyConfigs, 'deleteProfileProxyConfigs')
       profileProxyConfigsSpy.mockResolvedValue(true)
       const result = await profilesTable.delete(profileName)
       expect(result).toBe(false)
@@ -265,7 +271,7 @@ describe('profiles tests', () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 0 })
       const wirelessConfigSpy = spyOn(db.profileWirelessConfigs, 'deleteProfileWifiConfigs')
       wirelessConfigSpy.mockResolvedValue(true)
-      const profileProxyConfigsSpy = spyOn(db.profileProxiesConfigs, 'deleteProfileProxyConfigs')
+      const profileProxyConfigsSpy = spyOn(db.profileProxyConfigs, 'deleteProfileProxyConfigs')
       profileProxyConfigsSpy.mockResolvedValue(false)
       const result = await profilesTable.delete(profileName)
       expect(result).toBe(false)
@@ -491,7 +497,10 @@ describe('profiles tests', () => {
     })
 
     test('should NOT update when constraint violation', async () => {
-      querySpy.mockRejectedValueOnce({ code: '23503', message: 'profiles_cira_config_name_fkey' })
+      querySpy.mockRejectedValueOnce({
+        code: '23503',
+        message: 'profiles_cira_config_name_fkey'
+      })
       await expect(profilesTable.update(amtConfig)).rejects.toThrow(
         PROFILE_INSERTION_CIRA_CONSTRAINT(amtConfig.ciraConfigName)
       )
@@ -509,7 +518,7 @@ describe('profiles tests', () => {
     test('should insert with proxy configs', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 1 })
 
-      const profileProxyConfigsSpy = spyOn(db.profileProxiesConfigs, 'createProfileProxyConfigs')
+      const profileProxyConfigsSpy = spyOn(db.profileProxyConfigs, 'createProfileProxyConfigs')
       profileProxyConfigsSpy.mockResolvedValue(true)
 
       const getByNameSpy = spyOn(profilesTable, 'getByName')
@@ -563,7 +572,7 @@ describe('profiles tests', () => {
     })
     test('should insert without proxy configs', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 1 })
-      const profileProxyConfigsSpy = spyOn(db.profileProxiesConfigs, 'createProfileProxyConfigs')
+      const profileProxyConfigsSpy = spyOn(db.profileProxyConfigs, 'createProfileProxyConfigs')
       profileProxyConfigsSpy.mockResolvedValue(true)
       const getByNameSpy = spyOn(profilesTable, 'getByName')
       getByNameSpy.mockResolvedValue(amtConfig)
@@ -613,7 +622,7 @@ describe('profiles tests', () => {
     })
     test('should update with proxy configs', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 1 })
-      const profileProxyConfigsSpy = spyOn(db.profileProxiesConfigs, 'createProfileProxyConfigs')
+      const profileProxyConfigsSpy = spyOn(db.profileProxyConfigs, 'createProfileProxyConfigs')
       profileProxyConfigsSpy.mockResolvedValue(true)
       const getByNameSpy = spyOn(profilesTable, 'getByName')
       amtConfig.proxyConfigs = [{} as any]

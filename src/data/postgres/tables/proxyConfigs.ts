@@ -4,7 +4,7 @@
  **********************************************************************/
 
 import { type ProxyConfig } from '../../../models/RCS.Config.js'
-import { type IProxiesProfilesTable } from '../../../interfaces/database/IProxiesProfilesDB.js'
+import { type IProxyConfigsTable } from '../../../interfaces/database/IProxyConfigsDB.js'
 import {
   API_UNEXPECTED_EXCEPTION,
   CONCURRENCY_EXCEPTION,
@@ -20,12 +20,12 @@ import Logger from '../../../Logger.js'
 import type PostgresDb from '../index.js'
 import { PostgresErr } from '../errors.js'
 
-export class ProxiesProfilesTable implements IProxiesProfilesTable {
+export class ProxyConfigsTable implements IProxyConfigsTable {
   db: PostgresDb
   log: Logger
   constructor(db: PostgresDb) {
     this.db = db
-    this.log = new Logger('ProxiesConfigDb')
+    this.log = new Logger('ProxyConfigsDb')
   }
 
   /**
@@ -36,7 +36,7 @@ export class ProxiesProfilesTable implements IProxiesProfilesTable {
     const result = await this.db.query<{ total_count: number }>(
       `
     SELECT count(*) OVER() AS total_count 
-    FROM proxiesconfigs 
+    FROM proxyconfigs 
     WHERE tenant_id = $1`,
       [tenantId]
     )
@@ -57,15 +57,15 @@ export class ProxiesProfilesTable implements IProxiesProfilesTable {
     const results = await this.db.query<ProxyConfig>(
       `
     SELECT 
-      proxy_profile_name as "proxyName",
+      proxy_config_name as "proxyName",
       access_info as "accessInfo",
       info_format as "infoFormat",
       port as "port",
       network_dns_suffix as "networkDnsSuffix",
       tenant_id as "tenantId"
-    FROM proxiesconfigs 
+    FROM proxyconfigs 
     WHERE tenant_id = $3
-    ORDER BY proxy_profile_name 
+    ORDER BY proxy_config_name 
     LIMIT $1 OFFSET $2`,
       [
         top,
@@ -85,14 +85,14 @@ export class ProxiesProfilesTable implements IProxiesProfilesTable {
     const results = await this.db.query<ProxyConfig>(
       `
     SELECT 
-      proxy_profile_name as "proxyName",
+      proxy_config_name as "proxyName",
       access_info as "accessInfo",
       info_format as "infoFormat",
       port as "port",
       network_dns_suffix as "networkDnsSuffix",
       tenant_id as "tenantId"
-    FROM proxiesconfigs 
-    WHERE proxy_profile_name = $1 and tenant_id = $2`,
+    FROM proxyconfigs 
+    WHERE proxy_config_name = $1 and tenant_id = $2`,
       [proxyName, tenantId]
     )
 
@@ -113,8 +113,8 @@ export class ProxiesProfilesTable implements IProxiesProfilesTable {
     const results = await this.db.query(
       `
     SELECT 1
-    FROM proxiesconfigs 
-    WHERE proxy_profile_name = $1 and tenant_id = $2`,
+    FROM proxyconfigs 
+    WHERE proxy_config_name = $1 and tenant_id = $2`,
       [proxyName, tenantId]
     )
 
@@ -135,8 +135,8 @@ export class ProxiesProfilesTable implements IProxiesProfilesTable {
     const profiles = await this.db.query(
       `
     SELECT 1
-    FROM profiles_proxiesconfigs
-    WHERE proxy_profile_name = $1 and tenant_id = $2`,
+    FROM profiles_proxyconfigs
+    WHERE proxy_config_name = $1 and tenant_id = $2`,
       [proxyName, tenantId]
     )
     if (profiles?.rowCount) {
@@ -148,8 +148,8 @@ export class ProxiesProfilesTable implements IProxiesProfilesTable {
       const results = await this.db.query(
         `
       DELETE
-      FROM proxiesconfigs
-      WHERE proxy_profile_name = $1 and tenant_id = $2`,
+      FROM proxyconfigs
+      WHERE proxy_config_name = $1 and tenant_id = $2`,
         [proxyName, tenantId]
       )
       if (results?.rowCount) {
@@ -175,8 +175,8 @@ export class ProxiesProfilesTable implements IProxiesProfilesTable {
       const date = new Date().toISOString().replace(/T/, ' ').replace(/\..+/, '')
       const results = await this.db.query(
         `
-        INSERT INTO proxiesconfigs
-        (proxy_profile_name, access_info, info_format, port, network_dns_suffix, creation_date, tenant_id)
+        INSERT INTO proxyconfigs
+        (proxy_config_name, access_info, info_format, port, network_dns_suffix, creation_date, tenant_id)
         values($1, $2, $3, $4, $5, $6, $7)`,
         [
           proxyConfig.proxyName,
@@ -217,9 +217,9 @@ export class ProxiesProfilesTable implements IProxiesProfilesTable {
     try {
       const results = await this.db.query(
         `
-      UPDATE proxiesconfigs 
+      UPDATE proxyconfigs 
       SET access_info=$2, info_format=$3, port=$4, network_dns_suffix=$5 
-      WHERE proxy_profile_name=$1 and tenant_id = $6`,
+      WHERE proxy_config_name=$1 and tenant_id = $6`,
         [
           proxyConfig.proxyName,
           proxyConfig.accessInfo,

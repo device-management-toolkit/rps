@@ -21,11 +21,11 @@ describe('Proxy - Create', () => {
       'send'
     ])
     req = {
-      db: { proxiesProfiles: { insert: jest.fn() } },
+      db: { proxyConfigs: { insert: jest.fn() } },
       body: {},
       query: {}
     }
-    insertSpy = spyOn(req.db.proxiesProfiles, 'insert').mockResolvedValue({})
+    insertSpy = spyOn(req.db.proxyConfigs, 'insert').mockResolvedValue({})
     resSpy.status.mockReturnThis()
     resSpy.json.mockReturnThis()
     resSpy.send.mockReturnThis()
@@ -36,7 +36,7 @@ describe('Proxy - Create', () => {
     expect(resSpy.status).toHaveBeenCalledWith(201)
   })
   it('should handle error', async () => {
-    spyOn(req.db.proxiesProfiles, 'insert').mockRejectedValue(null)
+    spyOn(req.db.proxyConfigs, 'insert').mockRejectedValue(null)
     await createProxyProfile(req, resSpy)
     expect(insertSpy).toHaveBeenCalledTimes(1)
     expect(resSpy.status).toHaveBeenCalledWith(500)

@@ -13,7 +13,7 @@ export async function createProxyProfile(req: Request, res: Response): Promise<v
   proxyConfig.tenantId = req.tenantId || ''
   const log = new Logger('createProxyProfile')
   try {
-    const results: ProxyConfig | null = await req.db.proxiesProfiles.insert(proxyConfig)
+    const results: ProxyConfig | null = await req.db.proxyConfigs.insert(proxyConfig)
     log.verbose(`Created proxy profile : ${proxyConfig.proxyName}`)
     MqttProvider.publishEvent('success', ['createProxyProfiles'], `Created proxy profile : ${proxyConfig.proxyName}`)
     res.status(201).json(results).end()
