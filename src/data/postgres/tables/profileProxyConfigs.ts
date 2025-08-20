@@ -27,7 +27,7 @@ export class ProfileProxyConfigsTable implements IProfileProxyConfigsTable {
       `
     SELECT 
       priority as "priority",
-      proxy_config_name as "profileName"
+      access_info as "configName"
     FROM profiles_proxyconfigs
     WHERE profile_name = $1 and tenant_id = $2
     ORDER BY priority`,
@@ -62,7 +62,7 @@ export class ProfileProxyConfigsTable implements IProfileProxyConfigsTable {
         format(
           `
       INSERT INTO
-      profiles_proxyconfigs (proxy_config_name, profile_name, priority, tenant_id)
+      profiles_proxyconfigs (access_info, profile_name, priority, tenant_id)
       VALUES %L`,
           configs
         )

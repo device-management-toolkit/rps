@@ -12,14 +12,6 @@ const ipv6 =
 const fqdn = '^(?=.{1,254}$)((?=[a-z0-9-]{1,63}\\.)(xn--+)?[a-z0-9]+(-[a-z0-9]+)*\\.)+[a-z]{2,63}$'
 
 export const proxyValidator = (): any => [
-  check('proxyName')
-    .not()
-    .isEmpty()
-    .withMessage('Proxy profile name is required')
-    .matches('^[a-zA-Z0-9]+$')
-    .withMessage('Proxy profile name should be alphanumeric')
-    .isLength({ max: 32 })
-    .withMessage('Proxy profile name maximum length is 32'),
   check('accessInfo')
     .not()
     .isEmpty()

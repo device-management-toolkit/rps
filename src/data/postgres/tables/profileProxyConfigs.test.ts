@@ -38,7 +38,7 @@ describe('profileproxyconfig tests', () => {
         `
     SELECT 
       priority as "priority",
-      proxy_config_name as "profileName"
+      access_info as "configName"
     FROM profiles_proxyconfigs
     WHERE profile_name = $1 and tenant_id = $2
     ORDER BY priority`,
@@ -82,7 +82,7 @@ describe('profileproxyconfig tests', () => {
       expect(querySpy).toBeCalledTimes(1)
       expect(querySpy).toBeCalledWith(`
       INSERT INTO
-      profiles_proxyconfigs (proxy_config_name, profile_name, priority, tenant_id)
+      profiles_proxyconfigs (access_info, profile_name, priority, tenant_id)
       VALUES ('proxyConfig', 'profileName', '1', '')`)
     })
     test('should NOT insert when no proxyconfigs', async () => {

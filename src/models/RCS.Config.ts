@@ -303,7 +303,6 @@ export interface connectionParams {
 }
 
 export interface ProxyConfig {
-  proxyName: string
   accessInfo: string // A string holding the IP address or FQDN of the server
   infoFormat: AMT.Types.MPServer.InfoFormat // An enumerated integer describing the format and interpretation of the AccessInfo property (IPv4 (3), IPv6 (4), FQDN (201))
   port: number

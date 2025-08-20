@@ -9159,7 +9159,6 @@
                       "});\r",
                       "pm.test(\"Creation should succeed\", function () {\r",
                       "    var jsonData = pm.response.json();\r",
-                      "    pm.expect(jsonData.proxyName).to.eql(\"http\");\r",
                       "    pm.expect(jsonData.accessInfo).to.eql(\"www.proxy-abc.com\");\r",
                       "    pm.expect(jsonData.infoFormat).to.eql(201);\r",
                       "    pm.expect(jsonData.port).to.eql(900);\r",
@@ -9189,7 +9188,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\r\n    \"proxyName\": \"http\",\r\n    \"accessInfo\": \"www.proxy-abc.com\",\r\n    \"infoFormat\": 201,\r\n    \"port\": 900,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
+                  "raw": "{\r\n    \"accessInfo\": \"www.proxy-abc.com\",\r\n    \"infoFormat\": 201,\r\n    \"port\": 900,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -9224,7 +9223,6 @@
                       "});\r",
                       "pm.test(\"Request should return proxy just created\", function () {\r",
                       "    var jsonData = pm.response.json();\r",
-                      "    pm.expect(jsonData.proxyName).to.eql(\"https\");\r",
                       "    pm.expect(jsonData.accessInfo).to.eql(\"www.proxy-abc.test.com\");\r",
                       "    pm.expect(jsonData.infoFormat).to.eql(201);\r",
                       "    pm.expect(jsonData.port).to.eql(800);\r",
@@ -9253,7 +9251,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\r\n    \"proxyName\": \"https\",\r\n    \"accessInfo\": \"www.proxy-abc.test.com\",\r\n    \"infoFormat\": 201,\r\n    \"port\": 800,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
+                  "raw": "{\r\n    \"accessInfo\": \"www.proxy-abc.test.com\",\r\n    \"infoFormat\": 201,\r\n    \"port\": 800,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -12722,7 +12720,7 @@
             "header": [],
             "body": {
               "mode": "raw",
-              "raw": "{\r\n    \"proxyName\": \"P1\",\r\n    \"accessInfo\": \"\",\r\n    \"infoFormat\": 3,\r\n    \"port\": 900,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
+              "raw": "{\r\n    \"accessInfo\": \"\",\r\n    \"infoFormat\": 3,\r\n    \"port\": 900,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -12772,7 +12770,7 @@
             "header": [],
             "body": {
               "mode": "raw",
-              "raw": "{\r\n    \"proxyName\": \"P1\",\r\n    \"accessInfo\": \"192.168.9.58\",\r\n    \"infoFormat\": 5,\r\n    \"port\": 900,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
+              "raw": "{\r\n    \"accessInfo\": \"192.168.9.58\",\r\n    \"infoFormat\": 5,\r\n    \"port\": 900,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -12822,7 +12820,7 @@
             "header": [],
             "body": {
               "mode": "raw",
-              "raw": "{\r\n    \"proxyName\": \"P1\",\r\n    \"accessInfo\": \"192.168.9.58\",\r\n    \"infoFormat\": 3,\r\n    \"port\": 65536,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
+              "raw": "{\r\n    \"accessInfo\": \"192.168.9.58\",\r\n    \"infoFormat\": 3,\r\n    \"port\": 65536,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -12872,7 +12870,7 @@
             "header": [],
             "body": {
               "mode": "raw",
-              "raw": "{\r\n    \"proxyName\": \"P1\",\r\n    \"accessInfo\": \"192.168.9.58\",\r\n    \"infoFormat\": 3,\r\n    \"port\": 900,\r\n    \"networkDnsSuffix\": \"-intel.com\"\r\n}",
+              "raw": "{\r\n    \"accessInfo\": \"192.168.9.58\",\r\n    \"infoFormat\": 3,\r\n    \"port\": 900,\r\n    \"networkDnsSuffix\": \"-intel.com\"\r\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -12908,7 +12906,6 @@
                   "});\r",
                   "pm.test(\"Request should return proxy just created\", function () {\r",
                   "    var jsonData = pm.response.json();\r",
-                  "    pm.expect(jsonData.proxyName).to.eql(\"P1\");\r",
                   "    pm.expect(jsonData.accessInfo).to.eql(\"www.vprodemo.com\");\r",
                   "    pm.expect(jsonData.infoFormat).to.eql(201);\r",
                   "    pm.expect(jsonData.port).to.eql(900);\r",
@@ -12925,7 +12922,7 @@
             "header": [],
             "body": {
               "mode": "raw",
-              "raw": "{\r\n    \"proxyName\": \"P1\",\r\n    \"accessInfo\": \"www.vprodemo.com\",\r\n    \"infoFormat\": 201,\r\n    \"port\": 900,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
+              "raw": "{\r\n    \"accessInfo\": \"www.vprodemo.com\",\r\n    \"infoFormat\": 201,\r\n    \"port\": 900,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -12988,7 +12985,7 @@
             "header": [],
             "body": {
               "mode": "raw",
-              "raw": "{\r\n    \"proxyName\": \"P1\",\r\n    \"accessInfo\": \"192.168.9.58\",\r\n    \"infoFormat\": 3,\r\n    \"port\": 900,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
+              "raw": "{\r\n    \"accessInfo\": \"192.168.9.58\",\r\n    \"infoFormat\": 3,\r\n    \"port\": 900,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
               "options": {
                 "raw": {
                   "language": "json"

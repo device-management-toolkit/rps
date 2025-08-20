@@ -14,10 +14,10 @@ export async function createProxyProfile(req: Request, res: Response): Promise<v
   const log = new Logger('createProxyProfile')
   try {
     const results: ProxyConfig | null = await req.db.proxyConfigs.insert(proxyConfig)
-    log.verbose(`Created proxy profile : ${proxyConfig.proxyName}`)
-    MqttProvider.publishEvent('success', ['createProxyProfiles'], `Created proxy profile : ${proxyConfig.proxyName}`)
+    log.verbose(`Created proxy config: ${proxyConfig.accessInfo}`)
+    MqttProvider.publishEvent('success', ['createProxyConfigs'], `Created proxy config: ${proxyConfig.accessInfo}`)
     res.status(201).json(results).end()
   } catch (error) {
-    handleError(log, 'proxyConfig.proxyName', req, res, error)
+    handleError(log, 'proxyConfig.accessInfo', req, res, error)
   }
 }

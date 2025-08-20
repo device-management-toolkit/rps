@@ -24,10 +24,9 @@ describe('proxy configs tests', () => {
   let proxyConfigsTable: ProxyConfigsTable
   let querySpy: SpyInstance<any>
   let proxyConfig: ProxyConfig
-  const profileName = 'profileName'
+  const accessInfo = 'profileName'
   beforeEach(() => {
     proxyConfig = {
-      proxyName: 'proxy profile',
       accessInfo: 'proxy.com',
       infoFormat: 201, // FQDN (201)
       port: 1000,
@@ -96,8 +95,7 @@ describe('proxy configs tests', () => {
       expect(querySpy).toBeCalledTimes(1)
       expect(querySpy).toBeCalledWith(
         `
-    SELECT 
-      proxy_config_name as "proxyName",
+    SELECT
       access_info as "accessInfo",
       info_format as "infoFormat",
       port as "port",
@@ -105,7 +103,7 @@ describe('proxy configs tests', () => {
       tenant_id as "tenantId"
     FROM proxyconfigs 
     WHERE tenant_id = $3
-    ORDER BY proxy_config_name 
+    ORDER BY access_info 
     LIMIT $1 OFFSET $2`,
         [
           DEFAULT_TOP,
@@ -117,38 +115,37 @@ describe('proxy configs tests', () => {
     test('should get by name', async () => {
       const rows = [{}]
       querySpy.mockResolvedValueOnce({ rows: [{}], rowCount: rows.length })
-      const result = await proxyConfigsTable.getByName(profileName)
+      const result = await proxyConfigsTable.getByName(accessInfo)
       expect(result).toStrictEqual(rows[0])
       expect(querySpy).toBeCalledTimes(1)
       expect(querySpy).toBeCalledWith(
         `
-    SELECT 
-      proxy_config_name as "proxyName",
+    SELECT
       access_info as "accessInfo",
       info_format as "infoFormat",
       port as "port",
       network_dns_suffix as "networkDnsSuffix",
       tenant_id as "tenantId"
     FROM proxyconfigs 
-    WHERE proxy_config_name = $1 and tenant_id = $2`,
-        [profileName, '']
+    WHERE access_info = $1 and tenant_id = $2`,
+        [accessInfo, '']
       )
     })
     test('should NOT get by name when no profiles exists', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 0 })
-      const result = await proxyConfigsTable.getByName(profileName)
+      const result = await proxyConfigsTable.getByName(accessInfo)
       expect(result).toBeNull()
     })
     test('should check profile exist', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 0 })
-      const result = await proxyConfigsTable.checkProfileExits(profileName)
+      const result = await proxyConfigsTable.checkProfileExits(accessInfo)
       expect(querySpy).toBeCalledTimes(1)
       expect(querySpy).toBeCalledWith(
         `
     SELECT 1
     FROM proxyconfigs 
-    WHERE proxy_config_name = $1 and tenant_id = $2`,
-        [profileName, '']
+    WHERE access_info = $1 and tenant_id = $2`,
+        [accessInfo, '']
       )
       expect(result).toBe(false)
     })
@@ -157,7 +154,7 @@ describe('proxy configs tests', () => {
     test('should delete', async () => {
       let count = 0
       querySpy.mockImplementation(() => ({ rows: [], rowCount: count++ }))
-      const result = await proxyConfigsTable.delete(profileName)
+      const result = await proxyConfigsTable.delete(accessInfo)
       expect(result).toBeTruthy()
       expect(querySpy).toBeCalledTimes(2)
       expect(querySpy).toHaveBeenNthCalledWith(
@@ -165,30 +162,30 @@ describe('proxy configs tests', () => {
         `
     SELECT 1
     FROM profiles_proxyconfigs
-    WHERE proxy_config_name = $1 and tenant_id = $2`,
-        [profileName, '']
+    WHERE access_info = $1 and tenant_id = $2`,
+        [accessInfo, '']
       )
       expect(querySpy).toHaveBeenNthCalledWith(
         2,
         `
       DELETE
       FROM proxyconfigs
-      WHERE proxy_config_name = $1 and tenant_id = $2`,
-        [profileName, '']
+      WHERE access_info = $1 and tenant_id = $2`,
+        [accessInfo, '']
       )
     })
     test('should NOT delete when relationship still exists to profile', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 1 })
-      await expect(proxyConfigsTable.delete(profileName)).rejects.toThrow(
-        NETWORK_CONFIG_DELETION_FAILED_CONSTRAINT('Proxy', profileName)
+      await expect(proxyConfigsTable.delete(accessInfo)).rejects.toThrow(
+        NETWORK_CONFIG_DELETION_FAILED_CONSTRAINT('Proxy', accessInfo)
       )
       expect(querySpy).toBeCalledTimes(1)
       expect(querySpy).toBeCalledWith(
         `
     SELECT 1
     FROM profiles_proxyconfigs
-    WHERE proxy_config_name = $1 and tenant_id = $2`,
-        [profileName, '']
+    WHERE access_info = $1 and tenant_id = $2`,
+        [accessInfo, '']
       )
     })
     test('should NOT delete when constraint violation', async () => {
@@ -201,8 +198,8 @@ describe('proxy configs tests', () => {
         ;(err as any).code = '23503'
         throw err
       })
-      await expect(proxyConfigsTable.delete(profileName)).rejects.toThrow(
-        NETWORK_CONFIG_DELETION_FAILED_CONSTRAINT('Proxy', profileName)
+      await expect(proxyConfigsTable.delete(accessInfo)).rejects.toThrow(
+        NETWORK_CONFIG_DELETION_FAILED_CONSTRAINT('Proxy', accessInfo)
       )
     })
     test('should NOT delete when unknown error', async () => {
@@ -213,8 +210,8 @@ describe('proxy configs tests', () => {
         }
         throw new Error('unknown')
       })
-      await expect(proxyConfigsTable.delete(profileName)).rejects.toThrow(
-        API_UNEXPECTED_EXCEPTION(`Delete proxy configuration : ${profileName}`)
+      await expect(proxyConfigsTable.delete(accessInfo)).rejects.toThrow(
+        API_UNEXPECTED_EXCEPTION(`Delete proxy configuration : ${accessInfo}`)
       )
     })
   })
@@ -226,15 +223,14 @@ describe('proxy configs tests', () => {
       const result = await proxyConfigsTable.insert(proxyConfig)
 
       expect(result).toBe(proxyConfig)
-      expect(getByNameSpy).toHaveBeenCalledWith(proxyConfig.proxyName, proxyConfig.tenantId)
+      expect(getByNameSpy).toHaveBeenCalledWith(proxyConfig.accessInfo, proxyConfig.tenantId)
       expect(querySpy).toBeCalledTimes(1)
       expect(querySpy).toBeCalledWith(
         `
         INSERT INTO proxyconfigs
-        (proxy_config_name, access_info, info_format, port, network_dns_suffix, creation_date, tenant_id)
-        values($1, $2, $3, $4, $5, $6, $7)`,
+        (access_info, info_format, port, network_dns_suffix, creation_date, tenant_id)
+        values($1, $2, $3, $4, $5, $6)`,
         [
-          proxyConfig.proxyName,
           proxyConfig.accessInfo,
           proxyConfig.infoFormat,
           proxyConfig.port,
@@ -256,13 +252,13 @@ describe('proxy configs tests', () => {
     test('should NOT insert when duplicate name', async () => {
       querySpy.mockRejectedValueOnce({ code: '23505' })
       await expect(proxyConfigsTable.insert(proxyConfig)).rejects.toThrow(
-        NETWORK_CONFIG_INSERTION_FAILED_DUPLICATE('Proxy', proxyConfig.proxyName)
+        NETWORK_CONFIG_INSERTION_FAILED_DUPLICATE('Proxy', proxyConfig.accessInfo)
       )
     })
     test('should NOT insert when unexpected exception', async () => {
       querySpy.mockRejectedValueOnce(new Error('unknown'))
       await expect(proxyConfigsTable.insert(proxyConfig)).rejects.toThrow(
-        NETWORK_CONFIG_ERROR('Proxy', proxyConfig.proxyName)
+        NETWORK_CONFIG_ERROR('Proxy', proxyConfig.accessInfo)
       )
     })
   })
@@ -273,15 +269,14 @@ describe('proxy configs tests', () => {
       getByNameSpy.mockResolvedValue(proxyConfig)
       const result = await proxyConfigsTable.update(proxyConfig)
       expect(result).toBe(proxyConfig)
-      expect(getByNameSpy).toHaveBeenCalledWith(proxyConfig.proxyName, proxyConfig.tenantId)
+      expect(getByNameSpy).toHaveBeenCalledWith(proxyConfig.accessInfo, proxyConfig.tenantId)
       expect(querySpy).toBeCalledTimes(1)
       expect(querySpy).toBeCalledWith(
         `
       UPDATE proxyconfigs 
-      SET access_info=$2, info_format=$3, port=$4, network_dns_suffix=$5 
-      WHERE proxy_config_name=$1 and tenant_id = $6`,
+      SET info_format=$2, port=$3, network_dns_suffix=$4
+      WHERE access_info=$1 and tenant_id = $5`,
         [
-          proxyConfig.proxyName,
           proxyConfig.accessInfo,
           proxyConfig.infoFormat,
           proxyConfig.port,
@@ -307,7 +302,7 @@ describe('proxy configs tests', () => {
       const getByNameSpy = spyOn(proxyConfigsTable, 'getByName')
       getByNameSpy.mockResolvedValue(proxyConfig)
       await expect(proxyConfigsTable.update(proxyConfig)).rejects.toThrow(
-        NETWORK_CONFIG_ERROR('Proxy', proxyConfig.proxyName)
+        NETWORK_CONFIG_ERROR('Proxy', proxyConfig.accessInfo)
       )
     })
 
@@ -316,15 +311,14 @@ describe('proxy configs tests', () => {
       const getByNameSpy = spyOn(proxyConfigsTable, 'getByName')
       getByNameSpy.mockResolvedValue(proxyConfig)
       await expect(proxyConfigsTable.update(proxyConfig)).rejects.toThrow(CONCURRENCY_MESSAGE)
-      expect(getByNameSpy).toHaveBeenCalledWith(proxyConfig.proxyName, proxyConfig.tenantId)
+      expect(getByNameSpy).toHaveBeenCalledWith(proxyConfig.accessInfo, proxyConfig.tenantId)
       expect(querySpy).toBeCalledTimes(1)
       expect(querySpy).toBeCalledWith(
         `
       UPDATE proxyconfigs 
-      SET access_info=$2, info_format=$3, port=$4, network_dns_suffix=$5 
-      WHERE proxy_config_name=$1 and tenant_id = $6`,
+      SET info_format=$2, port=$3, network_dns_suffix=$4
+      WHERE access_info=$1 and tenant_id = $5`,
         [
-          proxyConfig.proxyName,
           proxyConfig.accessInfo,
           proxyConfig.infoFormat,
           proxyConfig.port,
