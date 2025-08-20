@@ -169,7 +169,18 @@ export class WiFiConfiguration {
   putWifiPortConfigurationService = async ({ input }: { input: WiFiConfigContext }): Promise<any> => {
     const wifiPortConfigurationService: AMT.Models.WiFiPortConfigurationService =
       input.message.Envelope.Body.AMT_WiFiPortConfigurationService
-    wifiPortConfigurationService.localProfileSynchronizationEnabled = 3
+
+    if (input.amtProfile?.localWifiSyncEnabled === true) {
+      // 3 = Unrestricted synchronization
+      wifiPortConfigurationService.localProfileSynchronizationEnabled = 3
+    } else if (input.amtProfile?.localWifiSyncEnabled === false) {
+      // 0 = Local synchronization disabled
+      wifiPortConfigurationService.localProfileSynchronizationEnabled = 0
+    } else {
+      // Field not updated in DB (old profile), fallback to old default (3)
+      wifiPortConfigurationService.localProfileSynchronizationEnabled = 3
+    }
+
     input.xmlMessage = input.amt?.WiFiPortConfigurationService.Put(wifiPortConfigurationService)
     return await invokeWsmanCall(input, 2)
   }
