@@ -1,3 +1,10 @@
+## [2.27.1](https://github.com/device-management-toolkit/rps/compare/v2.27.0...v2.27.1) (2025-08-20)
+
+
+### Bug Fixes
+
+* apply localWifiSyncEnabled value from profile instead of defaulting ([#2287](https://github.com/device-management-toolkit/rps/issues/2287)) ([c63b3c0](https://github.com/device-management-toolkit/rps/commit/c63b3c0a41535774585b93b9207c94ea71dee09e))
+
 # [2.27.0](https://github.com/device-management-toolkit/rps/compare/v2.26.0...v2.27.0) (2025-06-30)
 
 
