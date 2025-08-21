@@ -15,9 +15,9 @@ describe('profileproxyconfig tests', () => {
   let profilesProxyConfigsTable: ProfileProxyConfigsTable
   let querySpy: SpyInstance<any>
   const proxyConfigs: ProfileProxyConfigs[] = [
-    { profileName: 'proxyConfig', priority: 1 } as any
+    { configName: 'proxyConfig', priority: 1 } as any
   ]
-  const profileName = 'profileName'
+  const configName = 'profileName'
   const tenantId = 'tenantId'
 
   beforeEach(() => {
@@ -31,7 +31,7 @@ describe('profileproxyconfig tests', () => {
   describe('Get', () => {
     test('should Get', async () => {
       querySpy.mockResolvedValueOnce({ rows: [{}], rowCount: 1 })
-      const result = await profilesProxyConfigsTable.getProfileProxyConfigs(profileName)
+      const result = await profilesProxyConfigsTable.getProfileProxyConfigs(configName)
       expect(result).toStrictEqual([{}])
       expect(querySpy).toBeCalledTimes(1)
       expect(querySpy).toBeCalledWith(
@@ -42,14 +42,14 @@ describe('profileproxyconfig tests', () => {
     FROM profiles_proxyconfigs
     WHERE profile_name = $1 and tenant_id = $2
     ORDER BY priority`,
-        [profileName, '']
+        [configName, '']
       )
     })
   })
   describe('Delete', () => {
     test('should Delete', async () => {
       querySpy.mockResolvedValueOnce({ rows: [{}], rowCount: 1 })
-      const result = await profilesProxyConfigsTable.deleteProfileProxyConfigs(profileName)
+      const result = await profilesProxyConfigsTable.deleteProfileProxyConfigs(configName)
       expect(result).toBe(true)
       expect(querySpy).toBeCalledTimes(1)
       expect(querySpy).toBeCalledWith(
@@ -57,12 +57,12 @@ describe('profileproxyconfig tests', () => {
     DELETE
     FROM profiles_proxyconfigs
     WHERE profile_name = $1 and tenant_id = $2`,
-        [profileName, '']
+        [configName, '']
       )
     })
     test('should Delete with tenandId', async () => {
       querySpy.mockResolvedValueOnce({ rows: [{}], rowCount: 1 })
-      const result = await profilesProxyConfigsTable.deleteProfileProxyConfigs(profileName, tenantId)
+      const result = await profilesProxyConfigsTable.deleteProfileProxyConfigs(configName, tenantId)
       expect(result).toBe(true)
       expect(querySpy).toBeCalledTimes(1)
       expect(querySpy).toBeCalledWith(
@@ -70,14 +70,14 @@ describe('profileproxyconfig tests', () => {
     DELETE
     FROM profiles_proxyconfigs
     WHERE profile_name = $1 and tenant_id = $2`,
-        [profileName, tenantId]
+        [configName, tenantId]
       )
     })
   })
   describe('Insert', () => {
     test('should Insert', async () => {
       querySpy.mockResolvedValueOnce({ rows: [{}], rowCount: 1 })
-      const result = await profilesProxyConfigsTable.createProfileProxyConfigs(proxyConfigs, profileName)
+      const result = await profilesProxyConfigsTable.createProfileProxyConfigs(proxyConfigs, configName)
       expect(result).toBe(true)
       expect(querySpy).toBeCalledTimes(1)
       expect(querySpy).toBeCalledWith(`
@@ -86,20 +86,20 @@ describe('profileproxyconfig tests', () => {
       VALUES ('proxyConfig', 'profileName', '1', '')`)
     })
     test('should NOT insert when no proxyconfigs', async () => {
-      await expect(profilesProxyConfigsTable.createProfileProxyConfigs([], profileName)).rejects.toThrow(
+      await expect(profilesProxyConfigsTable.createProfileProxyConfigs([], configName)).rejects.toThrow(
         'Operation failed: profileName'
       )
     })
     test('should NOT insert when constraint violation', async () => {
       querySpy.mockRejectedValueOnce({ code: '23503', detail: 'error' })
-      await expect(profilesProxyConfigsTable.createProfileProxyConfigs(proxyConfigs, profileName)).rejects.toThrow(
+      await expect(profilesProxyConfigsTable.createProfileProxyConfigs(proxyConfigs, configName)).rejects.toThrow(
         'error'
       )
     })
     test('should NOT insert when unknown error', async () => {
       querySpy.mockRejectedValueOnce('unknown')
-      await expect(profilesProxyConfigsTable.createProfileProxyConfigs(proxyConfigs, profileName)).rejects.toThrow(
-        API_UNEXPECTED_EXCEPTION(profileName)
+      await expect(profilesProxyConfigsTable.createProfileProxyConfigs(proxyConfigs, configName)).rejects.toThrow(
+        API_UNEXPECTED_EXCEPTION(configName)
       )
     })
   })

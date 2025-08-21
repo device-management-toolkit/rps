@@ -19,10 +19,10 @@ export class ProfileProxyConfigsTable implements IProfileProxyConfigsTable {
 
   /**
    * @description Get AMT Profile associated proxy configs
-   * @param {string} profileName
+   * @param {string} configName
    * @returns {ProfileProxyConfigs[]} Return an array of proxy configs
    */
-  async getProfileProxyConfigs(profileName: string, tenantId = ''): Promise<ProfileProxyConfigs[]> {
+  async getProfileProxyConfigs(configName: string, tenantId = ''): Promise<ProfileProxyConfigs[]> {
     const results = await this.db.query<ProfileProxyConfigs>(
       `
     SELECT 
@@ -31,7 +31,7 @@ export class ProfileProxyConfigsTable implements IProfileProxyConfigsTable {
     FROM profiles_proxyconfigs
     WHERE profile_name = $1 and tenant_id = $2
     ORDER BY priority`,
-      [profileName, tenantId]
+      [configName, tenantId]
     )
     return results.rows
   }
@@ -39,12 +39,12 @@ export class ProfileProxyConfigsTable implements IProfileProxyConfigsTable {
   /**
    * @description Insert proxy configs associated with AMT profile
    * @param {ProfileProxyConfigs[]} proxyConfigs
-   * @param {string} profileName
+   * @param {string} configName
    * @returns {ProfileProxyConfigs[]} Return an array of proxy configs
    */
   async createProfileProxyConfigs(
     proxyConfigs: ProfileProxyConfigs[],
-    profileName: string,
+    configName: string,
     tenantId = ''
   ): Promise<boolean> {
     try {
@@ -53,8 +53,8 @@ export class ProfileProxyConfigsTable implements IProfileProxyConfigsTable {
       }
       // Preparing data for inserting multiple rows
       const configs = proxyConfigs.map((config) => [
-        config.profileName,
-        profileName,
+        config.configName,
+        configName,
         config.priority,
         tenantId
       ])
@@ -77,23 +77,23 @@ export class ProfileProxyConfigsTable implements IProfileProxyConfigsTable {
       if (error.code === PostgresErr.C23_FOREIGN_KEY_VIOLATION) {
         throw new RPSError(error.detail, 'Foreign key constraint violation')
       }
-      throw new RPSError(API_UNEXPECTED_EXCEPTION(profileName))
+      throw new RPSError(API_UNEXPECTED_EXCEPTION(configName))
     }
     return false
   }
 
   /**
    * @description Delete proxy configs of an AMT Profile from DB by profile name
-   * @param {string} profileName
+   * @param {string} configName
    * @returns {boolean} Return true on successful deletion
    */
-  async deleteProfileProxyConfigs(profileName: string, tenantId = ''): Promise<boolean> {
+  async deleteProfileProxyConfigs(configName: string, tenantId = ''): Promise<boolean> {
     const deleteProfileWifiResults = await this.db.query(
       `
     DELETE
     FROM profiles_proxyconfigs
     WHERE profile_name = $1 and tenant_id = $2`,
-      [profileName, tenantId]
+      [configName, tenantId]
     )
 
     if (deleteProfileWifiResults?.rowCount) {

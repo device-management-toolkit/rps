@@ -312,6 +312,6 @@ export interface ProxyConfig {
 
 export interface ProfileProxyConfigs {
   priority: number
-  profileName: string
+  configName: string
   tenantId: string
 }

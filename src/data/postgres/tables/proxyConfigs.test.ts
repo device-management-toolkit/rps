@@ -24,7 +24,7 @@ describe('proxy configs tests', () => {
   let proxyConfigsTable: ProxyConfigsTable
   let querySpy: SpyInstance<any>
   let proxyConfig: ProxyConfig
-  const accessInfo = 'profileName'
+  const accessInfo = 'proxyName'
   beforeEach(() => {
     proxyConfig = {
       accessInfo: 'proxy.com',
