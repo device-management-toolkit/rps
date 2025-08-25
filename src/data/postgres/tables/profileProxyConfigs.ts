@@ -68,10 +68,8 @@ export class ProfileProxyConfigsTable implements IProfileProxyConfigsTable {
         )
       )
 
-      if (proxyProfilesQueryResults?.rowCount) {
-        if (proxyProfilesQueryResults.rowCount > 0) {
-          return true
-        }
+      if ((proxyProfilesQueryResults?.rowCount ?? 0) > 0) {
+        return true
       }
     } catch (error) {
       if (error.code === PostgresErr.C23_FOREIGN_KEY_VIOLATION) {
@@ -96,10 +94,8 @@ export class ProfileProxyConfigsTable implements IProfileProxyConfigsTable {
       [configName, tenantId]
     )
 
-    if (deleteProfileWifiResults?.rowCount) {
-      if (deleteProfileWifiResults.rowCount > 0) {
-        return true
-      }
+    if ((deleteProfileWifiResults?.rowCount ?? 0) > 0) {
+      return true
     }
 
     return false

@@ -270,14 +270,13 @@ export class ProfilesTable implements IProfilesTable {
         }
       }
 
-      if (amtConfig.proxyConfigs) {
-        if (amtConfig.proxyConfigs?.length > 0) {
-          await this.db.profileProxyConfigs.createProfileProxyConfigs(
-            amtConfig.proxyConfigs,
-            amtConfig.profileName,
-            amtConfig.tenantId
-          )
-        }
+      const proxyConfigs = amtConfig?.proxyConfigs ?? []
+      if (proxyConfigs.length > 0) {
+        await this.db.profileProxyConfigs.createProfileProxyConfigs(
+          proxyConfigs,
+          amtConfig.profileName,
+          amtConfig.tenantId
+        )
       }
 
       return await this.getByName(amtConfig.profileName, amtConfig.tenantId)
@@ -348,9 +347,10 @@ export class ProfilesTable implements IProfilesTable {
             amtConfig.tenantId
           )
         }
-        if (amtConfig.proxyConfigs && amtConfig.proxyConfigs?.length > 0) {
+        const proxyConfigs = amtConfig?.proxyConfigs ?? []
+        if (proxyConfigs.length > 0) {
           await this.db.profileProxyConfigs.createProfileProxyConfigs(
-            amtConfig.proxyConfigs,
+            proxyConfigs,
             amtConfig.profileName,
             amtConfig.tenantId
           )

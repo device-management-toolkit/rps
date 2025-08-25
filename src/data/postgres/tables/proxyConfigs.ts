@@ -41,7 +41,7 @@ export class ProxyConfigsTable implements IProxyConfigsTable {
       [tenantId]
     )
     let count = 0
-    if (result != null && result.rows?.length > 0) {
+    if (result?.rows?.length > 0) {
       count = Number(result.rows[0].total_count)
     }
     return count
@@ -94,11 +94,10 @@ export class ProxyConfigsTable implements IProxyConfigsTable {
       [accessInfo, tenantId]
     )
 
-    if (results?.rowCount) {
-      if (results.rowCount > 0) {
-        return results.rows[0]
-      }
+    if ((results?.rowCount ?? 0) > 0) {
+      return results.rows[0]
     }
+
     return null
   }
 
@@ -116,11 +115,10 @@ export class ProxyConfigsTable implements IProxyConfigsTable {
       [accessInfo, tenantId]
     )
 
-    if (results?.rowCount) {
-      if (results.rowCount > 0) {
-        return true
-      }
+    if ((results?.rowCount ?? 0) > 0) {
+      return true
     }
+
     return false
   }
 
@@ -137,10 +135,8 @@ export class ProxyConfigsTable implements IProxyConfigsTable {
     WHERE access_info = $1 and tenant_id = $2`,
       [accessInfo, tenantId]
     )
-    if (profiles?.rowCount) {
-      if (profiles.rowCount > 0) {
-        throw new RPSError(NETWORK_CONFIG_DELETION_FAILED_CONSTRAINT('Proxy', accessInfo), 'Foreign key violation')
-      }
+    if ((profiles?.rowCount ?? 0) > 0) {
+      throw new RPSError(NETWORK_CONFIG_DELETION_FAILED_CONSTRAINT('Proxy', accessInfo), 'Foreign key violation')
     }
     try {
       const results = await this.db.query(
@@ -185,11 +181,10 @@ export class ProxyConfigsTable implements IProxyConfigsTable {
           proxyConfig.tenantId
         ]
       )
-      if (results?.rowCount) {
-        if (results.rowCount > 0) {
-          const config = await this.getByName(proxyConfig.accessInfo, proxyConfig.tenantId)
-          return config
-        }
+
+      if ((results?.rowCount ?? 0) > 0) {
+        const config = await this.getByName(proxyConfig.accessInfo, proxyConfig.tenantId)
+        return config
       }
     } catch (error) {
       if (error.code === PostgresErr.C23_UNIQUE_VIOLATION) {
@@ -227,10 +222,8 @@ export class ProxyConfigsTable implements IProxyConfigsTable {
       )
 
       latestItem = await this.getByName(proxyConfig.accessInfo, proxyConfig.tenantId)
-      if (results?.rowCount) {
-        if (results.rowCount > 0) {
-          return latestItem
-        }
+      if ((results?.rowCount ?? 0) > 0) {
+        return latestItem
       }
     } catch (error) {
       throw new RPSError(NETWORK_CONFIG_ERROR('Proxy', proxyConfig.accessInfo))
