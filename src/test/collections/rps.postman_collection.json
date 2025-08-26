@@ -12811,7 +12811,7 @@
                   "});\r",
                   "pm.test(\"Result should contain an error and message\", function () {\r",
                   "    var jsonData = pm.response.json();\r",
-                  "    pm.expect(jsonData.errors[0].msg).to.eql(\"Port value should range between 0 and 65535\");\r",
+                  "    pm.expect(jsonData.errors[0].msg).to.eql(\"Port value should range between 1 and 65535\");\r",
                   "    pm.expect(jsonData.errors[0].path).to.eql(\"port\");\r",
                   "});"
                 ],
