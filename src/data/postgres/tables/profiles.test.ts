@@ -82,7 +82,13 @@ describe('profiles tests', () => {
     })
     test('should get count of 0 on empty rows array', async () => {
       const expected = 0
-      querySpy.mockResolvedValueOnce({ rows: [], command: '', fields: null, rowCount: expected, oid: 0 })
+      querySpy.mockResolvedValueOnce({
+        rows: [],
+        command: '',
+        fields: null,
+        rowCount: expected,
+        oid: 0
+      })
       const count: number = await profilesTable.getCount()
       expect(count).toBe(expected)
     })
@@ -124,9 +130,11 @@ describe('profiles tests', () => {
       ieee8021x_profile_name as "ieee8021xProfileName",
       COALESCE(json_agg(json_build_object('profileName',wc.wireless_profile_name, 'priority', wc.priority)) FILTER (WHERE wc.wireless_profile_name IS NOT NULL), '[]') AS "wifiConfigs",
       ip_sync_enabled as "ipSyncEnabled",
-      local_wifi_sync_enabled as "localWifiSyncEnabled"
+      local_wifi_sync_enabled as "localWifiSyncEnabled",
+      COALESCE(json_agg(json_build_object('configName',pc.access_info, 'priority', pc.priority)) FILTER (WHERE pc.access_info IS NOT NULL), '[]') AS "proxyConfigs"
     FROM profiles p
     LEFT JOIN profiles_wirelessconfigs wc ON wc.profile_name = p.profile_name AND wc.tenant_id = p.tenant_id
+    LEFT JOIN profiles_proxyconfigs pc ON pc.profile_name = p.profile_name AND pc.tenant_id = p.tenant_id
     WHERE p.tenant_id = $3
     GROUP BY
       p.profile_name,
@@ -182,9 +190,11 @@ describe('profiles tests', () => {
       ieee8021x_profile_name as "ieee8021xProfileName",
       COALESCE(json_agg(json_build_object('profileName',wc.wireless_profile_name, 'priority', wc.priority)) FILTER (WHERE wc.wireless_profile_name IS NOT NULL), '[]') AS "wifiConfigs",
       ip_sync_enabled as "ipSyncEnabled",
-      local_wifi_sync_enabled as "localWifiSyncEnabled"
+      local_wifi_sync_enabled as "localWifiSyncEnabled",
+      COALESCE(json_agg(json_build_object('configName',pc.access_info, 'priority', pc.priority)) FILTER (WHERE pc.access_info IS NOT NULL), '[]') AS "proxyConfigs"
     FROM profiles p
     LEFT JOIN profiles_wirelessconfigs wc ON wc.profile_name = p.profile_name AND wc.tenant_id = p.tenant_id
+    LEFT JOIN profiles_proxyconfigs pc ON pc.profile_name = p.profile_name AND pc.tenant_id = p.tenant_id
     WHERE p.profile_name = $1 and p.tenant_id = $2
     GROUP BY
       p.profile_name,
@@ -233,9 +243,12 @@ describe('profiles tests', () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 1 })
       const wirelessConfigSpy = spyOn(db.profileWirelessConfigs, 'deleteProfileWifiConfigs')
       wirelessConfigSpy.mockResolvedValue(true)
+      const profileProxyConfigsSpy = spyOn(db.profileProxyConfigs, 'deleteProfileProxyConfigs')
+      profileProxyConfigsSpy.mockResolvedValue(true)
       const result = await profilesTable.delete(profileName, tenantId)
       expect(result).toBeTruthy()
       expect(wirelessConfigSpy).toHaveBeenLastCalledWith(profileName, tenantId)
+      expect(profileProxyConfigsSpy).toHaveBeenLastCalledWith(profileName, tenantId)
       expect(querySpy).toBeCalledTimes(1)
       expect(querySpy).toBeCalledWith(
         `
@@ -249,6 +262,17 @@ describe('profiles tests', () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 0 })
       const wirelessConfigSpy = spyOn(db.profileWirelessConfigs, 'deleteProfileWifiConfigs')
       wirelessConfigSpy.mockResolvedValue(false)
+      const profileProxyConfigsSpy = spyOn(db.profileProxyConfigs, 'deleteProfileProxyConfigs')
+      profileProxyConfigsSpy.mockResolvedValue(true)
+      const result = await profilesTable.delete(profileName)
+      expect(result).toBe(false)
+    })
+    test('should NOT delete when cannot delete proxy configs', async () => {
+      querySpy.mockResolvedValueOnce({ rows: [], rowCount: 0 })
+      const wirelessConfigSpy = spyOn(db.profileWirelessConfigs, 'deleteProfileWifiConfigs')
+      wirelessConfigSpy.mockResolvedValue(true)
+      const profileProxyConfigsSpy = spyOn(db.profileProxyConfigs, 'deleteProfileProxyConfigs')
+      profileProxyConfigsSpy.mockResolvedValue(false)
       const result = await profilesTable.delete(profileName)
       expect(result).toBe(false)
     })
@@ -263,6 +287,7 @@ describe('profiles tests', () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 1 })
       const profileWirelessConfigsSpy = spyOn(db.profileWirelessConfigs, 'createProfileWifiConfigs')
       profileWirelessConfigsSpy.mockResolvedValue(true)
+
       const getByNameSpy = spyOn(profilesTable, 'getByName')
       amtConfig.wifiConfigs = [{} as any]
       getByNameSpy.mockResolvedValue(amtConfig)
@@ -274,6 +299,7 @@ describe('profiles tests', () => {
         amtConfig.profileName,
         amtConfig.tenantId
       )
+
       expect(getByNameSpy).toHaveBeenCalledWith(amtConfig.profileName, amtConfig.tenantId)
       expect(querySpy).toBeCalledTimes(1)
       expect(querySpy).toBeCalledWith(
@@ -471,7 +497,10 @@ describe('profiles tests', () => {
     })
 
     test('should NOT update when constraint violation', async () => {
-      querySpy.mockRejectedValueOnce({ code: '23503', message: 'profiles_cira_config_name_fkey' })
+      querySpy.mockRejectedValueOnce({
+        code: '23503',
+        message: 'profiles_cira_config_name_fkey'
+      })
       await expect(profilesTable.update(amtConfig)).rejects.toThrow(
         PROFILE_INSERTION_CIRA_CONSTRAINT(amtConfig.ciraConfigName)
       )
@@ -485,6 +514,156 @@ describe('profiles tests', () => {
       const getByNameSpy = spyOn(profilesTable, 'getByName')
       getByNameSpy.mockResolvedValue(amtConfig)
       await expect(profilesTable.update(amtConfig)).rejects.toThrow(CONCURRENCY_MESSAGE)
+    })
+    test('should insert with proxy configs', async () => {
+      querySpy.mockResolvedValueOnce({ rows: [], rowCount: 1 })
+
+      const profileProxyConfigsSpy = spyOn(db.profileProxyConfigs, 'createProfileProxyConfigs')
+      profileProxyConfigsSpy.mockResolvedValue(true)
+
+      const getByNameSpy = spyOn(profilesTable, 'getByName')
+      amtConfig.proxyConfigs = [{} as any]
+      getByNameSpy.mockResolvedValue(amtConfig)
+      const result = await profilesTable.insert(amtConfig)
+
+      expect(result).toBe(amtConfig)
+
+      expect(profileProxyConfigsSpy).toHaveBeenCalledWith(
+        amtConfig.proxyConfigs,
+        amtConfig.profileName,
+        amtConfig.tenantId
+      )
+
+      expect(getByNameSpy).toHaveBeenCalledWith(amtConfig.profileName, amtConfig.tenantId)
+      expect(querySpy).toBeCalledTimes(1)
+      expect(querySpy).toBeCalledWith(
+        `
+        INSERT INTO profiles(
+          profile_name, activation,
+          amt_password, generate_random_password,
+          cira_config_name,
+          mebx_password, generate_random_mebx_password,
+          tags, dhcp_enabled, tls_mode,
+          user_consent, ider_enabled, kvm_enabled, sol_enabled,
+          tenant_id, tls_signing_authority, ieee8021x_profile_name, ip_sync_enabled, local_wifi_sync_enabled)
+        values($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
+        [
+          amtConfig.profileName,
+          amtConfig.activation,
+          amtConfig.amtPassword,
+          amtConfig.generateRandomPassword,
+          amtConfig.ciraConfigName,
+          amtConfig.mebxPassword,
+          amtConfig.generateRandomMEBxPassword,
+          amtConfig.tags,
+          amtConfig.dhcpEnabled,
+          amtConfig.tlsMode,
+          amtConfig.userConsent,
+          amtConfig.iderEnabled,
+          amtConfig.kvmEnabled,
+          amtConfig.solEnabled,
+          amtConfig.tenantId,
+          amtConfig.tlsSigningAuthority,
+          amtConfig.ieee8021xProfileName,
+          amtConfig.ipSyncEnabled,
+          amtConfig.localWifiSyncEnabled
+        ]
+      )
+    })
+    test('should insert without proxy configs', async () => {
+      querySpy.mockResolvedValueOnce({ rows: [], rowCount: 1 })
+      const profileProxyConfigsSpy = spyOn(db.profileProxyConfigs, 'createProfileProxyConfigs')
+      profileProxyConfigsSpy.mockResolvedValue(true)
+      const getByNameSpy = spyOn(profilesTable, 'getByName')
+      getByNameSpy.mockResolvedValue(amtConfig)
+      const result = await profilesTable.insert(amtConfig)
+
+      expect(result).toBe(amtConfig)
+      expect(profileProxyConfigsSpy).not.toHaveBeenCalledWith(
+        amtConfig.proxyConfigs,
+        amtConfig.profileName,
+        amtConfig.tenantId
+      )
+      expect(getByNameSpy).toHaveBeenCalledWith(amtConfig.profileName, amtConfig.tenantId)
+      expect(querySpy).toBeCalledTimes(1)
+      expect(querySpy).toBeCalledWith(
+        `
+        INSERT INTO profiles(
+          profile_name, activation,
+          amt_password, generate_random_password,
+          cira_config_name,
+          mebx_password, generate_random_mebx_password,
+          tags, dhcp_enabled, tls_mode,
+          user_consent, ider_enabled, kvm_enabled, sol_enabled,
+          tenant_id, tls_signing_authority, ieee8021x_profile_name, ip_sync_enabled, local_wifi_sync_enabled)
+        values($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
+        [
+          amtConfig.profileName,
+          amtConfig.activation,
+          amtConfig.amtPassword,
+          amtConfig.generateRandomPassword,
+          amtConfig.ciraConfigName,
+          amtConfig.mebxPassword,
+          amtConfig.generateRandomMEBxPassword,
+          amtConfig.tags,
+          amtConfig.dhcpEnabled,
+          amtConfig.tlsMode,
+          amtConfig.userConsent,
+          amtConfig.iderEnabled,
+          amtConfig.kvmEnabled,
+          amtConfig.solEnabled,
+          amtConfig.tenantId,
+          amtConfig.tlsSigningAuthority,
+          amtConfig.ieee8021xProfileName,
+          amtConfig.ipSyncEnabled,
+          amtConfig.localWifiSyncEnabled
+        ]
+      )
+    })
+    test('should update with proxy configs', async () => {
+      querySpy.mockResolvedValueOnce({ rows: [], rowCount: 1 })
+      const profileProxyConfigsSpy = spyOn(db.profileProxyConfigs, 'createProfileProxyConfigs')
+      profileProxyConfigsSpy.mockResolvedValue(true)
+      const getByNameSpy = spyOn(profilesTable, 'getByName')
+      amtConfig.proxyConfigs = [{} as any]
+      getByNameSpy.mockResolvedValue(amtConfig)
+
+      const result = await profilesTable.update(amtConfig)
+      expect(result).toBe(amtConfig)
+      expect(querySpy).toBeCalledTimes(1)
+      expect(querySpy).toBeCalledWith(
+        `
+      UPDATE profiles 
+      SET activation=$2, amt_password=$3, generate_random_password=$4, cira_config_name=$5,
+          mebx_password=$6, generate_random_mebx_password=$7,
+          tags=$8, dhcp_enabled=$9, tls_mode=$10, user_consent=$13,
+          ider_enabled=$14, kvm_enabled=$15, sol_enabled=$16,
+          tls_signing_authority=$17, ieee8021x_profile_name=$18,
+          ip_sync_enabled=$19, local_wifi_sync_enabled=$20
+      WHERE profile_name=$1 and tenant_id = $11 and xmin = $12`,
+        [
+          amtConfig.profileName,
+          amtConfig.activation,
+          amtConfig.amtPassword,
+          amtConfig.generateRandomPassword,
+          amtConfig.ciraConfigName,
+          amtConfig.mebxPassword,
+          amtConfig.generateRandomMEBxPassword,
+          amtConfig.tags,
+          amtConfig.dhcpEnabled,
+          amtConfig.tlsMode,
+          amtConfig.tenantId,
+          amtConfig.version,
+          amtConfig.userConsent,
+          amtConfig.iderEnabled,
+          amtConfig.kvmEnabled,
+          amtConfig.solEnabled,
+          amtConfig.tlsSigningAuthority,
+          amtConfig.ieee8021xProfileName,
+          amtConfig.ipSyncEnabled,
+          amtConfig.localWifiSyncEnabled
+        ]
+      )
     })
   })
 })

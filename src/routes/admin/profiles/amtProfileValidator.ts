@@ -138,6 +138,23 @@ export const amtProfileValidator = (): ValidationChain[] => [
         throw new Error(`wifi configs ${wifiConfigs.toString()} does not exists in db`)
       }
     }),
+  check('proxyConfigs')
+    .optional({ nullable: true })
+    .isArray()
+    .custom(async (value, { req }) => {
+      if (value.length > 15) {
+        throw new Error('A maximum of 15 proxy profiles can be stored at a time.')
+      }
+      for (const config of value) {
+        if (Number.isInteger(config.priority) && (config.priority < 1 || config.priority > 255)) {
+          throw new Error('proxy config priority should be an integer and between 1 and 255')
+        }
+      }
+      const proxyConfigs = await validateProxyConfigs(value, req as Request)
+      if (proxyConfigs.length > 0) {
+        throw new Error(`proxy configs ${proxyConfigs.toString()} does not exists in db`)
+      }
+    }),
   check('ieee8021xProfileName')
     .optional({ nullable: true })
     .custom(async (value, { req }) => {
@@ -179,6 +196,17 @@ const validatewifiConfigs = async (value: any, req: Request): Promise<string[]> 
     }
   }
   return wifiConfigNames
+}
+
+const validateProxyConfigs = async (value: any, req: Request): Promise<string[]> => {
+  const proxyConfigNames: string[] = []
+  for (const config of value) {
+    const isProxyExist = await req.db.proxyConfigs.checkProfileExits(config.configName, req.tenantId)
+    if (!isProxyExist) {
+      proxyConfigNames.push(config.configName)
+    }
+  }
+  return proxyConfigNames
 }
 
 const validateIEEE8021xConfigs = async (value: any, req: Request): Promise<boolean> => {
@@ -321,6 +349,23 @@ export const profileUpdateValidator = (): any => [
       const wifiConfigs = await validatewifiConfigs(value, req as Request)
       if (wifiConfigs.length > 0) {
         throw new Error(`wifi configs ${wifiConfigs.toString()} does not exists in db`)
+      }
+    }),
+  check('proxyConfigs')
+    .optional({ nullable: true })
+    .isArray()
+    .custom(async (value, { req }) => {
+      if (value.length > 15) {
+        throw new Error('A maximum of 15 proxy profiles can be stored at a time.')
+      }
+      for (const config of value) {
+        if (Number.isInteger(config.priority) && (config.priority < 1 || config.priority > 255)) {
+          throw new Error('proxy config priority should be an integer and between 1 and 255')
+        }
+      }
+      const proxyConfigs = await validateProxyConfigs(value, req as Request)
+      if (proxyConfigs.length > 0) {
+        throw new Error(`proxy configs ${proxyConfigs.toString()} does not exists in db`)
       }
     }),
   check('ieee8021xProfileName')

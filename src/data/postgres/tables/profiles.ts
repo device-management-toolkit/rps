@@ -78,9 +78,11 @@ export class ProfilesTable implements IProfilesTable {
       ieee8021x_profile_name as "ieee8021xProfileName",
       COALESCE(json_agg(json_build_object('profileName',wc.wireless_profile_name, 'priority', wc.priority)) FILTER (WHERE wc.wireless_profile_name IS NOT NULL), '[]') AS "wifiConfigs",
       ip_sync_enabled as "ipSyncEnabled",
-      local_wifi_sync_enabled as "localWifiSyncEnabled"
+      local_wifi_sync_enabled as "localWifiSyncEnabled",
+      COALESCE(json_agg(json_build_object('configName',pc.access_info, 'priority', pc.priority)) FILTER (WHERE pc.access_info IS NOT NULL), '[]') AS "proxyConfigs"
     FROM profiles p
     LEFT JOIN profiles_wirelessconfigs wc ON wc.profile_name = p.profile_name AND wc.tenant_id = p.tenant_id
+    LEFT JOIN profiles_proxyconfigs pc ON pc.profile_name = p.profile_name AND pc.tenant_id = p.tenant_id
     WHERE p.tenant_id = $3
     GROUP BY
       p.profile_name,
@@ -140,9 +142,11 @@ export class ProfilesTable implements IProfilesTable {
       ieee8021x_profile_name as "ieee8021xProfileName",
       COALESCE(json_agg(json_build_object('profileName',wc.wireless_profile_name, 'priority', wc.priority)) FILTER (WHERE wc.wireless_profile_name IS NOT NULL), '[]') AS "wifiConfigs",
       ip_sync_enabled as "ipSyncEnabled",
-      local_wifi_sync_enabled as "localWifiSyncEnabled"
+      local_wifi_sync_enabled as "localWifiSyncEnabled",
+      COALESCE(json_agg(json_build_object('configName',pc.access_info, 'priority', pc.priority)) FILTER (WHERE pc.access_info IS NOT NULL), '[]') AS "proxyConfigs"
     FROM profiles p
     LEFT JOIN profiles_wirelessconfigs wc ON wc.profile_name = p.profile_name AND wc.tenant_id = p.tenant_id
+    LEFT JOIN profiles_proxyconfigs pc ON pc.profile_name = p.profile_name AND pc.tenant_id = p.tenant_id
     WHERE p.profile_name = $1 and p.tenant_id = $2
     GROUP BY
       p.profile_name,
@@ -192,6 +196,9 @@ export class ProfilesTable implements IProfilesTable {
   async delete(profileName: string, tenantId = ''): Promise<boolean> {
     // delete any associations with wificonfigs
     await this.db.profileWirelessConfigs.deleteProfileWifiConfigs(profileName, tenantId)
+
+    // delete any associations with proxyconfigs
+    await this.db.profileProxyConfigs.deleteProfileProxyConfigs(profileName, tenantId)
 
     const results = await this.db.query(
       `
@@ -263,6 +270,15 @@ export class ProfilesTable implements IProfilesTable {
         }
       }
 
+      const proxyConfigs = amtConfig?.proxyConfigs ?? []
+      if (proxyConfigs.length > 0) {
+        await this.db.profileProxyConfigs.createProfileProxyConfigs(
+          proxyConfigs,
+          amtConfig.profileName,
+          amtConfig.tenantId
+        )
+      }
+
       return await this.getByName(amtConfig.profileName, amtConfig.tenantId)
     } catch (error) {
       this.log.error(`Failed to insert AMT profile: ${amtConfig.profileName}`, error)
@@ -331,6 +347,15 @@ export class ProfilesTable implements IProfilesTable {
             amtConfig.tenantId
           )
         }
+        const proxyConfigs = amtConfig?.proxyConfigs ?? []
+        if (proxyConfigs.length > 0) {
+          await this.db.profileProxyConfigs.createProfileProxyConfigs(
+            proxyConfigs,
+            amtConfig.profileName,
+            amtConfig.tenantId
+          )
+        }
+
         latestItem = await this.getByName(amtConfig.profileName, amtConfig.tenantId)
         return latestItem
       }
