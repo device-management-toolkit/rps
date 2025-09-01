@@ -8,10 +8,16 @@ import validateMiddleware from '../../../middleware/validate.js'
 import { odataValidator } from '../odataValidator.js'
 import { allProxyProfiles } from './all.js'
 import { createProxyProfile } from './create.js'
-import { proxyValidator } from './proxyValidator.js'
+import { proxyUpdateValidator, proxyValidator } from './proxyValidator.js'
+import { deleteProxyProfile } from './delete.js'
+import { getProxyProfile } from './get.js'
+import { editProxyProfile } from './edit.js'
 
-const profileRouter: Router = Router()
+const proxyRouter: Router = Router()
 
-profileRouter.get('/', odataValidator(), validateMiddleware, allProxyProfiles)
-profileRouter.post('/', proxyValidator(), validateMiddleware, createProxyProfile)
-export default profileRouter
+proxyRouter.get('/', odataValidator(), validateMiddleware, allProxyProfiles)
+proxyRouter.get('/:proxyName', getProxyProfile)
+proxyRouter.post('/', proxyValidator(), validateMiddleware, createProxyProfile)
+proxyRouter.patch('/', proxyUpdateValidator(), validateMiddleware, editProxyProfile)
+proxyRouter.delete('/:proxyName', deleteProxyProfile)
+export default proxyRouter

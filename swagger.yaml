@@ -1051,6 +1051,194 @@ paths:
               schema:
                 $ref: '#/components/schemas/APIResponse'
       deprecated: false
+  /api/v1/admin/proxyconfigs:
+    get:
+      tags:
+        - Proxyconfigs
+      summary: Get All Proxyconfigs
+      operationId: GetAllProxyconfigs
+      description: Retrives all the proxy configuration profiles stored in the database.
+      parameters:
+        - in: query
+          name: $skip
+          schema:
+            type: integer
+          description: The number of items to skip before starting to collect the result set
+        - in: query
+          name: $top
+          schema:
+            type: integer
+          description: The numbers of items to return
+        - in: query
+          name: $count
+          schema:
+            type: boolean
+          description: The total number of proxy configurations
+      responses:
+        200:
+          description: 'successful operation'
+          headers: {}
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: array
+                    items:
+                      $ref: '#/components/schemas/ProxyConfigResponse'
+                  - $ref: '#/components/schemas/CountProxyConfigResponse'
+        404:
+          description: 'not found'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+        500:
+          description: 'internal server error'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+      deprecated: false
+    post:
+      tags:
+        - Proxyconfigs
+      summary: Create Proxyconfig
+      operationId: CreateProxyconfig
+      description: Creates a new proxy configuration profile in the database.
+      requestBody:
+        description: ''
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProxyConfigPOST'
+        required: true
+      responses:
+        201:
+          description: 'successful operation'
+          headers: {}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProxyConfigResponse'
+        400:
+          description: 'bad request'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+        500:
+          description: 'internal server error'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+      deprecated: false
+    patch:
+      tags:
+        - Proxyconfigs
+      summary: Update Proxyconfig
+      operationId: UpdateProxyconfig
+      description: |
+        Edits an existing proxy configuration profile in the database.
+
+        The proxyName field can't be changed.
+      requestBody:
+        description: ''
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProxyConfigPATCH'
+        required: true
+      responses:
+        200:
+          description: 'successful operation'
+          headers: {}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProxyConfigResponse'
+        400:
+          description: 'bad request'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+        500:
+          description: 'internal server error'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+      deprecated: false
+  /api/v1/admin/proxyconfigs/{proxyName}:
+    get:
+      tags:
+        - Proxyconfigs
+      summary: Get Proxyconfig
+      operationId: GetProxyconfig
+      description: Retrives the specific proxy configuration profile.
+      parameters:
+        - name: proxyName
+          in: path
+          description: Name of proxy configuration profile to return
+          required: true
+          schema:
+            type: string
+      responses:
+        200:
+          description: 'successful operation'
+          headers: {}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProxyConfigResponse'
+        404:
+          description: 'not found'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+        500:
+          description: 'internal server error'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+      deprecated: false
+    delete:
+      tags:
+        - Proxyconfigs
+      summary: Delete Proxyconfig
+      operationId: DeleteProxyconfig
+      description: Deletes the specific proxy configuration profile.
+      parameters:
+        - name: proxyName
+          in: path
+          description: Name of proxy configuration profile to delete
+          required: true
+          schema:
+            type: string
+      responses:
+        204:
+          description: 'successful operation'
+          headers: {}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProxyConfigResponse'
+        404:
+          description: 'not found'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+        500:
+          description: 'internal server error'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+      deprecated: false
   /api/v1/admin/health:
     get:
       summary: Return Status of DB and Secret Store
@@ -1890,6 +2078,16 @@ components:
             $ref: '#/components/schemas/IEEE8021xConfigResponse'
         totalCount:
           type: integer
+    CountProxyConfigResponse:
+      title: CountProxyConfigResponse
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProxyConfigResponse'
+        totalCount:
+          type: integer
     APIResponse:
       title: APIResponse
       type: object
@@ -1953,6 +2151,118 @@ components:
                   type: string
                 cluster_id:
                   type: string
+    ProxyConfigResponse:
+      title: ProxyConfigResponse
+      type: object
+      required:
+        - proxyName
+        - address
+        - infoFormat
+        - port
+        - networkDnsSuffix
+        - tenantId
+      properties:
+        proxyName:
+          type: string
+          minLength: 1
+          maxLength: 32
+        address:
+          type: string
+        infoFormat:
+          type: integer
+          enum:
+            - 3
+            - 4
+            - 201
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        networkDnsSuffix:
+          type: string
+          minLength: 1
+          maxLength: 192
+        tenantId:
+          type: string
+      example:
+        proxyName: 'proxyName1'
+        address: 'www.vprodemo.com'
+        infoFormat: 201
+        port: 900
+        networkDnsSuffix: 'intel.com'
+        tenantId: ''
+    ProxyConfigPOST:
+      title: ProxyConfigPOST
+      type: object
+      required:
+        - proxyName
+        - address
+        - infoFormat
+        - port
+        - networkDnsSuffix
+      properties:
+        proxyName:
+          type: string
+          minLength: 1
+          maxLength: 32
+        address:
+          type: string
+        infoFormat:
+          type: integer
+          enum:
+            - 3
+            - 4
+            - 201
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        networkDnsSuffix:
+          type: string
+          minLength: 1
+          maxLength: 192
+      example:
+        proxyName: 'proxyName1'
+        address: 'www.vprodemo.com'
+        infoFormat: 201
+        port: 900
+        networkDnsSuffix: 'intel.com'
+    ProxyConfigPATCH:
+      title: ProxyConfigPATCH
+      type: object
+      required:
+        - proxyName
+        - address
+        - infoFormat
+        - port
+        - networkDnsSuffix
+      properties:
+        proxyName:
+          type: string
+          minLength: 1
+          maxLength: 32
+        address:
+          type: string
+        infoFormat:
+          type: integer
+          enum:
+            - 3
+            - 4
+            - 201
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        networkDnsSuffix:
+          type: string
+          minLength: 1
+          maxLength: 192
+      example:
+        proxyName: 'proxyName1'
+        address: 'www.vprodemo.com'
+        infoFormat: 201
+        port: 900
+        networkDnsSuffix: 'intel.com'
     VersionResponse:
       title: VersionResponse
       required:
@@ -1974,5 +2284,6 @@ tags:
   - name: Profiles
   - name: Wireless
   - name: IEEE802.1x
+  - name: Proxyconfigs
   - name: Misc
     description: ''
