@@ -79,7 +79,7 @@ export class ProfilesTable implements IProfilesTable {
       COALESCE(json_agg(json_build_object('profileName',wc.wireless_profile_name, 'priority', wc.priority)) FILTER (WHERE wc.wireless_profile_name IS NOT NULL), '[]') AS "wifiConfigs",
       ip_sync_enabled as "ipSyncEnabled",
       local_wifi_sync_enabled as "localWifiSyncEnabled",
-      COALESCE(json_agg(json_build_object('configName',pc.access_info, 'priority', pc.priority)) FILTER (WHERE pc.access_info IS NOT NULL), '[]') AS "proxyConfigs"
+      COALESCE(json_agg(json_build_object('profileName',pc.proxy_config_name, 'priority', pc.priority)) FILTER (WHERE pc.proxy_config_name IS NOT NULL), '[]') AS "proxyConfigs"
     FROM profiles p
     LEFT JOIN profiles_wirelessconfigs wc ON wc.profile_name = p.profile_name AND wc.tenant_id = p.tenant_id
     LEFT JOIN profiles_proxyconfigs pc ON pc.profile_name = p.profile_name AND pc.tenant_id = p.tenant_id
@@ -143,7 +143,7 @@ export class ProfilesTable implements IProfilesTable {
       COALESCE(json_agg(json_build_object('profileName',wc.wireless_profile_name, 'priority', wc.priority)) FILTER (WHERE wc.wireless_profile_name IS NOT NULL), '[]') AS "wifiConfigs",
       ip_sync_enabled as "ipSyncEnabled",
       local_wifi_sync_enabled as "localWifiSyncEnabled",
-      COALESCE(json_agg(json_build_object('configName',pc.access_info, 'priority', pc.priority)) FILTER (WHERE pc.access_info IS NOT NULL), '[]') AS "proxyConfigs"
+      COALESCE(json_agg(json_build_object('profileName',pc.proxy_config_name, 'priority', pc.priority)) FILTER (WHERE pc.proxy_config_name IS NOT NULL), '[]') AS "proxyConfigs"
     FROM profiles p
     LEFT JOIN profiles_wirelessconfigs wc ON wc.profile_name = p.profile_name AND wc.tenant_id = p.tenant_id
     LEFT JOIN profiles_proxyconfigs pc ON pc.profile_name = p.profile_name AND pc.tenant_id = p.tenant_id
