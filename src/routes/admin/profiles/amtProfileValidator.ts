@@ -201,9 +201,9 @@ const validatewifiConfigs = async (value: any, req: Request): Promise<string[]> 
 const validateProxyConfigs = async (value: any, req: Request): Promise<string[]> => {
   const proxyConfigNames: string[] = []
   for (const config of value) {
-    const isProxyExist = await req.db.proxyConfigs.checkProfileExits(config.configName, req.tenantId)
+    const isProxyExist = await req.db.proxyConfigs.checkProfileExits(config.profileName, req.tenantId)
     if (!isProxyExist) {
-      proxyConfigNames.push(config.configName)
+      proxyConfigNames.push(config.profileName)
     }
   }
   return proxyConfigNames
