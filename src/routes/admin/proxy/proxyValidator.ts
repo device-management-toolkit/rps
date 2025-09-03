@@ -6,6 +6,15 @@
 import { check } from 'express-validator'
 
 export const proxyValidator = (): any => [
+  check('proxyName')
+    .not()
+    .isEmpty()
+    .withMessage('Proxy profile name is required')
+    .matches('^[a-zA-Z0-9]+$')
+    .withMessage('Proxy profile name should be alphanumeric')
+    .isLength({ max: 32 })
+    .withMessage('Proxy profile name maximum length is 32'),
+
   // Validate and normalize infoFormat first so conditional checks can rely on a number
   check('infoFormat')
     .not()

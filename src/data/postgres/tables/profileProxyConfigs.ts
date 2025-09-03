@@ -19,19 +19,19 @@ export class ProfileProxyConfigsTable implements IProfileProxyConfigsTable {
 
   /**
    * @description Get AMT Profile associated proxy configs
-   * @param {string} configName
+   * @param {string} profileName
    * @returns {ProfileProxyConfigs[]} Return an array of proxy configs
    */
-  async getProfileProxyConfigs(configName: string, tenantId = ''): Promise<ProfileProxyConfigs[]> {
+  async getProfileProxyConfigs(profileName: string, tenantId = ''): Promise<ProfileProxyConfigs[]> {
     const results = await this.db.query<ProfileProxyConfigs>(
       `
     SELECT 
       priority as "priority",
-      access_info as "configName"
+      proxy_config_name as "profileName"
     FROM profiles_proxyconfigs
     WHERE profile_name = $1 and tenant_id = $2
     ORDER BY priority`,
-      [configName, tenantId]
+      [profileName, tenantId]
     )
     return results.rows
   }
@@ -39,12 +39,12 @@ export class ProfileProxyConfigsTable implements IProfileProxyConfigsTable {
   /**
    * @description Insert proxy configs associated with AMT profile
    * @param {ProfileProxyConfigs[]} proxyConfigs
-   * @param {string} configName
+   * @param {string} profileName
    * @returns {ProfileProxyConfigs[]} Return an array of proxy configs
    */
   async createProfileProxyConfigs(
     proxyConfigs: ProfileProxyConfigs[],
-    configName: string,
+    profileName: string,
     tenantId = ''
   ): Promise<boolean> {
     try {
@@ -53,8 +53,8 @@ export class ProfileProxyConfigsTable implements IProfileProxyConfigsTable {
       }
       // Preparing data for inserting multiple rows
       const configs = proxyConfigs.map((config) => [
-        config.configName,
-        configName,
+        config.profileName,
+        profileName,
         config.priority,
         tenantId
       ])
@@ -62,7 +62,7 @@ export class ProfileProxyConfigsTable implements IProfileProxyConfigsTable {
         format(
           `
       INSERT INTO
-      profiles_proxyconfigs (access_info, profile_name, priority, tenant_id)
+      profiles_proxyconfigs (proxy_config_name, profile_name, priority, tenant_id)
       VALUES %L`,
           configs
         )
@@ -75,7 +75,7 @@ export class ProfileProxyConfigsTable implements IProfileProxyConfigsTable {
       if (error.code === PostgresErr.C23_FOREIGN_KEY_VIOLATION) {
         throw new RPSError(error.detail, 'Foreign key constraint violation')
       }
-      throw new RPSError(API_UNEXPECTED_EXCEPTION(configName))
+      throw new RPSError(API_UNEXPECTED_EXCEPTION(profileName))
     }
     return false
   }
