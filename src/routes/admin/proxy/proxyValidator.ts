@@ -29,19 +29,19 @@ export const proxyValidator = (): any => [
     ])
     .withMessage('Server address format should be either 3(IPV4), 4(IPV6) or 201(FQDN)'),
 
-  // accessInfo presence
-  check('accessInfo').not().isEmpty().withMessage('Server address is required'),
+  // address presence
+  check('address').not().isEmpty().withMessage('Server address is required'),
 
-  // accessInfo format based on infoFormat
-  check('accessInfo')
+  // address format based on infoFormat
+  check('address')
     .if((_, { req }) => req.body.infoFormat === 3)
     .isIP(4)
     .withMessage('infoFormat 3 requires IPV4 server address'),
-  check('accessInfo')
+  check('address')
     .if((_, { req }) => req.body.infoFormat === 4)
     .isIP(6)
     .withMessage('infoFormat 4 requires IPV6 server address'),
-  check('accessInfo')
+  check('address')
     .if((_, { req }) => req.body.infoFormat === 201)
     .isFQDN({ require_tld: true, allow_underscores: false, allow_numeric_tld: false })
     .withMessage('infoFormat 201 requires FQDN server address'),
