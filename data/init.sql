@@ -101,18 +101,17 @@ CREATE TABLE IF NOT EXISTS domains(
 );
 CREATE TABLE IF NOT EXISTS proxyconfigs(
   proxy_config_name citext,
-  access_info citext NOT NULL,
+  address citext NOT NULL,
   info_format integer NOT NULL,
   port integer NOT NULL,
   network_dns_suffix varchar(192),
   creation_date timestamp,
   tenant_id varchar(36),
-  CONSTRAINT access_info_port UNIQUE (access_info, port, tenant_id),
+  CONSTRAINT proxy_config_name_tenant_id UNIQUE (proxy_config_name, tenant_id),
   PRIMARY KEY (proxy_config_name, tenant_id)
 );
 CREATE TABLE IF NOT EXISTS profiles_proxyconfigs(
   proxy_config_name citext,
-  access_info citext,
   profile_name citext,
   FOREIGN KEY (proxy_config_name,tenant_id)  REFERENCES proxyconfigs(proxy_config_name,tenant_id),
   FOREIGN KEY (profile_name,tenant_id)  REFERENCES profiles(profile_name,tenant_id),

@@ -48,11 +48,11 @@ export interface Ieee8021xConfig {
 /*
 - AddMpServer Method:
 
-AccessInfo: IP or FQDN of MPS server(MaxLen 256)
+address: IP or FQDN of MPS server(MaxLen 256)
 Port (number)
 Username (16 alphanumeric characters)
 Password (16 characters)
-CN (common name used when AccessInfo is IP address)
+CN (common name used when address is IP address)
 
 Additional information that we need to provide when configuring MPS:
 
@@ -194,7 +194,7 @@ export interface TLSConfigFlow {
 }
 
 export interface mpsServer {
-  AccessInfo: any
+  address: any
   InfoFormat: number
   Port: number
   AuthMethod: number
@@ -304,8 +304,8 @@ export interface connectionParams {
 
 export interface ProxyConfig {
   proxyName: string
-  accessInfo: string // A string holding the IP address or FQDN of the server
-  infoFormat: AMT.Types.MPServer.InfoFormat // An enumerated integer describing the format and interpretation of the AccessInfo property (IPv4 (3), IPv6 (4), FQDN (201))
+  address: string // A string holding the IP address or FQDN of the server
+  infoFormat: AMT.Types.MPServer.InfoFormat // An enumerated integer describing the format and interpretation of the address property (IPv4 (3), IPv6 (4), FQDN (201))
   port: number
   networkDnsSuffix: string // Domain name of the network to which this proxy belongs
   tenantId: string
