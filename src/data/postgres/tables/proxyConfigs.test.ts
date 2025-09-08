@@ -28,7 +28,7 @@ describe('proxy configs tests', () => {
   beforeEach(() => {
     proxyConfig = {
       proxyName: 'proxy profile',
-      accessInfo: 'proxy.com',
+      address: 'proxy.com',
       infoFormat: 201, // FQDN (201)
       port: 1000,
       networkDnsSuffix: 'suffix',
@@ -98,7 +98,7 @@ describe('proxy configs tests', () => {
         `
     SELECT
       proxy_config_name as "proxyName",
-      access_info as "accessInfo",
+      address as "address",
       info_format as "infoFormat",
       port as "port",
       network_dns_suffix as "networkDnsSuffix",
@@ -124,7 +124,7 @@ describe('proxy configs tests', () => {
         `
     SELECT
       proxy_config_name as "proxyName",
-      access_info as "accessInfo",
+      address as "address",
       info_format as "infoFormat",
       port as "port",
       network_dns_suffix as "networkDnsSuffix",
@@ -231,11 +231,11 @@ describe('proxy configs tests', () => {
       expect(querySpy).toBeCalledWith(
         `
         INSERT INTO proxyconfigs
-        (proxy_config_name, access_info, info_format, port, network_dns_suffix, creation_date, tenant_id)
+        (proxy_config_name, address, info_format, port, network_dns_suffix, creation_date, tenant_id)
         values($1, $2, $3, $4, $5, $6, $7)`,
         [
           proxyConfig.proxyName,
-          proxyConfig.accessInfo,
+          proxyConfig.address,
           proxyConfig.infoFormat,
           proxyConfig.port,
           proxyConfig.networkDnsSuffix,
@@ -278,11 +278,11 @@ describe('proxy configs tests', () => {
       expect(querySpy).toBeCalledWith(
         `
       UPDATE proxyconfigs 
-      SET access_info=$2, info_format=$3, port=$4, network_dns_suffix=$5 
+      SET address=$2, info_format=$3, port=$4, network_dns_suffix=$5 
       WHERE proxy_config_name=$1 and tenant_id = $6`,
         [
           proxyConfig.proxyName,
-          proxyConfig.accessInfo,
+          proxyConfig.address,
           proxyConfig.infoFormat,
           proxyConfig.port,
           proxyConfig.networkDnsSuffix,
@@ -321,11 +321,11 @@ describe('proxy configs tests', () => {
       expect(querySpy).toBeCalledWith(
         `
       UPDATE proxyconfigs 
-      SET access_info=$2, info_format=$3, port=$4, network_dns_suffix=$5 
+      SET address=$2, info_format=$3, port=$4, network_dns_suffix=$5 
       WHERE proxy_config_name=$1 and tenant_id = $6`,
         [
           proxyConfig.proxyName,
-          proxyConfig.accessInfo,
+          proxyConfig.address,
           proxyConfig.infoFormat,
           proxyConfig.port,
           proxyConfig.networkDnsSuffix,
