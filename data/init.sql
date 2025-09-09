@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS proxyconfigs(
   network_dns_suffix varchar(192),
   creation_date timestamp,
   tenant_id varchar(36),
-  CONSTRAINT proxy_config_name_tenant_id UNIQUE (proxy_config_name, tenant_id),
+  CONSTRAINT address_port_tenant_id UNIQUE (address, port, tenant_id),
   PRIMARY KEY (proxy_config_name, tenant_id)
 );
 CREATE TABLE IF NOT EXISTS profiles_proxyconfigs(
