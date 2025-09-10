@@ -38,6 +38,7 @@ export interface WiFiConfigContext extends CommonContext {
   profilesAdded?: string
   profilesFailed?: string
   onlyLocalWifiSyncEnabled?: boolean
+  uefiWifiSyncEnabled?: boolean
   amt?: AMT.Messages
   cim?: CIM.Messages
 }
@@ -181,6 +182,13 @@ export class WiFiConfiguration {
       wifiPortConfigurationService.localProfileSynchronizationEnabled = 3
     }
 
+    if (input.amtProfile?.uefiWifiSyncEnabled === true) {
+      // Enable UEFI WiFi Profile Synchronization
+      wifiPortConfigurationService.UEFIWiFiProfileShareEnabled = 1
+    } else {
+      wifiPortConfigurationService.UEFIWiFiProfileShareEnabled = 0
+    }
+
     input.xmlMessage = input.amt?.WiFiPortConfigurationService.Put(wifiPortConfigurationService)
     return await invokeWsmanCall(input, 2)
   }
@@ -270,7 +278,8 @@ export class WiFiConfiguration {
       isWiFiProfilesExist: ({ context }) =>
         context.amtProfile?.wifiConfigs != null ? context.amtProfile.wifiConfigs.length > 0 : false,
       isLocalProfileSynchronizationNotEnabled: ({ context }) =>
-        context.message.Envelope.Body.AMT_WiFiPortConfigurationService.localProfileSynchronizationEnabled === 0,
+        context.message.Envelope.Body.AMT_WiFiPortConfigurationService.localProfileSynchronizationEnabled === 0 &&
+        context.message.Envelope.Body.AMT_WiFiPortConfigurationService.UEFIWiFiProfileShareEnabled === 0,
       isTrustedRootCertifcateExists: ({ context }) => {
         const res = devices[context.clientId].trustedRootCertificateResponse
         const cert = devices[context.clientId].trustedRootCertificate
