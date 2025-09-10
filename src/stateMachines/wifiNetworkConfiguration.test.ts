@@ -133,6 +133,7 @@ describe('WiFi Network Configuration', () => {
       dhcpEnabled: true,
       ipSyncEnabled: true,
       localWifiSyncEnabled: true,
+      uefiWifiSyncEnabled: true,
       wifiConfigs: [
         {
           priority: 1,
@@ -146,13 +147,27 @@ describe('WiFi Network Configuration', () => {
         getWifiPortConfigurationService: fromPromise(
           async ({ input }) =>
             await Promise.resolve({
-              Envelope: { Body: { AMT_WiFiPortConfigurationService: { localProfileSynchronizationEnabled: 0 } } }
+              Envelope: {
+                Body: {
+                  AMT_WiFiPortConfigurationService: {
+                    localProfileSynchronizationEnabled: 0,
+                    UEFIWiFiProfileShareEnabled: 0
+                  }
+                }
+              }
             })
         ),
         putWifiPortConfigurationService: fromPromise(
           async ({ input }) =>
             await Promise.resolve({
-              Envelope: { Body: { AMT_WiFiPortConfigurationService: { localProfileSynchronizationEnabled: 3 } } }
+              Envelope: {
+                Body: {
+                  AMT_WiFiPortConfigurationService: {
+                    localProfileSynchronizationEnabled: 3,
+                    UEFIWiFiProfileShareEnabled: 0
+                  }
+                }
+              }
             })
         ),
         updateWifiPort: fromPromise(async ({ input }) => await Promise.resolve({ clientId })),
