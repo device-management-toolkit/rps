@@ -1,4 +1,4 @@
-import { WirelessConfig, Ieee8021xConfig, ProfileWifiConfigs } from 'models/RCS.Config.js'
+import { Ieee8021xConfig, ProfileWifiConfigs, TlsSigningAuthority } from '../../../models/RCS.Config.js'
 import { type ExportWifiConfig, type ExportConfiguration } from '../../../models/index.js'
 import Logger from '../../../Logger.js'
 import { NOT_FOUND_EXCEPTION, NOT_FOUND_MESSAGE } from '../../../utils/constants.js'
@@ -155,7 +155,8 @@ export async function exportProfile(req: Request, res: Response): Promise<void> 
           wireless: {
             wifiSyncEnabled: result.localWifiSyncEnabled ?? false,
             profiles: wirelessProfiles
-          }
+          },
+          proxies: []
         },
         tls: {
           mutualAuthentication: false,
@@ -176,7 +177,7 @@ export async function exportProfile(req: Request, res: Response): Promise<void> 
           userAccounts: []
         },
         enterpriseAssistant: {
-          url: Environment.Config.enterprise_assistant_url ?? 'http://localhost:8000',
+          url: result.tlsSigningAuthority == TlsSigningAuthority.MICROSOFT_CA ? Environment.Config.enterprise_assistant_url ?? 'http://localhost:8000' : '',
           username: '',
           password: ''
         },

@@ -319,6 +319,11 @@ export interface ExportConfiguration {
         wifiSyncEnabled: boolean
         profiles: ExportWifiConfig[]
       }
+      proxies: {
+        address: string
+        port: number
+        networkDnsSuffix: string
+      }[]
     }
     tls: {
       mutualAuthentication: boolean
