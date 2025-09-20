@@ -44,10 +44,11 @@ export class ProxyConfiguration {
     if (input.amtProfile?.proxyConfigs != null) {
       // Get Proxy profile information based on the profile name from db.
       this.db = await this.dbFactory.getDb()
-      input.proxyConfigs = await this.db.proxyConfig.getByName(
+      input.proxyConfigs = await this.db.proxyConfigs.getByName(
         input.amtProfile.proxyConfigs[input.proxyConfigsCount].profileName,
         input.amtProfile.tenantId
       )
+      return
     }
     this.logger.error('Null object in getProxyConfig()')
   }
@@ -61,8 +62,9 @@ export class ProxyConfiguration {
       NetworkDnsSuffix: input.proxyConfigs?.networkDnsSuffix ?? ''
     }
 
-    input.proxyConfigName = input.proxyConfigs?.address ?? null
+    input.xmlMessage = input.ips?.HTTPProxyService.AddProxyAccessPoint(proxyAccessPointParameters)
 
+    input.proxyConfigName = input.proxyConfigs?.address ?? null
     // Increment the count to keep track of proxies added to AMT
     ++input.proxyConfigsCount
     return await invokeWsmanCall(input)
