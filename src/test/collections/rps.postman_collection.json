@@ -13466,7 +13466,7 @@
           "response": []
         },
         {
-          "name": "All profiles (Cached)",
+          "name": "All proxies (Cached)",
           "event": [
             {
               "listen": "test",
@@ -13527,7 +13527,7 @@
           "response": []
         },
         {
-          "name": "All profiles with invalid query params",
+          "name": "All proxies with invalid query params",
           "event": [
             {
               "listen": "test",
@@ -13550,7 +13550,8 @@
                   "});"
                 ],
                 "type": "text/javascript",
-                "packages": {}
+                "packages": {},
+                "requests": {}
               }
             }
           ],
@@ -13588,7 +13589,7 @@
           "response": []
         },
         {
-          "name": "All profiles with count set to true",
+          "name": "All proxies with count set to true",
           "event": [
             {
               "listen": "test",
@@ -13597,7 +13598,7 @@
                   "pm.test(\"Status code is 200\", function () {\r",
                   "    pm.response.to.have.status(200);\r",
                   "});\r",
-                  "pm.test(\"Result length should be equal to three\", function () {\r",
+                  "pm.test(\"Result length should be equal to one\", function () {\r",
                   "    var jsonData = pm.response.json();\r",
                   "    pm.expect(jsonData.data.length).to.eql(1);\r",
                   "    pm.expect(jsonData.totalCount).to.eql(1);\r",
@@ -13643,7 +13644,7 @@
           "response": []
         },
         {
-          "name": "All profiles with count set to false",
+          "name": "All proxies with count set to false",
           "event": [
             {
               "listen": "test",
@@ -13652,7 +13653,7 @@
                   "pm.test(\"Status code is 200\", function () {\r",
                   "    pm.response.to.have.status(200);\r",
                   "});\r",
-                  "pm.test(\"Result length should be equal to three\", function () {\r",
+                  "pm.test(\"Result length should be equal to one\", function () {\r",
                   "    var jsonData = pm.response.json();\r",
                   "    pm.expect(jsonData.length).to.eql(1);\r",
                   "});"
