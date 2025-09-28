@@ -94,7 +94,13 @@ export class ProxyConfiguration {
     },
     actions: {
       'Update Configuration Status': ({ context }) => {
-        const { clientId, proxyConfigAdded: proxyConfigsAdded, proxyConfigFailed: proxyConfigsFailed, statusMessage, errorMessage } = context
+        const {
+          clientId,
+          proxyConfigAdded: proxyConfigsAdded,
+          proxyConfigFailed: proxyConfigsFailed,
+          statusMessage,
+          errorMessage
+        } = context
         const device = devices[clientId]
         const networkStatus = device.status.Network
         let message
