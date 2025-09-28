@@ -5,7 +5,7 @@
 
 // import { type AMT, type CIM, type IPS } from '@device-management-toolkit/wsman-messages'
 import { type IPS } from '@device-management-toolkit/wsman-messages'
-import { assign, sendTo, fromPromise, setup } from 'xstate'
+import { assign, fromPromise, setup } from 'xstate'
 import { type ProxyConfig } from '../models/RCS.Config.js'
 import Logger from '../Logger.js'
 import { type AMTConfiguration } from '../models/index.js'
@@ -16,14 +16,14 @@ import { DbCreatorFactory } from '../factories/DbCreatorFactory.js'
 import { type CommonContext, invokeWsmanCall } from './common.js'
 import { UNEXPECTED_PARSE_ERROR } from '../utils/constants.js'
 
-interface ProxyConfigContext extends CommonContext {
+export interface ProxyConfigContext extends CommonContext {
   amtProfile: AMTConfiguration | null
-  proxyConfigs?: ProxyConfig
+  proxyConfig?: ProxyConfig
   proxyConfigsCount: number
   retryCount: number
   proxyConfigName?: string | null
-  proxyConfigsAdded?: string
-  proxyConfigsFailed?: string
+  proxyConfigAdded?: string
+  proxyConfigFailed?: string
   ips?: IPS.Messages
 }
 
@@ -44,7 +44,7 @@ export class ProxyConfiguration {
     if (input.amtProfile?.proxyConfigs != null) {
       // Get Proxy profile information based on the profile name from db.
       this.db = await this.dbFactory.getDb()
-      input.proxyConfigs = await this.db.proxyConfigs.getByName(
+      input.proxyConfig = await this.db.proxyConfigs.getByName(
         input.amtProfile.proxyConfigs[input.proxyConfigsCount].profileName,
         input.amtProfile.tenantId
       )
@@ -56,15 +56,15 @@ export class ProxyConfiguration {
   addProxyConfigs = async ({ input }: { input: ProxyConfigContext }): Promise<any> => {
     // Add proxy config information to HTTP Proxy Service object
     const proxyAccessPointParameters: IPS.Models.AddProxyAccessPointParameters = {
-      AccessInfo: input.proxyConfigs?.address ?? '',
-      InfoFormat: input.proxyConfigs?.infoFormat ?? 3,
-      Port: input.proxyConfigs?.port ?? 0,
-      NetworkDnsSuffix: input.proxyConfigs?.networkDnsSuffix ?? ''
+      AccessInfo: input.proxyConfig?.address ?? '',
+      InfoFormat: input.proxyConfig?.infoFormat ?? 3,
+      Port: input.proxyConfig?.port ?? 0,
+      NetworkDnsSuffix: input.proxyConfig?.networkDnsSuffix ?? ''
     }
 
     input.xmlMessage = input.ips?.HTTPProxyService.AddProxyAccessPoint(proxyAccessPointParameters)
 
-    input.proxyConfigName = input.proxyConfigs?.address ?? null
+    input.proxyConfigName = input.proxyConfig?.address ?? null
     // Increment the count to keep track of proxies added to AMT
     ++input.proxyConfigsCount
     return await invokeWsmanCall(input)
@@ -94,7 +94,7 @@ export class ProxyConfiguration {
     },
     actions: {
       'Update Configuration Status': ({ context }) => {
-        const { clientId, proxyConfigsAdded, proxyConfigsFailed, statusMessage, errorMessage } = context
+        const { clientId, proxyConfigAdded: proxyConfigsAdded, proxyConfigFailed: proxyConfigsFailed, statusMessage, errorMessage } = context
         const device = devices[clientId]
         const networkStatus = device.status.Network
         let message
@@ -113,32 +113,32 @@ export class ProxyConfiguration {
       'Reset Retry Count': assign({ retryCount: () => 0 }),
       'Increment Retry Count': assign({ retryCount: ({ context }) => context.retryCount + 1 }),
       'Check Return Value': assign({
-        proxyConfigsAdded: ({ context, event }) => {
+        proxyConfigAdded: ({ context, event }) => {
           if (event.output.Envelope?.Body?.AddProxyAccessPoint_OUTPUT?.ReturnValue === 0) {
-            if (context.proxyConfigsAdded == null) {
+            if (context.proxyConfigAdded == null) {
               return `${context.proxyConfigName}`
             } else {
-              return `${context.proxyConfigsAdded}, ${context.proxyConfigName}`
+              return `${context.proxyConfigAdded}, ${context.proxyConfigName}`
             }
           } else {
-            return context.proxyConfigsAdded
+            return context.proxyConfigAdded
           }
         },
-        proxyConfigsFailed: ({ context, event }) => {
+        proxyConfigFailed: ({ context, event }) => {
           if (event.output.Envelope?.Body?.AddProxyAccessPoint_OUTPUT?.ReturnValue !== 0) {
-            if (context.proxyConfigsFailed == null) {
+            if (context.proxyConfigFailed == null) {
               return `${context.proxyConfigName}`
             } else {
-              return `${context.proxyConfigsFailed}, ${context.proxyConfigName}`
+              return `${context.proxyConfigFailed}, ${context.proxyConfigName}`
             }
           } else {
-            return context.proxyConfigsFailed
+            return context.proxyConfigFailed
           }
         }
       })
     }
   }).createMachine({
-    /** @xstate-layout N4IgpgJg5mDOIC5QAcBOB7AHgTwLQGN0A7AMwEsoBXVAQwBczjcBbG-ACzKLADoBBAMIAVAJIA1PqIDyAOQDEABQBKUgBoBNAbIBiIgOIBtAAwBdRCnSwyDYuZCZEAFgBMARh4BOIwDZnAZkcADi9nUIBWMIAaEGxEQPcwoyNXIwB2ZyNQj0cw1IBfPOi0LDxCUgpqekYiFjZObh4BAAkAUQEAaQB9bSklTuU1dU6tGV09AGU5YzMkEGRLa2q7BwQU13dA50CjD2zvR1S-V29o2NXXDx5Uoz9-Vz9vLw8-MOcCoowcAmJyKlobGqsDhcXh6FpCfoqDTDHT6OQQYi8LgAN3QAGteDA6Lhil8yr9pnZ5lYActEGtAld4hcPIlUtlUicYohnKkwjxvGFvA9HF5goEBWF3nNPqUfhV-tVasCGmCIQNoSMxnIwKgMKgeMgADb0EjoVDMHhYnGi77lKCE2bExa2WYrVy5VI8HJHC7+baOIxRZkIZyvTzODzbP37VyBVLHYW4sXmyoA6X1Xh8AAiychgxho30kwRDRR6N4NAgEBNJTNv1glosJKWdqcbk8Pn8QRC4W9ZyCTsCYWyN1CLlSbPyhRFZfxEqqTCBif4qfTithExVav1mp1dD1Bp4RZL0fLFErpiJC1JdYQLncXl8AWCmTbp0Qfmyje5D3WbMS3ijpvHf0ngLqEFGlaDpOhTNMFSGJVs06JQWnGBRZHGFopiPK0T1rUB7WSDYth2PYDiOJkOwuHg3F8VxWXuRww0cb8x3FP942nIDmjaLpwPnKDF3GWD4MQmRkKmVwZmrG0iDJVYcJ4TZtl2Rx9kOY4H3PTkyOOC5blpNJOSFEc91-OMpRYhoWiUFQlDkHQ+BEAAZFpkyrOYMNtLDyUdZ0wldDx3SMT123c9lOW5INrkcF5vECAoRyIdAIDgIkf0Yoyp0A7hjxrVz7EQXBiJy9ldkKorir8ei8WSyVUplJNhHESQRFkDLxMk5xvASB1vB2UIbheLyVPfTwvPuJJci5DI9I+BjY0qgDquA9jul6LjMzGcYmtPNyEEiykwzZW4aTcRx+tcJ1aSOPwRrZXwvTKmNfhS2aZzlZboL0dbMOy1Z-GcF8-RGk6IhUv13A687+RyMIov0pLpv-BMgM4yCVuzd6spWFwgYjMj4luRIjG2PsJtHcrYeYtLeDY0DEahbiswmPiEKQlpUYks99m8HgAj8Rl8a8F4jp9Fw-BkzYPFccL8ayImDIquGTN4MyLJZyTKP2MiudDMIFI647LmCxJ4i5fYtdu-cmOM8meG0Gz7OTZWzxOrx1fC8MvF5bmPH6hSXwCR4FI8R4vNNwyZvhhpxgAVQEAR4LW9DMtZzbKNuX68bCAGAvPP0rmODJIvuUIHmivIgA */
+    /** @xstate-layout N4IgpgJg5mDOIC5QAcBOB7AHgTwLQGN0A7AMwEsoBXVAQwBczjcBbG-ACzKLADoBBAMIAVAJIA1PqIDyAOQDEABQBKUgBoBNAbIBiIgOIBtAAwBdRCnSwyDYuZCZEAFgBMARh4BOIwDZnAZkcADi9nUIBWMIAaEGxEQPcwoyNXIwB2ZyNQj0cw1IBfPOi0LDxCUgpqekYiFjZObh4BAAkAUQEAaQB9bSklTuU1dU6tGV09AGU5YzMkEGRLa2q7BwQU13dA50CjD2zvR1S-V29o2NXXDx5Uoz9-Vz9vLw8-MOcCoowcAmJyKlobGqsDhcXjNNpdHp9AYaYY6fSTAyuGYWKwA5aIIynDHvOafUo-Cr-aq1YENPQtIT9FQwkZjOQQYi8LgAN3QAGteDA6Lhil8yr9pnZ5qilrMVmtAld4hcPIlUtlUicYohnKkwjxvGFvA9HF5goEDWEcbz8eU-lUmED6rxyZToUNafo5GBUBhUDxkAAbegkdCoZg8Lk8vHfM2C2bCxa2MWIVy5VI8HJHC7+baOIxRZUIZyvTzODzbHP7VyBVLHY0h-mEi2Auog-gAEQbVMGsNG8PpjJ4LPZvBoEAgwZKod+sHDKKjRHRCBc7i8vgCwUy4UzZyCCcCYWyN1CLlSavyhVxw6r5oBJOtjeb9rbY0mLrdHu9dF9-p4-cHJpHFDHpiFCzRGMZzcTwfH8IIQhXLEED8bJQO1B51jVRJvArE8CTPYkrXrMEOk6PgmxbGk4QmTolBacYFFkcYWimP8IwA0VQHFZINi2HY9gOI4lTXC4eDcXxXFVe5HBLRw0L5DDKnPbCGlwroCOvakHRI8YyIoqiZBoqYkX-EVo2Y2NWJ4TZtl2Rx9kOY5oIs9UBIuW5ZTSTUjRxIh0AgOAhUrKSiUtOtuD0ydp1wIJoNwUseGObxvFSQJROOWC-Ak01fmkrCAt4QRRAkaQZCCwDDOzbwEjjbwdlCG4XjCPxoKQzwavuJJci1DJXI+dCzXS-zSVBVo8MhIiVPbCYCqY+xEG8A0otLGq3F2NxHDq1wE1lI4-GatVfAzFLv0wnrL1tIbb30MaDIm1Z-GceCc2alaImgnN3DK9b9RyMJAl209utrXqr2Ox1RoY-SpyAlxHrLfj4luRIjG2Hd2uPSSur837L3k-DCJvQG1PIyjqJaM7QaK-ZvB4AI-EVOGvBeJasxcPwTM2DxXEcDbNnzRGv2+1GL3rbQ+BEAAZFoGyJ6cVq8fiKdLLxdUpjw6os+CAkeCyPEeGqvt8ms+YacYAFUBAECjxnFoChNuG7YbCe7VycHMrmODIpvuUIHgKAogA */
     context: ({ input }) => ({
       clientId: input.clientId,
       amtProfile: input.amtProfile,
@@ -199,10 +199,10 @@ export class ProxyConfiguration {
           },
           onError: {
             actions: assign({
-              proxyConfigsFailed: ({ context }) =>
-                context.proxyConfigsFailed == null
+              proxyConfigFailed: ({ context }) =>
+                context.proxyConfigFailed == null
                   ? `${context.proxyConfigName}`
-                  : `${context.proxyConfigsFailed}, ${context.proxyConfigName}`
+                  : `${context.proxyConfigFailed}, ${context.proxyConfigName}`
             }),
             target: 'CHECK_ADD_PROXY_CONFIGS_RESPONSE'
           }
