@@ -15,6 +15,7 @@ import { type CommonContext, invokeWsmanCall } from './common.js'
 import { UNEXPECTED_PARSE_ERROR } from '../utils/constants.js'
 import { WiredConfiguration } from './wiredNetworkConfiguration.js'
 import { WiFiConfiguration } from './wifiNetworkConfiguration.js'
+import { ProxyConfiguration } from './proxyConfiguration.js'
 
 export interface NetworkConfigContext extends CommonContext {
   amtProfile: AMTConfiguration | null
@@ -40,6 +41,7 @@ export class NetworkConfiguration {
   error: Error = new Error()
   wiredConfiguration: WiredConfiguration = new WiredConfiguration()
   wifiConfiguration: WiFiConfiguration = new WiFiConfiguration()
+  proxyConfiguration: ProxyConfiguration = new ProxyConfiguration()
 
   putGeneralSettings = async ({ input }: { input: NetworkConfigContext }): Promise<any> => {
     input.xmlMessage = input.amt.GeneralSettings.Put(input.generalSettings)
@@ -103,6 +105,7 @@ export class NetworkConfiguration {
     actors: {
       wiredConfiguration: this.wiredConfiguration.machine,
       wifiConfiguration: this.wifiConfiguration.machine,
+      proxyConfiguration: this.proxyConfiguration.machine,
       errorMachine: this.error.machine,
       putGeneralSettings: fromPromise(this.putGeneralSettings),
       enumerateEthernetPortSettings: fromPromise(this.enumerateEthernetPortSettings),
@@ -124,6 +127,13 @@ export class NetworkConfiguration {
         }
         return false
       },
+      isProxyGiven: ({ context }) => {
+        const profile = context.amtProfile
+        if (profile?.proxyConfigs != null) {
+          return profile.proxyConfigs.length > 0
+        }
+        return false
+      },
       isLocalProfileSynchronizationNotEnabled: ({ context }) =>
         context.message.Envelope.Body.AMT_WiFiPortConfigurationService.localProfileSynchronizationEnabled === 0,
       shouldRetry: ({ context, event }) =>
@@ -141,6 +151,7 @@ export class NetworkConfiguration {
       }
     }
   }).createMachine({
+    /** @xstate-layout N4IgpgJg5mDOIC5QDswBcDuB7ATgawFoBjLZAMwEsoBXHAQzQtIIFs6iALC1AOgEEAwgBUAkgDU+ogPIA5AMQyAokIDqUgEoBpAbIBiIgOIBVdZJGyA2gAYAuolAAHLLAqNS9kAA9EAZgAsAEw8AKx+AIwAbBEA7AAcPgHRYWHRADQgAJ6IflYAnDzRVvE+PrkRfsGx0YkAvjXpqJi4hCTkVLQMTMis7Fy8AgASigKaAPoGikqmADKjAMrKojIGc3LWdkggTi5uyB7eCLE5Ibk+0cE+Vn65yT7B6VkIl8E8edUBAUc5RbF1DejYfDEUiUGj0XY9TjcMA8QbDMYTKZ8WYLIRLFZrMIbRzOVxdfaII5WE5nC5XG5hO4PbIRMIhYr+MLxKIVHx-ECNQEtEHtcFdSF9GEABSMQnGk0UM3mixEy1WEFIMO4ADcsHgYQ5qGgCDBUPQADYEWDoRjIKCwdYebZ49ybA5hYJXAqlSqxKqJHJhakIAK5F6OqyBqyVJllcrsznNYFtMGdZhsKG8EVixGS5HStGyjFgHA4XA8Bz6hhkXAsAtanVgPV0Q3GtCm82WzbW3YEhAOp3RF1u93RT3egJWOk3KJRXJ5PwRXJuiMAqOtUEdCEJwU8SZGACyaaEilGyiG6iUYqFGjFqPR8sVPBVaphVeoLBzDDABHQHBzjQIThw2rrDYtthWrirZ2ogDrxCEwSDrEuSDlYPgpN6lTEkUJT+AEoQJP4s5NECC68nG3QrtCa4yJu267vukpHqMJ7qGeMpynIOZ5jgBZFmgJY4GW96PuCL5vh+6Bfrgv4mtwjaAc2wH4qBPoIbEPDTn6NzTlOiQ+EhESKaOUTnH4fg+BERQ4Vy0aLny8a9CRIrTLMVGHsotGnhmF5yAqvA3uq5b6oagk4J+35ifWEkAdiWwybaoD2o6fjOn6PbVH2Q7esksTDpEURVAkwZ+KZ848rGy7WUmRh2XuQgHjRdEMZmTEsfmhbFqWPl+Wg74BcJQVGuJZphUBOyydFYGxfFrq9v2mSIDEPg8LpMSwTEjoBPleGFUu-LEaV5UOdVLnnlmqwNWxTWcS1mq+a+7VCdq3V-qFFhYgNNp7HJHZxV2CVuklk2PNEMQ8BhQYOrkNz-bkq3cjGG1WYmMJwiMFVVU5NWuYdtFlbM6iKHMJ4yAsaxSTig1RV4iABApSkwcEqmxOpXapVY5xzUDViDqUFMRMEkPmQRxVw7CQyI7tKP7YxKwY+V2O47IBOPeFLZDWT8lMlTKlhGpsEM1N7YBMchTFME5SXLEAQRDz+FFZtJXw0LYwi8eYt1RLtlYzjeNywECuRa9w0q4pyk0xrdNa5pOvjvkoSZUcdylPBFvrZZRE2zwKgiNjAAiow6DI+jGKY0jyB5SrIKq3kYBQOCQAQkZrdDScCtCTbEy9baXBhrwRBhtw00k5yM2UIRTgZXOFF2FQJ-XhGN7waeZ9neiGCYZiyO5V5eTCFdVxANdznXFnT1tYDy89IF++3LxWF3wQ97kff3DrYTkp3uQj4ECkfJPB-86uaf6Avucl4F3MEXdepdbw8ArpQXeuEobf2tnDZuEUSa+2VqUY48Ewhm2uOcKIXpH4BBSDwQywZgjRHIYOSIvx6gcj3nAvmCDVxCnUFIAAGgATQAXnZehc16eXAd5BweZPAZF5lbWGgokGK1JgcdBKEELYLvkbWk3o+yzQNiUPwpsjhm2of8WBYiYbJwFpKFh6g+ElzLneXMuAZ7HyJsg1ucl0IhHCHpeIiRkhpB1kZII0E0LpUKP4PRtCDGWyMXYtc6gzFyD0HwEQ0xFAZykT7NugRXGZTiAkJIiEdbpR4JlUcptX40wwnUGhyAsAQDgB4Wu9DxHGMFKfJWBwCARG9AQF4oNQbuhjoEcIX8GESJIoIUQEhC7NJkeTeCxCr5AxiEUKcVRvSTmJPNc4TNyg00GQ0yJCMEQSilAdOUkzUEHBpl0yoJRQhaPIXkFZFxiGFL7LEN4yidkRKPjwZM4okQonFnMU5bZkgzLNl2LmkQNZ+G1o8T4KFKRulflcfwTMPkNy+euLcBdKKVWoqLeiaMTnSRQcCmCEQChhAqOOIycy-RITITwKoAZUKbIdGiw+KdXZIzxY7AlxyVhAreqhMa2U8inAdKlB0QQrnXMSN9c47Kf4kX2dyxyvLaoXklm7GW+NFCCr9qGWa1MiT+GhWQsOjxkivx4Gha5BlTY30VYwkic8klcKASvGQ+rlZm19J3IGd8yjjmWY-NmikrjR0dMZa4TrhmzxEP-HO3DgGyG9bIm5rwFEREZJ8KCARJWFBOO8fpULtKxsaTZFhHD3X509Wm3wGbMFmxzbEPN3opzkqZYGLB047jRHLZE0xGh60IECN6S45L-DvD1kkFkKQB1fN0PExJGcR2+vyHMx0gapxFG8Y8YIRtGUyrcVCpIC6U5zCMAIAQONAXEqcX7QIXcCjRoSPEU20LGbpMIa-Sc6CcnlJqEAA */
     // todo: the actual context comes in from the parent and clobbers this one
     // xstate version 5 should fix this.
     context: ({ input }) => ({
@@ -270,6 +281,10 @@ export class NetworkConfiguration {
               guard: 'isWifiSupportedOnDevice',
               target: 'WIFI_CONFIGURATION'
             },
+            {
+              guard: 'isProxyGiven',
+              target: 'PROXY_CONFIGURATION'
+            },
             { target: 'SUCCESS' }
           ]
         }
@@ -289,6 +304,29 @@ export class NetworkConfiguration {
             retryCount: 0,
             amt: context.amt,
             cim: context.cim
+          }),
+          onDone: [
+            {
+              guard: 'isProxyGiven',
+              target: 'PROXY_CONFIGURATION'
+            },
+            { target: 'SUCCESS' }
+          ]
+        }
+      },
+      PROXY_CONFIGURATION: {
+        entry: sendTo('proxy-configuration-machine', { type: 'PROXYCONFIG' }),
+        invoke: {
+          src: 'proxyConfiguration',
+          id: 'proxy-configuration-machine',
+          input: ({ context }) => ({
+            clientId: context.clientId,
+            amtProfile: context.amtProfile,
+            httpHandler: context.httpHandler,
+            message: '',
+            proxyConfigsCount: 0,
+            retryCount: 0,
+            ips: context.ips
           }),
           onDone: 'SUCCESS'
         }
