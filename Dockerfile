@@ -2,7 +2,7 @@
 # Copyright (c) Intel Corporation 2021
 # SPDX-License-Identifier: Apache-2.0
 #*********************************************************************/
-FROM node:24-bullseye-slim@sha256:1bbe2bea2b4d8491bf118ad6e213069c0cbea1c69e8ad58f10560aed790dbba7 as builder
+FROM node:24-bullseye-slim@sha256:2502c8872aa92d104425541e7ea04ec0b858b71e8a3141d6c051673620fba6d7 as builder
 
 WORKDIR /rps
 
