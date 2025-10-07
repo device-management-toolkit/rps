@@ -6,10 +6,16 @@
 import Logger from '../../../Logger.js'
 import { NOT_FOUND_EXCEPTION, NOT_FOUND_MESSAGE } from '../../../utils/constants.js'
 import { type AMTConfiguration } from '../../../models/index.js'
-import { ClientAction, type ProfileWifiConfigs, TlsSigningAuthority } from '../../../models/RCS.Config.js'
+import {
+  ClientAction,
+  type ProfileWifiConfigs,
+  type ProfileProxyConfigs,
+  TlsSigningAuthority
+} from '../../../models/RCS.Config.js'
 import { MqttProvider } from '../../../utils/MqttProvider.js'
 import { type Request, type Response } from 'express'
 import { type IProfilesWifiConfigsTable } from '../../../interfaces/database/IProfileWifiConfigsDb.js'
+import { type IProfileProxyConfigsTable } from '../../../interfaces/database/IProfileProxyConfigsDb.js'
 import handleError from '../../../utils/handleError.js'
 import { RPSError } from '../../../utils/RPSError.js'
 import { type DeviceCredentials } from '../../../interfaces/ISecretManagerService.js'
@@ -27,6 +33,7 @@ export async function editProfile(req: Request, res: Response): Promise<void> {
     } else {
       let amtConfig: AMTConfiguration = await getUpdatedData(newConfig, oldConfig)
       amtConfig.wifiConfigs = await handleWifiConfigs(newConfig, oldConfig, req.db.profileWirelessConfigs)
+      amtConfig.proxyConfigs = await handleProxyConfigs(newConfig, oldConfig, req.db.profileProxyConfigs)
       // Assigning value key value for AMT Random Password and MEBx Random Password to store in database
       const amtPwdBefore = amtConfig.amtPassword ?? ''
       const mebxPwdBefore = amtConfig.mebxPassword ?? ''
@@ -159,6 +166,18 @@ export const handleWifiConfigs = async (
     wifiConfigs = newConfig.wifiConfigs ?? null
   }
   return wifiConfigs
+}
+
+export const handleProxyConfigs = async (
+  newConfig: AMTConfiguration,
+  oldConfig: AMTConfiguration,
+  profileProxyConfigsDb: IProfileProxyConfigsTable
+): Promise<ProfileProxyConfigs[] | null> => {
+  let proxyConfigs: ProfileProxyConfigs[] | null = null
+  // Always delete existing proxy configs and set new ones if provided
+  await profileProxyConfigsDb.deleteProfileProxyConfigs(newConfig.profileName, newConfig.tenantId)
+  proxyConfigs = newConfig.proxyConfigs ?? null
+  return proxyConfigs
 }
 
 export const getUpdatedData = async (newConfig: any, oldConfig: AMTConfiguration): Promise<AMTConfiguration> => {

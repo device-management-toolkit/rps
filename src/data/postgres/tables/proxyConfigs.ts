@@ -57,7 +57,7 @@ export class ProxyConfigsTable implements IProxyConfigsTable {
     const results = await this.db.query<ProxyConfig>(
       `
     SELECT
-      proxy_config_name as "proxyName",
+      proxy_config_name as "name",
       address as "address",
       info_format as "infoFormat",
       port as "port",
@@ -78,14 +78,14 @@ export class ProxyConfigsTable implements IProxyConfigsTable {
 
   /**
    * @description Get proxy profile from DB by name
-   * @param {string} proxyName
+   * @param {string} name
    * @returns {ProxyConfig} ProxyConfig object
    */
-  async getByName(proxyName: string, tenantId = ''): Promise<ProxyConfig | null> {
+  async getByName(name: string, tenantId = ''): Promise<ProxyConfig | null> {
     const results = await this.db.query<ProxyConfig>(
       `
     SELECT
-      proxy_config_name as "proxyName",
+      proxy_config_name as "name",
       address as "address",
       info_format as "infoFormat",
       port as "port",
@@ -93,7 +93,7 @@ export class ProxyConfigsTable implements IProxyConfigsTable {
       tenant_id as "tenantId"
     FROM proxyconfigs 
     WHERE proxy_config_name = $1 and tenant_id = $2`,
-      [proxyName, tenantId]
+      [name, tenantId]
     )
 
     if ((results?.rowCount ?? 0) > 0) {
@@ -105,16 +105,16 @@ export class ProxyConfigsTable implements IProxyConfigsTable {
 
   /**
    * @description Check proxy profile exists in DB by name
-   * @param {string} proxyName
+   * @param {string} name
    * @returns {string[]}
    */
-  async checkProfileExits(proxyName: string, tenantId = ''): Promise<boolean> {
+  async checkProfileExits(name: string, tenantId = ''): Promise<boolean> {
     const results = await this.db.query(
       `
     SELECT 1
     FROM proxyconfigs 
     WHERE proxy_config_name = $1 and tenant_id = $2`,
-      [proxyName, tenantId]
+      [name, tenantId]
     )
 
     if ((results?.rowCount ?? 0) > 0) {
@@ -126,19 +126,19 @@ export class ProxyConfigsTable implements IProxyConfigsTable {
 
   /**
    * @description Delete proxy profile from DB by name
-   * @param {string} proxyName
+   * @param {string} name
    * @returns {boolean} Return true on successful deletion
    */
-  async delete(proxyName: string, tenantId = ''): Promise<boolean> {
+  async delete(name: string, tenantId = ''): Promise<boolean> {
     const profiles = await this.db.query(
       `
     SELECT 1
     FROM profiles_proxyconfigs
     WHERE proxy_config_name = $1 and tenant_id = $2`,
-      [proxyName, tenantId]
+      [name, tenantId]
     )
     if ((profiles?.rowCount ?? 0) > 0) {
-      throw new RPSError(NETWORK_CONFIG_DELETION_FAILED_CONSTRAINT('Proxy', proxyName), 'Foreign key violation')
+      throw new RPSError(NETWORK_CONFIG_DELETION_FAILED_CONSTRAINT('Proxy', name), 'Foreign key violation')
     }
     try {
       const results = await this.db.query(
@@ -146,17 +146,17 @@ export class ProxyConfigsTable implements IProxyConfigsTable {
       DELETE
       FROM proxyconfigs
       WHERE proxy_config_name = $1 and tenant_id = $2`,
-        [proxyName, tenantId]
+        [name, tenantId]
       )
       if (results?.rowCount) {
         return results.rowCount > 0
       }
     } catch (error) {
-      this.log.error(`Failed to delete proxy configuration : ${proxyName}`, error)
+      this.log.error(`Failed to delete proxy configuration : ${name}`, error)
       if (error.code === PostgresErr.C23_FOREIGN_KEY_VIOLATION) {
-        throw new RPSError(NETWORK_CONFIG_DELETION_FAILED_CONSTRAINT('Proxy', proxyName))
+        throw new RPSError(NETWORK_CONFIG_DELETION_FAILED_CONSTRAINT('Proxy', name))
       }
-      throw new RPSError(API_UNEXPECTED_EXCEPTION(`Delete proxy configuration : ${proxyName}`))
+      throw new RPSError(API_UNEXPECTED_EXCEPTION(`Delete proxy configuration : ${name}`))
     }
     return false
   }
@@ -175,7 +175,7 @@ export class ProxyConfigsTable implements IProxyConfigsTable {
         (proxy_config_name, address, info_format, port, network_dns_suffix, creation_date, tenant_id)
         values($1, $2, $3, $4, $5, $6, $7)`,
         [
-          proxyConfig.proxyName,
+          proxyConfig.name,
           proxyConfig.address,
           proxyConfig.infoFormat,
           proxyConfig.port,
@@ -186,17 +186,14 @@ export class ProxyConfigsTable implements IProxyConfigsTable {
       )
 
       if ((results?.rowCount ?? 0) > 0) {
-        const config = await this.getByName(proxyConfig.proxyName, proxyConfig.tenantId)
+        const config = await this.getByName(proxyConfig.name, proxyConfig.tenantId)
         return config
       }
     } catch (error) {
       if (error.code === PostgresErr.C23_UNIQUE_VIOLATION) {
-        throw new RPSError(
-          NETWORK_CONFIG_INSERTION_FAILED_DUPLICATE('Proxy', proxyConfig.proxyName),
-          'Unique key violation'
-        )
+        throw new RPSError(NETWORK_CONFIG_INSERTION_FAILED_DUPLICATE('Proxy', proxyConfig.name), 'Unique key violation')
       }
-      throw new RPSError(NETWORK_CONFIG_ERROR('Proxy', proxyConfig.proxyName))
+      throw new RPSError(NETWORK_CONFIG_ERROR('Proxy', proxyConfig.name))
     }
     return null
   }
@@ -216,7 +213,7 @@ export class ProxyConfigsTable implements IProxyConfigsTable {
       SET address=$2, info_format=$3, port=$4, network_dns_suffix=$5 
       WHERE proxy_config_name=$1 and tenant_id = $6`,
         [
-          proxyConfig.proxyName,
+          proxyConfig.name,
           proxyConfig.address,
           proxyConfig.infoFormat,
           proxyConfig.port,
@@ -225,12 +222,12 @@ export class ProxyConfigsTable implements IProxyConfigsTable {
         ]
       )
 
-      latestItem = await this.getByName(proxyConfig.proxyName, proxyConfig.tenantId)
+      latestItem = await this.getByName(proxyConfig.name, proxyConfig.tenantId)
       if ((results?.rowCount ?? 0) > 0) {
         return latestItem
       }
     } catch (error) {
-      throw new RPSError(NETWORK_CONFIG_ERROR('Proxy', proxyConfig.proxyName))
+      throw new RPSError(NETWORK_CONFIG_ERROR('Proxy', proxyConfig.name))
     }
     // making assumption that if no records are updated, that it is due to concurrency. We've already checked for if it doesn't exist before calling update.
     throw new RPSError(CONCURRENCY_MESSAGE, CONCURRENCY_EXCEPTION, latestItem)

@@ -27,7 +27,7 @@ export class ProfileProxyConfigsTable implements IProfileProxyConfigsTable {
       `
     SELECT 
       priority as "priority",
-      proxy_config_name as "profileName"
+      proxy_config_name as "name"
     FROM profiles_proxyconfigs
     WHERE profile_name = $1 and tenant_id = $2
     ORDER BY priority`,
@@ -53,7 +53,7 @@ export class ProfileProxyConfigsTable implements IProfileProxyConfigsTable {
       }
       // Preparing data for inserting multiple rows
       const configs = proxyConfigs.map((config) => [
-        config.profileName,
+        config.name,
         profileName,
         config.priority,
         tenantId

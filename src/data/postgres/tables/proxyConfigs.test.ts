@@ -24,10 +24,10 @@ describe('proxy configs tests', () => {
   let proxyConfigsTable: ProxyConfigsTable
   let querySpy: SpyInstance<any>
   let proxyConfig: ProxyConfig
-  const profileName = 'proxyName'
+  const profileName = 'name'
   beforeEach(() => {
     proxyConfig = {
-      proxyName: 'proxy profile',
+      name: 'proxy profile',
       address: 'proxy.com',
       infoFormat: 201, // FQDN (201)
       port: 1000,
@@ -97,7 +97,7 @@ describe('proxy configs tests', () => {
       expect(querySpy).toBeCalledWith(
         `
     SELECT
-      proxy_config_name as "proxyName",
+      proxy_config_name as "name",
       address as "address",
       info_format as "infoFormat",
       port as "port",
@@ -123,7 +123,7 @@ describe('proxy configs tests', () => {
       expect(querySpy).toBeCalledWith(
         `
     SELECT
-      proxy_config_name as "proxyName",
+      proxy_config_name as "name",
       address as "address",
       info_format as "infoFormat",
       port as "port",
@@ -226,7 +226,7 @@ describe('proxy configs tests', () => {
       const result = await proxyConfigsTable.insert(proxyConfig)
 
       expect(result).toBe(proxyConfig)
-      expect(getByNameSpy).toHaveBeenCalledWith(proxyConfig.proxyName, proxyConfig.tenantId)
+      expect(getByNameSpy).toHaveBeenCalledWith(proxyConfig.name, proxyConfig.tenantId)
       expect(querySpy).toBeCalledTimes(1)
       expect(querySpy).toBeCalledWith(
         `
@@ -234,7 +234,7 @@ describe('proxy configs tests', () => {
         (proxy_config_name, address, info_format, port, network_dns_suffix, creation_date, tenant_id)
         values($1, $2, $3, $4, $5, $6, $7)`,
         [
-          proxyConfig.proxyName,
+          proxyConfig.name,
           proxyConfig.address,
           proxyConfig.infoFormat,
           proxyConfig.port,
@@ -256,13 +256,13 @@ describe('proxy configs tests', () => {
     test('should NOT insert when duplicate name', async () => {
       querySpy.mockRejectedValueOnce({ code: '23505' })
       await expect(proxyConfigsTable.insert(proxyConfig)).rejects.toThrow(
-        NETWORK_CONFIG_INSERTION_FAILED_DUPLICATE('Proxy', proxyConfig.proxyName)
+        NETWORK_CONFIG_INSERTION_FAILED_DUPLICATE('Proxy', proxyConfig.name)
       )
     })
     test('should NOT insert when unexpected exception', async () => {
       querySpy.mockRejectedValueOnce(new Error('unknown'))
       await expect(proxyConfigsTable.insert(proxyConfig)).rejects.toThrow(
-        NETWORK_CONFIG_ERROR('Proxy', proxyConfig.proxyName)
+        NETWORK_CONFIG_ERROR('Proxy', proxyConfig.name)
       )
     })
   })
@@ -273,7 +273,7 @@ describe('proxy configs tests', () => {
       getByNameSpy.mockResolvedValue(proxyConfig)
       const result = await proxyConfigsTable.update(proxyConfig)
       expect(result).toBe(proxyConfig)
-      expect(getByNameSpy).toHaveBeenCalledWith(proxyConfig.proxyName, proxyConfig.tenantId)
+      expect(getByNameSpy).toHaveBeenCalledWith(proxyConfig.name, proxyConfig.tenantId)
       expect(querySpy).toBeCalledTimes(1)
       expect(querySpy).toBeCalledWith(
         `
@@ -281,7 +281,7 @@ describe('proxy configs tests', () => {
       SET address=$2, info_format=$3, port=$4, network_dns_suffix=$5 
       WHERE proxy_config_name=$1 and tenant_id = $6`,
         [
-          proxyConfig.proxyName,
+          proxyConfig.name,
           proxyConfig.address,
           proxyConfig.infoFormat,
           proxyConfig.port,
@@ -307,7 +307,7 @@ describe('proxy configs tests', () => {
       const getByNameSpy = spyOn(proxyConfigsTable, 'getByName')
       getByNameSpy.mockResolvedValue(proxyConfig)
       await expect(proxyConfigsTable.update(proxyConfig)).rejects.toThrow(
-        NETWORK_CONFIG_ERROR('Proxy', proxyConfig.proxyName)
+        NETWORK_CONFIG_ERROR('Proxy', proxyConfig.name)
       )
     })
 
@@ -316,7 +316,7 @@ describe('proxy configs tests', () => {
       const getByNameSpy = spyOn(proxyConfigsTable, 'getByName')
       getByNameSpy.mockResolvedValue(proxyConfig)
       await expect(proxyConfigsTable.update(proxyConfig)).rejects.toThrow(CONCURRENCY_MESSAGE)
-      expect(getByNameSpy).toHaveBeenCalledWith(proxyConfig.proxyName, proxyConfig.tenantId)
+      expect(getByNameSpy).toHaveBeenCalledWith(proxyConfig.name, proxyConfig.tenantId)
       expect(querySpy).toBeCalledTimes(1)
       expect(querySpy).toBeCalledWith(
         `
@@ -324,7 +324,7 @@ describe('proxy configs tests', () => {
       SET address=$2, info_format=$3, port=$4, network_dns_suffix=$5 
       WHERE proxy_config_name=$1 and tenant_id = $6`,
         [
-          proxyConfig.proxyName,
+          proxyConfig.name,
           proxyConfig.address,
           proxyConfig.infoFormat,
           proxyConfig.port,

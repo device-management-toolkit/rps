@@ -15,7 +15,7 @@ describe('profileproxyconfig tests', () => {
   let profilesProxyConfigsTable: ProfileProxyConfigsTable
   let querySpy: SpyInstance<any>
   const proxyConfigs: ProfileProxyConfigs[] = [
-    { profileName: 'proxyConfig', priority: 1 } as any
+    { name: 'proxyConfig', priority: 1 } as any
   ]
   const profileName = 'profileName'
   const tenantId = 'tenantId'
@@ -38,7 +38,7 @@ describe('profileproxyconfig tests', () => {
         `
     SELECT 
       priority as "priority",
-      proxy_config_name as "profileName"
+      proxy_config_name as "name"
     FROM profiles_proxyconfigs
     WHERE profile_name = $1 and tenant_id = $2
     ORDER BY priority`,

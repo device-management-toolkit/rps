@@ -26,6 +26,7 @@ export interface UnconfigContext extends CommonContext {
   privateCerts: any[]
   tlsSettingData: any[]
   publicKeyCertificates: any[]
+  httpProxyAccessPoints?: any[]
   status?: 'success' | 'error' | 'wsman' | 'heartbeat_request'
   ciraConfig?: CIRAConfig | null
   is8021xProfileUpdated?: boolean
@@ -105,6 +106,42 @@ export class Unconfiguration {
     }
   }
 
+  enumerateHTTPProxyAccessPoint = async ({ input }): Promise<any> => {
+    if (input.ips != null) {
+      input.xmlMessage = input.ips.HTTPProxyAccessPoint.Enumerate()
+      return await invokeWsmanCall(input, 2)
+    } else {
+      this.logger.error('Null object in enumerateHTTPProxyAccessPoint()')
+    }
+  }
+
+  pullHTTPProxyAccessPoint = async ({ input }): Promise<any> => {
+    if (input.ips != null) {
+      // Use EnumerationContext from PullResponse if available (for subsequent pulls), otherwise from EnumerateResponse
+      const enumerationContext =
+        input.message.Envelope.Body?.PullResponse?.EnumerationContext ??
+        input.message.Envelope.Body?.EnumerateResponse?.EnumerationContext
+      input.xmlMessage = input.ips.HTTPProxyAccessPoint.Pull(enumerationContext)
+      return await invokeWsmanCall(input)
+    } else {
+      this.logger.error('Null object in pullHTTPProxyAccessPoint()')
+    }
+  }
+
+  deleteHTTPProxyAccessPoint = async ({ input }): Promise<any> => {
+    let httpProxyAccessPoints = input.httpProxyAccessPoints
+    if (httpProxyAccessPoints != null && input.ips != null) {
+      // Deletes first proxy in the array
+      const selector = { name: 'Name', value: httpProxyAccessPoints[0].Name }
+      input.xmlMessage = input.ips.HTTPProxyAccessPoint.Delete(selector)
+      httpProxyAccessPoints = httpProxyAccessPoints.slice(1)
+      input.httpProxyAccessPoints = httpProxyAccessPoints
+      return await invokeWsmanCall(input)
+    }
+    this.logger.error('Null object in deleteHTTPProxyAccessPoint()')
+    return null
+  }
+
   enumerateWifiEndpointSettings = async ({ input }): Promise<any> => {
     input.xmlMessage = input.cim.WiFiEndpointSettings.Enumerate()
     return await invokeWsmanCall(input, 2)
@@ -134,6 +171,31 @@ export class Unconfiguration {
       wifiEndPointSettings.forEach((wifi) => {
         if (wifi.InstanceID != null && wifi.Priority !== 0) {
           context.wifiEndPointSettings?.push({ ...wifi })
+        }
+      })
+    }
+  }
+
+  readHTTPProxyAccessPointPullResponse = ({ context }): void => {
+    let httpProxyAccessPoints: any[] = []
+    if (context.message.Envelope.Body.PullResponse.Items?.IPS_HTTPProxyAccessPoint != null) {
+      // IPS_HTTPProxyAccessPoint is an array if there more than one profile exists, otherwise its just an object from AMT
+      if (Array.isArray(context.message.Envelope.Body.PullResponse.Items.IPS_HTTPProxyAccessPoint)) {
+        httpProxyAccessPoints = context.message.Envelope.Body.PullResponse.Items.IPS_HTTPProxyAccessPoint
+      } else {
+        httpProxyAccessPoints.push(context.message.Envelope.Body.PullResponse.Items.IPS_HTTPProxyAccessPoint)
+      }
+    }
+
+    // Initialize array if it doesn't exist or append to existing array
+    if (context.httpProxyAccessPoints == null) {
+      context.httpProxyAccessPoints = []
+    }
+    if (httpProxyAccessPoints.length > 0) {
+      // Accumulate all HTTP Proxy Access Points with Name, which is required to delete them on AMT device
+      httpProxyAccessPoints.forEach((proxy) => {
+        if (proxy.Name != null) {
+          context.httpProxyAccessPoints?.push({ ...proxy })
         }
       })
     }
@@ -396,6 +458,9 @@ export class Unconfiguration {
       pullEthernetPortSettings: fromPromise(this.pullEthernetPortSettings),
       get8021xProfile: fromPromise(this.get8021xProfile),
       disableWired8021xConfiguration: fromPromise(this.disableWired8021xConfiguration),
+      enumerateHTTPProxyAccessPoint: fromPromise(this.enumerateHTTPProxyAccessPoint),
+      pullHTTPProxyAccessPoint: fromPromise(this.pullHTTPProxyAccessPoint),
+      deleteHTTPProxyAccessPoint: fromPromise(this.deleteHTTPProxyAccessPoint),
       enumerateWifiEndpointSettings: fromPromise(this.enumerateWifiEndpointSettings),
       pullWifiEndpointSettings: fromPromise(this.pullWifiEndpointSettings),
       deleteWiFiProfileOnAMTDevice: fromPromise(this.deleteWiFiProfileOnAMTDevice),
@@ -443,6 +508,11 @@ export class Unconfiguration {
         context.message.Envelope.Body.AMT_EnvironmentDetectionSettingData.DetectionStrings != null,
       hasTLSCredentialContext: ({ context }) =>
         context.message.Envelope.Body.PullResponse.Items?.AMT_TLSCredentialContext != null,
+      hasHTTPProxyAccessPoints: ({ context }) =>
+        context.httpProxyAccessPoints != null ? context.httpProxyAccessPoints.length !== 0 : false,
+      hasMoreHTTPProxyData: ({ context }) =>
+        context.message.Envelope.Body.PullResponse?.EnumerationContext != null &&
+        context.message.Envelope.Body.PullResponse?.EndOfSequence == null,
       is8021xProfileEnabled: ({ context }) =>
         context.message.Envelope.Body.IPS_IEEE8021xSettings.Enabled === 2 ||
         context.message.Envelope.Body.IPS_IEEE8021xSettings.Enabled === 6,
@@ -475,6 +545,7 @@ export class Unconfiguration {
         devices[context.clientId].unauthCount = 0
       },
       'Read WiFi Endpoint Settings Pull Response': this.readWiFiEndpointSettingsPullResponse,
+      'Read HTTP Proxy Access Point Pull Response': this.readHTTPProxyAccessPointPullResponse,
       'Reset Retry Count': assign({ retryCount: () => 0 }),
       'Increment Retry Count': assign({ retryCount: ({ context }) => context.retryCount + 1 }),
       'Read Ethernet Port Settings': this.readEthernetPortSettings
@@ -594,7 +665,7 @@ export class Unconfiguration {
             target: 'ENUMERATE_WIFI_ENDPOINT_SETTINGS'
           },
           {
-            target: 'REMOVE_REMOTE_ACCESS_POLICY_RULE_USER_INITIATED'
+            target: 'ENUMERATE_HTTP_PROXY_ACCESS_POINT'
           }
         ]
       },
@@ -610,7 +681,7 @@ export class Unconfiguration {
               target: 'ENUMERATE_WIFI_ENDPOINT_SETTINGS'
             },
             {
-              target: 'REMOVE_REMOTE_ACCESS_POLICY_RULE_USER_INITIATED'
+              target: 'ENUMERATE_HTTP_PROXY_ACCESS_POINT'
             }
           ],
           onError: {
@@ -666,7 +737,7 @@ export class Unconfiguration {
             target: 'DELETE_WIFI_ENDPOINT_SETTINGS'
           },
           {
-            target: 'REMOVE_REMOTE_ACCESS_POLICY_RULE_USER_INITIATED'
+            target: 'ENUMERATE_HTTP_PROXY_ACCESS_POINT'
           }
         ]
       },
@@ -694,6 +765,85 @@ export class Unconfiguration {
           {
             guard: 'isWifiProfilesExistsOnDevice',
             target: 'DELETE_WIFI_ENDPOINT_SETTINGS'
+          },
+          {
+            target: 'ENUMERATE_HTTP_PROXY_ACCESS_POINT'
+          }
+        ]
+      },
+      ENUMERATE_HTTP_PROXY_ACCESS_POINT: {
+        invoke: {
+          src: 'enumerateHTTPProxyAccessPoint',
+          input: ({ context }) => context,
+          id: 'enumerate-http-proxy-access-point',
+          onDone: {
+            actions: assign({ message: ({ event }) => event.output }),
+            target: 'PULL_HTTP_PROXY_ACCESS_POINT'
+          },
+          onError: {
+            actions: assign({ errorMessage: () => 'Failed to enumerate HTTP Proxy Access Point' }),
+            target: 'FAILURE'
+          }
+        }
+      },
+      PULL_HTTP_PROXY_ACCESS_POINT: {
+        invoke: {
+          src: 'pullHTTPProxyAccessPoint',
+          input: ({ context }) => context,
+          id: 'pull-http-proxy-access-point',
+          onDone: {
+            actions: [assign({ message: ({ event }) => event.output }), 'Reset Retry Count'],
+            target: 'CHECK_HTTP_PROXY_ACCESS_POINT_PULL_RESPONSE'
+          },
+          onError: [
+            {
+              guard: 'shouldRetry',
+              actions: 'Increment Retry Count',
+              target: 'ENUMERATE_HTTP_PROXY_ACCESS_POINT'
+            },
+            {
+              actions: assign({ errorMessage: () => 'Failed to pull HTTP Proxy Access Point' }),
+              target: 'FAILURE'
+            }
+          ]
+        }
+      },
+      CHECK_HTTP_PROXY_ACCESS_POINT_PULL_RESPONSE: {
+        entry: 'Read HTTP Proxy Access Point Pull Response',
+        always: [
+          {
+            guard: 'hasMoreHTTPProxyData',
+            target: 'PULL_HTTP_PROXY_ACCESS_POINT'
+          },
+          {
+            guard: 'hasHTTPProxyAccessPoints',
+            target: 'DELETE_HTTP_PROXY_ACCESS_POINT'
+          },
+          {
+            target: 'REMOVE_REMOTE_ACCESS_POLICY_RULE_USER_INITIATED'
+          }
+        ]
+      },
+      DELETE_HTTP_PROXY_ACCESS_POINT: {
+        invoke: {
+          src: 'deleteHTTPProxyAccessPoint',
+          input: ({ context }) => context,
+          id: 'delete-http-proxy-access-point',
+          onDone: {
+            actions: assign({ message: ({ event }) => event.output }),
+            target: 'CHECK_HTTP_PROXY_ACCESS_POINT_DELETE_RESPONSE'
+          },
+          onError: {
+            actions: assign({ errorMessage: () => 'Failed to delete HTTP Proxy Access Point' }),
+            target: 'FAILURE'
+          }
+        }
+      },
+      CHECK_HTTP_PROXY_ACCESS_POINT_DELETE_RESPONSE: {
+        always: [
+          {
+            guard: 'hasHTTPProxyAccessPoints',
+            target: 'DELETE_HTTP_PROXY_ACCESS_POINT'
           },
           {
             target: 'REMOVE_REMOTE_ACCESS_POLICY_RULE_USER_INITIATED'

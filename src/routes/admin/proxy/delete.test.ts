@@ -24,7 +24,7 @@ describe('Proxy - Delete', () => {
     req = {
       db: { proxyConfigs: { delete: jest.fn(), checkProfileExits: jest.fn() } },
       query: {},
-      params: { proxyName: 'proxyConfigName' },
+      params: { name: 'proxyConfigName' },
       tenantId: '',
       method: 'DELETE'
     }

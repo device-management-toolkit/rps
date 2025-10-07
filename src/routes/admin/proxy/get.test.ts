@@ -26,14 +26,14 @@ describe('Proxy - Get', () => {
     req = {
       db: { proxyConfigs: { getByName: jest.fn() } },
       query: {},
-      params: { proxyName: 'proxyConfigName' },
+      params: { name: 'proxyConfigName' },
       tenantId: '',
       method: 'GET'
     }
 
     getSpy = spyOn(req.db.proxyConfigs, 'getByName').mockResolvedValue(
       (proxyConfig = {
-        proxyName: 'proxyConfigName',
+        name: 'proxyConfigName',
         address: 'intel.com',
         infoFormat: 201,
         networkDnsSuffix: 'vprodemo',
