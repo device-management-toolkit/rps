@@ -1,3 +1,10 @@
+# [2.28.0](https://github.com/device-management-toolkit/rps/compare/v2.27.1...v2.28.0) (2025-10-08)
+
+
+### Features
+
+* enable http proxy for cira ([#2352](https://github.com/device-management-toolkit/rps/issues/2352)) ([5b9ede0](https://github.com/device-management-toolkit/rps/commit/5b9ede0dedac2cbbdbb7e24254359404fca836bd))
+
 ## [2.27.1](https://github.com/device-management-toolkit/rps/compare/v2.27.0...v2.27.1) (2025-08-20)
 
 
