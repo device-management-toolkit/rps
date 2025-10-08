@@ -9161,7 +9161,7 @@
                       "});\r",
                       "pm.test(\"Creation should succeed\", function () {\r",
                       "    var jsonData = pm.response.json();\r",
-                      "    pm.expect(jsonData.proxyName).to.eql(\"proxyabc\");\r",
+                      "    pm.expect(jsonData.name).to.eql(\"proxyabc\");\r",
                       "    pm.expect(jsonData.address).to.eql(\"www.proxy-abc.com\");\r",
                       "    pm.expect(jsonData.infoFormat).to.eql(201);\r",
                       "    pm.expect(jsonData.port).to.eql(902);\r",
@@ -9191,7 +9191,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\r\n    \"proxyName\": \"proxyabc\",\r\n    \"address\": \"www.proxy-abc.com\",\r\n    \"infoFormat\": 201,\r\n    \"port\": 902,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
+                  "raw": "{\r\n    \"name\": \"proxyabc\",\r\n    \"address\": \"www.proxy-abc.com\",\r\n    \"port\": 902,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -9226,7 +9226,7 @@
                       "});\r",
                       "pm.test(\"Request should return proxy just created\", function () {\r",
                       "    var jsonData = pm.response.json();\r",
-                      "    pm.expect(jsonData.proxyName).to.eql(\"proxyabctest\");\r",
+                      "    pm.expect(jsonData.name).to.eql(\"proxyabctest\");\r",
                       "    pm.expect(jsonData.address).to.eql(\"www.proxy-abc.test.com\");\r",
                       "    pm.expect(jsonData.infoFormat).to.eql(201);\r",
                       "    pm.expect(jsonData.port).to.eql(800);\r",
@@ -9255,7 +9255,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\r\n    \"proxyName\": \"proxyabctest\",\r\n    \"address\": \"www.proxy-abc.test.com\",\r\n    \"infoFormat\": 201,\r\n    \"port\": 800,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
+                  "raw": "{\r\n    \"name\": \"proxyabctest\",\r\n    \"address\": \"www.proxy-abc.test.com\",\r\n    \"port\": 800,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -9316,7 +9316,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\r\n    \"profileName\": \"wifi-profile\",\r\n    \"amtPassword\": \"Intel123!\",\r\n    \"mebxPassword\": \"Intel123!\",\r\n    \"activation\": \"ccmactivate\",\r\n    \"tags\": [\"tag1\"],\r\n    \"dhcpEnabled\": true,\r\n    \"proxyConfigs\": [\r\n        {\r\n            \"priority\": 1,\r\n            \"profileName\": \"proxy\"\r\n        }\r\n    ]\r\n}",
+                  "raw": "{\r\n    \"profileName\": \"wifi-profile\",\r\n    \"amtPassword\": \"P@ssw0rd\",\r\n    \"generateRandomPassword\": false,\r\n    \"generateRandomMEBxPassword\": true,\r\n    \"activation\": \"ccmactivate\",\r\n    \"tags\": [\"tag1\"],\r\n    \"dhcpEnabled\": true,\r\n    \"proxyConfigs\": [\r\n        {\r\n            \"priority\": 1,\r\n            \"name\": \"proxy\"\r\n        }\r\n    ]\r\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -9341,18 +9341,22 @@
               "response": []
             },
             {
-              "name": "Create AMT Profile",
+              "name": "Create AMT Profile (proxy-profile1)",
               "event": [
                 {
                   "listen": "test",
                   "script": {
                     "exec": [
+                      "var responseBody = pm.response.json();\r",
+                      "versionVar = responseBody.version;\r",
+                      "pm.globals.set(\"proxyProfile1Version\", versionVar);\r",
+                      "\r",
                       "pm.test(\"Status code is 201\", function () {\r",
                       "    pm.response.to.have.status(201);\r",
                       "});\r",
                       "pm.test(\"Creation should succeed\", function () {\r",
                       "    var result = pm.response.json();\r",
-                      "    pm.expect(result.profileName).to.eql(\"wifi-profile1\"),\r",
+                      "    pm.expect(result.profileName).to.eql(\"proxy-profile1\"),\r",
                       "    pm.expect(result.amtPassword).to.eql(),\r",
                       "    pm.expect(result.mebxPassword).to.eql(),\r",
                       "    pm.expect(result.activation).to.eql(\"ccmactivate\")\r",
@@ -9360,9 +9364,9 @@
                       "    pm.expect(result.dhcpEnabled).to.equal(true)\r",
                       "    pm.expect(result.proxyConfigs.length).to.equal(2)\r",
                       "    pm.expect(result.proxyConfigs[0].priority).to.equal(1)\r",
-                      "    pm.expect(result.proxyConfigs[0].profileName).to.equal(\"proxyabc\")\r",
+                      "    pm.expect(result.proxyConfigs[0].name).to.equal(\"proxyabc\")\r",
                       "    pm.expect(result.proxyConfigs[1].priority).to.equal(2)\r",
-                      "    pm.expect(result.proxyConfigs[1].profileName).to.equal(\"proxyabctest\")\r",
+                      "    pm.expect(result.proxyConfigs[1].name).to.equal(\"proxyabctest\")\r",
                       "});"
                     ],
                     "type": "text/javascript",
@@ -9387,7 +9391,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\r\n    \"profileName\": \"wifi-profile1\",\r\n    \"amtPassword\": \"P@ssw0rd\",\r\n    \"activation\": \"ccmactivate\",\r\n    \"tags\": [\"acm\"],\r\n    \"dhcpEnabled\": true,\r\n    \"proxyConfigs\": [\r\n        {\r\n            \"priority\": 1,\r\n            \"profileName\": \"proxyabc\"\r\n        },\r\n        {\r\n            \"priority\": 2,\r\n            \"profileName\": \"proxyabctest\"\r\n        }\r\n    ]\r\n}",
+                  "raw": "{\r\n    \"profileName\": \"proxy-profile1\",\r\n    \"amtPassword\": \"P@ssw0rd\",\r\n    \"generateRandomPassword\": false,\r\n    \"generateRandomMEBxPassword\": true,\r\n    \"activation\": \"ccmactivate\",\r\n    \"tags\": [\"acm\"],\r\n    \"dhcpEnabled\": true,\r\n    \"proxyConfigs\": [\r\n        {\r\n            \"priority\": 1,\r\n            \"name\": \"proxyabc\"\r\n        },\r\n        {\r\n            \"priority\": 2,\r\n            \"name\": \"proxyabctest\"\r\n        }\r\n    ]\r\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -9412,7 +9416,7 @@
               "response": []
             },
             {
-              "name": "Create AMT Profile",
+              "name": "Create AMT Profile (proxy-profile2)",
               "event": [
                 {
                   "listen": "test",
@@ -9423,7 +9427,7 @@
                       "});\r",
                       "pm.test(\"Creation should succeed\", function () {\r",
                       "    var result = pm.response.json();\r",
-                      "    pm.expect(result.profileName).to.eql(\"wifi-profile2\"),\r",
+                      "    pm.expect(result.profileName).to.eql(\"proxy-profile2\"),\r",
                       "    pm.expect(result.amtPassword).to.eql(),\r",
                       "    pm.expect(result.mebxPassword).to.eql(),\r",
                       "    pm.expect(result.activation).to.eql(\"ccmactivate\")\r",
@@ -9431,7 +9435,7 @@
                       "    pm.expect(result.dhcpEnabled).to.equal(true)\r",
                       "    pm.expect(result.proxyConfigs.length).to.equal(1)\r",
                       "    pm.expect(result.proxyConfigs[0].priority).to.equal(1)\r",
-                      "    pm.expect(result.proxyConfigs[0].profileName).to.equal(\"proxyabc\")\r",
+                      "    pm.expect(result.proxyConfigs[0].name).to.equal(\"proxyabc\")\r",
                       "});"
                     ],
                     "type": "text/javascript",
@@ -9456,7 +9460,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\r\n    \"profileName\": \"wifi-profile2\",\r\n    \"amtPassword\": \"P@ssw0rd\",\r\n    \"activation\": \"ccmactivate\",\r\n    \"tags\": [\"acm\"],\r\n    \"dhcpEnabled\": true,\r\n    \"proxyConfigs\": [\r\n        {\r\n            \"priority\": 1,\r\n            \"profileName\": \"proxyabc\"\r\n        }\r\n    ]\r\n}",
+                  "raw": "{\r\n    \"profileName\": \"proxy-profile2\",\r\n    \"amtPassword\": \"P@ssw0rd\",\r\n    \"generateRandomPassword\": false,\r\n    \"generateRandomMEBxPassword\": true,\r\n    \"activation\": \"ccmactivate\",\r\n    \"tags\": [\"acm\"],\r\n    \"dhcpEnabled\": true,\r\n    \"proxyConfigs\": [\r\n        {\r\n            \"priority\": 1,\r\n            \"name\": \"proxyabc\"\r\n        }\r\n    ]\r\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -9498,26 +9502,26 @@
                       "\r",
                       "pm.test(\"Profile one\", function () {\r",
                       "    var result = pm.response.json();\r",
-                      "    pm.expect(result[0].profileName).to.eql(\"wifi-profile1\"),\r",
+                      "    pm.expect(result[0].profileName).to.eql(\"proxy-profile1\"),\r",
                       "    pm.expect(result[0].amtPassword).to.eql(),\r",
                       "    pm.expect(result[0].mebxPassword).to.eql(),\r",
                       "    pm.expect(result[0].activation).to.eql(\"ccmactivate\")\r",
                       "    pm.expect(result[0].tags.length).to.equal(1)\r",
                       "    pm.expect(result[0].proxyConfigs.length).to.equal(2)\r",
                       "    pm.expect(result[0].proxyConfigs[0].priority).to.equal(1)\r",
-                      "    pm.expect(result[0].proxyConfigs[0].profileName).to.equal(\"proxyabc\")\r",
+                      "    pm.expect(result[0].proxyConfigs[0].name).to.equal(\"proxyabc\")\r",
                       "    pm.expect(result[0].proxyConfigs[1].priority).to.equal(2)\r",
-                      "    pm.expect(result[0].proxyConfigs[1].profileName).to.equal(\"proxyabctest\")\r",
+                      "    pm.expect(result[0].proxyConfigs[1].name).to.equal(\"proxyabctest\")\r",
                       "});\r",
                       "\r",
                       "pm.test(\"Profile two\", function () {\r",
                       "    var result = pm.response.json();\r",
-                      "    pm.expect(result[1].profileName).to.eql(\"wifi-profile2\"),\r",
+                      "    pm.expect(result[1].profileName).to.eql(\"proxy-profile2\"),\r",
                       "        pm.expect(result[1].activation).to.eql(\"ccmactivate\")\r",
                       "    pm.expect(result[1].tags.length).to.equal(1)\r",
                       "    pm.expect(result[1].proxyConfigs.length).to.equal(1)\r",
                       "    pm.expect(result[1].proxyConfigs[0].priority).to.equal(1)\r",
-                      "    pm.expect(result[1].proxyConfigs[0].profileName).to.equal(\"proxyabc\")\r",
+                      "    pm.expect(result[1].proxyConfigs[0].name).to.equal(\"proxyabc\")\r",
                       "});"
                     ],
                     "type": "text/javascript",
@@ -9539,6 +9543,312 @@
                     "v1",
                     "admin",
                     "profiles"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Create Proxy (proxy)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "pm.test(\"Status code is 201\", function () {\r",
+                      "    pm.response.to.have.status(201);\r",
+                      "});\r",
+                      "pm.test(\"Request should return proxy just created\", function () {\r",
+                      "    var jsonData = pm.response.json();\r",
+                      "    pm.expect(jsonData.name).to.eql(\"proxy\");\r",
+                      "    pm.expect(jsonData.address).to.eql(\"www.proxy.com\");\r",
+                      "    pm.expect(jsonData.infoFormat).to.eql(201);\r",
+                      "    pm.expect(jsonData.port).to.eql(8080);\r",
+                      "    pm.expect(jsonData.networkDnsSuffix).to.eql(\"intel.com\");\r",
+                      "});"
+                    ],
+                    "type": "text/javascript",
+                    "packages": {}
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n    \"name\": \"proxy\",\r\n    \"address\": \"www.proxy.com\",\r\n    \"port\": 8080,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{protocol}}://{{host}}/api/v1/admin/proxyconfigs",
+                  "protocol": "{{protocol}}",
+                  "host": [
+                    "{{host}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "admin",
+                    "proxyconfigs"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Create Profile \"profile-proxy1\" with proxyConfigs",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "var responseBody = pm.response.json();\r",
+                      "versionVar = responseBody.version;\r",
+                      "pm.globals.set(\"profileProxy1Version\", versionVar);\r",
+                      "\r",
+                      "pm.test(\"Status code is 201\", function () {\r",
+                      "    pm.response.to.have.status(201);\r",
+                      "});\r",
+                      "\r",
+                      "pm.test(\"Profile should be created with proxyConfigs\", function () {\r",
+                      "    var jsonData = pm.response.json();\r",
+                      "    pm.expect(jsonData.profileName).to.eql(\"profile-proxy1\");\r",
+                      "    pm.expect(jsonData.activation).to.equal(\"ccmactivate\");\r",
+                      "    pm.expect(jsonData.dhcpEnabled).to.equal(true);\r",
+                      "    pm.expect(jsonData.proxyConfigs).to.be.an('array');\r",
+                      "    pm.expect(jsonData.proxyConfigs.length).to.equal(2);\r",
+                      "    pm.expect(jsonData.proxyConfigs[0].priority).to.equal(1);\r",
+                      "    pm.expect(jsonData.proxyConfigs[0].name).to.equal(\"proxyabc\");\r",
+                      "    pm.expect(jsonData.proxyConfigs[1].priority).to.equal(2);\r",
+                      "    pm.expect(jsonData.proxyConfigs[1].name).to.equal(\"proxyabctest\");\r",
+                      "});"
+                    ],
+                    "type": "text/javascript",
+                    "packages": {}
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n    \"profileName\": \"profile-proxy1\",\r\n    \"amtPassword\": \"P@ssw0rd\",\r\n    \"generateRandomPassword\": false,\r\n    \"generateRandomMEBxPassword\": true,\r\n    \"activation\": \"ccmactivate\",\r\n    \"tags\": [\"proxy-test\"],\r\n    \"dhcpEnabled\": true,\r\n    \"proxyConfigs\": [\r\n        {\r\n            \"priority\": 1,\r\n            \"name\": \"proxyabc\"\r\n        },\r\n        {\r\n            \"priority\": 2,\r\n            \"name\": \"proxyabctest\"\r\n        }\r\n    ]\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{protocol}}://{{host}}/api/v1/admin/profiles/",
+                  "protocol": "{{protocol}}",
+                  "host": [
+                    "{{host}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "admin",
+                    "profiles",
+                    ""
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Update Profile \"profile-proxy1\" with proxyConfigs",
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "exec": [
+                      "// Get current version of profile-proxy1\r",
+                      "const getProfileRequest = {\r",
+                      "  url: pm.variables.get(\"protocol\") + \"://\" + pm.variables.get(\"host\") + \"/api/v1/admin/profiles/profile-proxy1\",\r",
+                      "  method: 'GET',\r",
+                      "  header: {\r",
+                      "    'Content-Type': 'application/json'\r",
+                      "  }\r",
+                      "};\r",
+                      "\r",
+                      "pm.sendRequest(getProfileRequest, function (err, response) {\r",
+                      "  if (err) {\r",
+                      "    console.log(err);\r",
+                      "  } else {\r",
+                      "    var jsonData = response.json();\r",
+                      "    pm.globals.set(\"profileProxy1Version\", jsonData.version);\r",
+                      "  }\r",
+                      "});"
+                    ],
+                    "type": "text/javascript",
+                    "packages": {}
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "pm.test(\"Status code is 200\", function () {\r",
+                      "    pm.response.to.have.status(200);\r",
+                      "});\r",
+                      "\r",
+                      "pm.test(\"Should update profile with new proxyConfigs\", function () {\r",
+                      "    var jsonData = pm.response.json();\r",
+                      "    pm.expect(jsonData.profileName).to.eql(\"profile-proxy1\");\r",
+                      "    pm.expect(jsonData.activation).to.equal(\"ccmactivate\");\r",
+                      "    pm.expect(jsonData.dhcpEnabled).to.equal(true);\r",
+                      "    pm.expect(jsonData.proxyConfigs).to.be.an('array');\r",
+                      "    pm.expect(jsonData.proxyConfigs.length).to.equal(1);\r",
+                      "    pm.expect(jsonData.proxyConfigs[0].priority).to.equal(1);\r",
+                      "    pm.expect(jsonData.proxyConfigs[0].name).to.equal(\"proxy\");\r",
+                      "});"
+                    ],
+                    "type": "text/javascript",
+                    "packages": {}
+                  }
+                }
+              ],
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n    \"profileName\": \"profile-proxy1\",\r\n    \"activation\": \"ccmactivate\",\r\n    \"generateRandomPassword\": false,\r\n    \"amtPassword\": \"P@ssw0rd\",\r\n    \"generateRandomMEBxPassword\": true,\r\n    \"tags\": [\"proxy-test\"],\r\n    \"dhcpEnabled\": true,\r\n    \"proxyConfigs\": [\r\n        {\r\n            \"priority\": 1,\r\n            \"name\": \"proxy\"\r\n        }\r\n    ],\r\n    \"version\": {{profileProxy1Version}}\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{protocol}}://{{host}}/api/v1/admin/profiles/",
+                  "protocol": "{{protocol}}",
+                  "host": [
+                    "{{host}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "admin",
+                    "profiles",
+                    ""
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Remove Profile \"profile-proxy1\"",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "pm.test(\"Status code is 204\", function () {\r",
+                      "    pm.response.to.have.status(204);\r",
+                      "});"
+                    ],
+                    "type": "text/javascript",
+                    "packages": {}
+                  }
+                }
+              ],
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": ""
+                },
+                "url": {
+                  "raw": "{{protocol}}://{{host}}/api/v1/admin/profiles/profile-proxy1",
+                  "protocol": "{{protocol}}",
+                  "host": [
+                    "{{host}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "admin",
+                    "profiles",
+                    "profile-proxy1"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Remove Proxy (proxy)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "pm.test(\"Status code is 204\", function () {\r",
+                      "    pm.response.to.have.status(204);\r",
+                      "});"
+                    ],
+                    "type": "text/javascript",
+                    "packages": {}
+                  }
+                }
+              ],
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": ""
+                },
+                "url": {
+                  "raw": "{{protocol}}://{{host}}/api/v1/admin/proxyconfigs/proxy",
+                  "protocol": "{{protocol}}",
+                  "host": [
+                    "{{host}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "admin",
+                    "proxyconfigs",
+                    "proxy"
                   ]
                 }
               },
@@ -12719,7 +13029,7 @@
                   "pm.test(\"Result should contain an error and message\", function () {\r",
                   "    var jsonData = pm.response.json();\r",
                   "    pm.expect(jsonData.errors[0].msg).to.eql(\"Proxy profile name is required\");\r",
-                  "    pm.expect(jsonData.errors[0].path).to.eql(\"proxyName\");\r",
+                  "    pm.expect(jsonData.errors[0].path).to.eql(\"name\");\r",
                   "});"
                 ],
                 "type": "text/javascript",
@@ -12743,7 +13053,7 @@
             "header": [],
             "body": {
               "mode": "raw",
-              "raw": "{\r\n    \"proxyName\": \"\",\r\n    \"address\": \"proxy.dummy.com\",\r\n    \"infoFormat\": 201,\r\n    \"port\": 900,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
+              "raw": "{\r\n    \"name\": \"\",\r\n    \"address\": \"proxy.dummy.com\",\r\n    \"port\": 900,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -12803,7 +13113,7 @@
             "header": [],
             "body": {
               "mode": "raw",
-              "raw": "{\r\n    \"proxyName\": \"proxy1\",\r\n    \"address\": \"\",\r\n    \"infoFormat\": 3,\r\n    \"port\": 900,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
+              "raw": "{\r\n    \"name\": \"proxy1\",\r\n    \"address\": \"\",\r\n    \"port\": 900,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -12828,7 +13138,7 @@
           "response": []
         },
         {
-          "name": "Create Proxy with invalid info format",
+          "name": "Create Proxy with invalid address format",
           "event": [
             {
               "listen": "test",
@@ -12839,8 +13149,8 @@
                   "});\r",
                   "pm.test(\"Result should contain an error and message\", function () {\r",
                   "    var jsonData = pm.response.json();\r",
-                  "    pm.expect(jsonData.errors[0].msg).to.eql(\"Server address format should be either 3(IPV4), 4(IPV6) or 201(FQDN)\");\r",
-                  "    pm.expect(jsonData.errors[0].path).to.eql(\"infoFormat\");\r",
+                  "    pm.expect(jsonData.errors[0].msg).to.eql(\"Server address must be a valid IPv4, IPv6, or FQDN\");\r",
+                  "    pm.expect(jsonData.errors[0].path).to.eql(\"address\");\r",
                   "});"
                 ],
                 "type": "text/javascript",
@@ -12863,7 +13173,7 @@
             "header": [],
             "body": {
               "mode": "raw",
-              "raw": "{\r\n    \"proxyName\": \"proxy1\",\r\n    \"address\": \"192.168.9.58\",\r\n    \"infoFormat\": 5,\r\n    \"port\": 900,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
+              "raw": "{\r\n    \"name\": \"proxy1\",\r\n    \"address\": \"invalid@address!format\",\r\n    \"port\": 900,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -12923,7 +13233,7 @@
             "header": [],
             "body": {
               "mode": "raw",
-              "raw": "{\r\n    \"proxyName\": \"proxy1\",\r\n    \"address\": \"192.168.9.58\",\r\n    \"infoFormat\": 3,\r\n    \"port\": 65536,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
+              "raw": "{\r\n    \"name\": \"proxy1\",\r\n    \"address\": \"192.168.9.58\",\r\n    \"port\": 65536,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -12983,7 +13293,7 @@
             "header": [],
             "body": {
               "mode": "raw",
-              "raw": "{\r\n    \"proxyName\": \"proxy1\",\r\n    \"address\": \"192.168.9.58\",\r\n    \"infoFormat\": 3,\r\n    \"port\": 900,\r\n    \"networkDnsSuffix\": \"-intel.com\"\r\n}",
+              "raw": "{\r\n    \"name\": \"proxy1\",\r\n    \"address\": \"192.168.9.58\",\r\n    \"port\": 900,\r\n    \"networkDnsSuffix\": \"-intel.com\"\r\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -13046,7 +13356,7 @@
             "header": [],
             "body": {
               "mode": "raw",
-              "raw": "{\r\n    \"proxyName\": \"{{proxyName}}\",\r\n    \"address\": \"www.vprodemo.com\",\r\n    \"infoFormat\": 201,\r\n    \"port\": 900,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
+              "raw": "{\r\n    \"name\": \"{{proxyName}}\",\r\n    \"address\": \"www.vprodemo.com\",\r\n    \"port\": 900,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -13107,7 +13417,7 @@
             "header": [],
             "body": {
               "mode": "raw",
-              "raw": "{\r\n    \"proxyName\": \"{{proxyName}}\",\r\n    \"address\": \"www.vprodemo.com\",\r\n    \"infoFormat\": 201,\r\n    \"port\": 900,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
+              "raw": "{\r\n    \"name\": \"{{proxyName}}\",\r\n    \"address\": \"www.vprodemo.com\",\r\n    \"port\": 900,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -13143,7 +13453,7 @@
                   "});\r",
                   "pm.test(\"Request should return proxy just modified\", function () {\r",
                   "    var jsonData = pm.response.json();\r",
-                  "    pm.expect(jsonData.proxyName).to.eql(\"proxy1\");\r",
+                  "    pm.expect(jsonData.name).to.eql(\"proxy1\");\r",
                   "    pm.expect(jsonData.address).to.eql(\"www.vprotest.com\");\r",
                   "    pm.expect(jsonData.infoFormat).to.eql(201);\r",
                   "    pm.expect(jsonData.port).to.eql(900);\r",
@@ -13171,7 +13481,7 @@
             "header": [],
             "body": {
               "mode": "raw",
-              "raw": "{\r\n    \"proxyName\": \"{{proxyName}}\",\r\n    \"address\": \"www.vprotest.com\",\r\n    \"infoFormat\": 201,\r\n    \"port\": 900,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
+              "raw": "{\r\n    \"name\": \"{{proxyName}}\",\r\n    \"address\": \"www.vprotest.com\",\r\n    \"port\": 900,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -13232,7 +13542,7 @@
             "header": [],
             "body": {
               "mode": "raw",
-              "raw": "{\r\n    \"proxyName\": \"nonExistingProxy\",\r\n    \"address\": \"www.vprotest.com\",\r\n    \"infoFormat\": 201,\r\n    \"port\": 900,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
+              "raw": "{\r\n    \"name\": \"nonExistingProxy\",\r\n    \"address\": \"www.vprotest.com\",\r\n    \"port\": 900,\r\n    \"networkDnsSuffix\": \"intel.com\"\r\n}",
               "options": {
                 "raw": {
                   "language": "json"
