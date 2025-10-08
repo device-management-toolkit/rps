@@ -4,9 +4,33 @@
  **********************************************************************/
 
 import { check } from 'express-validator'
+import { type AMT } from '@device-management-toolkit/wsman-messages'
+
+/**
+ * Detects the address format (IPv4, IPv6, or FQDN) based on the address string
+ * @param address The address to detect
+ * @returns InfoFormat enum value (3 for IPv4, 4 for IPv6, 201 for FQDN)
+ */
+export function detectAddressFormat(address: string): AMT.Types.MPServer.InfoFormat {
+  // Check for IPv6 (contains colons and hex characters)
+  const ipv6Regex =
+    /^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]+|::(ffff(:0{1,4})?:)?((25[0-5]|(2[0-4]|1?[0-9])?[0-9])\.){3}(25[0-5]|(2[0-4]|1?[0-9])?[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1?[0-9])?[0-9])\.){3}(25[0-5]|(2[0-4]|1?[0-9])?[0-9]))$/
+  if (ipv6Regex.test(address)) {
+    return 4 // IPv6
+  }
+
+  // Check for IPv4 (xxx.xxx.xxx.xxx)
+  const ipv4Regex = /^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}$/
+  if (ipv4Regex.test(address)) {
+    return 3 // IPv4
+  }
+
+  // Otherwise, treat as FQDN
+  return 201 // FQDN
+}
 
 export const proxyValidator = (): any => [
-  check('proxyName')
+  check('name')
     .not()
     .isEmpty()
     .withMessage('Proxy profile name is required')
@@ -15,36 +39,23 @@ export const proxyValidator = (): any => [
     .isLength({ max: 32 })
     .withMessage('Proxy profile name maximum length is 32'),
 
-  // Validate and normalize infoFormat first so conditional checks can rely on a number
-  check('infoFormat')
+  // address presence and format validation
+  check('address')
     .not()
     .isEmpty()
-    .withMessage('Server address format is required')
-    .isInt()
-    .toInt()
-    .isIn([
-      3,
-      4,
-      201
-    ])
-    .withMessage('Server address format should be either 3(IPV4), 4(IPV6) or 201(FQDN)'),
+    .withMessage('Server address is required')
+    .custom((value) => {
+      // Validate if it's a valid IPv4, IPv6, or FQDN
+      const ipv4Regex = /^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}$/
+      const ipv6Regex =
+        /^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]+|::(ffff(:0{1,4})?:)?((25[0-5]|(2[0-4]|1?[0-9])?[0-9])\.){3}(25[0-5]|(2[0-4]|1?[0-9])?[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1?[0-9])?[0-9])\.){3}(25[0-5]|(2[0-4]|1?[0-9])?[0-9]))$/
+      const fqdnRegex = /^(?!:\/\/)([a-zA-Z0-9-_]+\.)*[a-zA-Z0-9][a-zA-Z0-9-_]+\.[a-zA-Z]{2,11}?$/
 
-  // address presence
-  check('address').not().isEmpty().withMessage('Server address is required'),
-
-  // address format based on infoFormat
-  check('address')
-    .if((_, { req }) => req.body.infoFormat === 3)
-    .isIP(4)
-    .withMessage('infoFormat 3 requires IPV4 server address'),
-  check('address')
-    .if((_, { req }) => req.body.infoFormat === 4)
-    .isIP(6)
-    .withMessage('infoFormat 4 requires IPV6 server address'),
-  check('address')
-    .if((_, { req }) => req.body.infoFormat === 201)
-    .isFQDN({ require_tld: true, allow_underscores: false, allow_numeric_tld: false })
-    .withMessage('infoFormat 201 requires FQDN server address'),
+      if (ipv4Regex.test(value) || ipv6Regex.test(value) || fqdnRegex.test(value)) {
+        return true
+      }
+      throw new Error('Server address must be a valid IPv4, IPv6, or FQDN')
+    }),
 
   check('port').exists().isPort().withMessage('Port value should range between 1 and 65535'),
   check('networkDnsSuffix')
@@ -58,36 +69,23 @@ export const proxyValidator = (): any => [
 ]
 
 export const proxyUpdateValidator = (): any => [
-  // Validate and normalize infoFormat first so conditional checks can rely on a number
-  check('infoFormat')
+  // address presence and format validation
+  check('address')
     .not()
     .isEmpty()
-    .withMessage('Server address format is required')
-    .isInt()
-    .toInt()
-    .isIn([
-      3,
-      4,
-      201
-    ])
-    .withMessage('Server address format should be either 3(IPV4), 4(IPV6) or 201(FQDN)'),
+    .withMessage('Server address is required')
+    .custom((value) => {
+      // Validate if it's a valid IPv4, IPv6, or FQDN
+      const ipv4Regex = /^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}$/
+      const ipv6Regex =
+        /^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]+|::(ffff(:0{1,4})?:)?((25[0-5]|(2[0-4]|1?[0-9])?[0-9])\.){3}(25[0-5]|(2[0-4]|1?[0-9])?[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1?[0-9])?[0-9])\.){3}(25[0-5]|(2[0-4]|1?[0-9])?[0-9]))$/
+      const fqdnRegex = /^(?!:\/\/)([a-zA-Z0-9-_]+\.)*[a-zA-Z0-9][a-zA-Z0-9-_]+\.[a-zA-Z]{2,11}?$/
 
-  // address presence
-  check('address').not().isEmpty().withMessage('Server address is required'),
-
-  // address format based on infoFormat
-  check('address')
-    .if((_, { req }) => req.body.infoFormat === 3)
-    .isIP(4)
-    .withMessage('infoFormat 3 requires IPV4 server address'),
-  check('address')
-    .if((_, { req }) => req.body.infoFormat === 4)
-    .isIP(6)
-    .withMessage('infoFormat 4 requires IPV6 server address'),
-  check('address')
-    .if((_, { req }) => req.body.infoFormat === 201)
-    .isFQDN({ require_tld: true, allow_underscores: false, allow_numeric_tld: false })
-    .withMessage('infoFormat 201 requires FQDN server address'),
+      if (ipv4Regex.test(value) || ipv6Regex.test(value) || fqdnRegex.test(value)) {
+        return true
+      }
+      throw new Error('Server address must be a valid IPv4, IPv6, or FQDN')
+    }),
 
   check('port').exists().isPort().withMessage('Port value should range between 1 and 65535'),
   check('networkDnsSuffix')

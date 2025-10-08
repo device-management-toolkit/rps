@@ -28,8 +28,7 @@ describe('Proxy - Edit', () => {
       tenantId: '',
       method: 'PATCH',
       body: {
-        address: 'intel.com',
-        infoFormat: 201,
+        address: 'intel.com', // FQDN for testing auto-detection (will be 201)
         networkDnsSuffix: 'vprodemo',
         port: 443,
         tenantId: 'foo'

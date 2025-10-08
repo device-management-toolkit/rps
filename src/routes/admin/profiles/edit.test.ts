@@ -12,7 +12,8 @@ import {
   handleGenerateRandomMEBxPassword,
   handleGenerateRandomPassword,
   handleMEBxPassword,
-  handleWifiConfigs
+  handleWifiConfigs,
+  handleProxyConfigs
 } from './edit.js'
 import { ClientAction, TlsMode, TlsSigningAuthority } from '../../../models/RCS.Config.js'
 import { jest } from '@jest/globals'
@@ -32,13 +33,19 @@ describe('AMT Profile - Edit', () => {
       'send'
     ])
     req = {
-      db: { profiles: { getByName: jest.fn(), update: jest.fn() } },
+      db: {
+        profiles: { getByName: jest.fn(), update: jest.fn() },
+        profileWirelessConfigs: { deleteProfileWifiConfigs: jest.fn() },
+        profileProxyConfigs: { deleteProfileProxyConfigs: jest.fn() }
+      },
       body: { profileName: 'profileName' },
       query: {},
       tenantId: ''
     }
     getByNameSpy = jest.spyOn(req.db.profiles, 'getByName').mockResolvedValue({})
     jest.spyOn(req.db.profiles, 'update').mockResolvedValue({})
+    jest.spyOn(req.db.profileWirelessConfigs, 'deleteProfileWifiConfigs').mockResolvedValue(true)
+    jest.spyOn(req.db.profileProxyConfigs, 'deleteProfileProxyConfigs').mockResolvedValue(true)
 
     resSpy.status.mockReturnThis()
     resSpy.json.mockReturnThis()

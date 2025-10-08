@@ -16,8 +16,8 @@ import { editProxyProfile } from './edit.js'
 const proxyRouter: Router = Router()
 
 proxyRouter.get('/', odataValidator(), validateMiddleware, allProxyProfiles)
-proxyRouter.get('/:proxyName', getProxyProfile)
+proxyRouter.get('/:name', getProxyProfile)
 proxyRouter.post('/', proxyValidator(), validateMiddleware, createProxyProfile)
 proxyRouter.patch('/', proxyUpdateValidator(), validateMiddleware, editProxyProfile)
-proxyRouter.delete('/:proxyName', deleteProxyProfile)
+proxyRouter.delete('/:name', deleteProxyProfile)
 export default proxyRouter

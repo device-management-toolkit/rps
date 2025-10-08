@@ -132,6 +132,16 @@ describe('Unconfiguration State Machine', () => {
             })
         ),
         deleteWifiProfileOnAMTDevice: fromPromise(async ({ input }) => await Promise.resolve({ clientId })),
+        enumerateHTTPProxyAccessPoint: fromPromise(
+          async ({ input }) => await Promise.resolve({ clientId: input.clientId })
+        ),
+        pullHTTPProxyAccessPoint: fromPromise(
+          async ({ input }) =>
+            await Promise.resolve({
+              Envelope: { Body: { PullResponse: { Items: { IPS_HTTPProxyAccessPoint: null } } } }
+            })
+        ),
+        deleteHTTPProxyAccessPoint: fromPromise(async ({ input }) => await Promise.resolve({ clientId })),
         removeRemoteAccessPolicyRuleUserInitiated: fromPromise(
           async ({ input }) => await Promise.resolve({ clientId })
         ),
@@ -175,6 +185,8 @@ describe('Unconfiguration State Machine', () => {
         hasPublicKeyCertificate: () => false,
         hasEnvSettings: () => false,
         hasTLSCredentialContext: () => false,
+        hasHTTPProxyAccessPoints: () => false,
+        hasMoreHTTPProxyData: () => false,
         is8021xProfileEnabled: () => false
       },
       delays: {}
@@ -226,6 +238,177 @@ describe('Unconfiguration State Machine', () => {
     service.send({ type: 'REMOVECONFIG', clientId })
   })
 
+  it('should eventually reach FAILURE after ENUMERATE_HTTP_PROXY_ACCESS_POINT', (done) => {
+    configuration.actors!.enumerateHTTPProxyAccessPoint = fromPromise(
+      async ({ input }) => await Promise.reject(new Error())
+    )
+    const mockUnconfigurationMachine = unconfiguration.machine.provide(configuration)
+    const flowStates = [
+      'UNCONFIGURED',
+      'ENUMERATE_ETHERNET_PORT_SETTINGS',
+      'PULL_ETHERNET_PORT_SETTINGS',
+      'GET_8021X_PROFILE',
+      'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
+      'PULL_WIFI_ENDPOINT_SETTINGS',
+      'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
+      'FAILURE'
+    ]
+    const service = createActor(mockUnconfigurationMachine, { input: unconfigContext })
+    service.subscribe((state) => {
+      const expectedState: any = flowStates[currentStateIndex++]
+      expect(state.matches(expectedState)).toBe(true)
+      if (state.matches('FAILURE') && currentStateIndex === flowStates.length) {
+        done()
+      }
+    })
+    service.start()
+    service.send({ type: 'REMOVECONFIG', clientId })
+  })
+
+  it('should eventually reach FAILURE after PULL_HTTP_PROXY_ACCESS_POINT', (done) => {
+    configuration.actors!.pullHTTPProxyAccessPoint = fromPromise(async ({ input }) => await Promise.reject(new Error()))
+    const mockUnconfigurationMachine = unconfiguration.machine.provide(configuration)
+    const flowStates = [
+      'UNCONFIGURED',
+      'ENUMERATE_ETHERNET_PORT_SETTINGS',
+      'PULL_ETHERNET_PORT_SETTINGS',
+      'GET_8021X_PROFILE',
+      'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
+      'PULL_WIFI_ENDPOINT_SETTINGS',
+      'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
+      'PULL_HTTP_PROXY_ACCESS_POINT',
+      'FAILURE'
+    ]
+    const service = createActor(mockUnconfigurationMachine, { input: unconfigContext })
+    service.subscribe((state) => {
+      const expectedState: any = flowStates[currentStateIndex++]
+      expect(state.matches(expectedState)).toBe(true)
+      if (state.matches('FAILURE') && currentStateIndex === flowStates.length) {
+        done()
+      }
+    })
+    service.start()
+    service.send({ type: 'REMOVECONFIG', clientId })
+  })
+
+  it('should eventually reach FAILURE after DELETE_HTTP_PROXY_ACCESS_POINT', (done) => {
+    configuration.guards!.hasHTTPProxyAccessPoints = () => true
+    configuration.actors!.pullHTTPProxyAccessPoint = fromPromise(
+      async ({ input }) =>
+        await Promise.resolve({
+          Envelope: {
+            Body: {
+              PullResponse: {
+                Items: {
+                  IPS_HTTPProxyAccessPoint: [
+                    { Name: 'Intel(r) ME:HTTP Proxy Access Point 0' },
+                    { Name: 'Intel(r) ME:HTTP Proxy Access Point 1' }]
+                },
+                EndOfSequence: ''
+              }
+            }
+          }
+        })
+    )
+    configuration.actors!.deleteHTTPProxyAccessPoint = fromPromise(
+      async ({ input }) => await Promise.reject(new Error())
+    )
+    const mockUnconfigurationMachine = unconfiguration.machine.provide(configuration)
+    const flowStates = [
+      'UNCONFIGURED',
+      'ENUMERATE_ETHERNET_PORT_SETTINGS',
+      'PULL_ETHERNET_PORT_SETTINGS',
+      'GET_8021X_PROFILE',
+      'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
+      'PULL_WIFI_ENDPOINT_SETTINGS',
+      'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
+      'PULL_HTTP_PROXY_ACCESS_POINT',
+      'DELETE_HTTP_PROXY_ACCESS_POINT',
+      'FAILURE'
+    ]
+    const service = createActor(mockUnconfigurationMachine, { input: unconfigContext })
+    service.subscribe((state) => {
+      const expectedState: any = flowStates[currentStateIndex++]
+      expect(state.matches(expectedState)).toBe(true)
+      if (state.matches('FAILURE') && currentStateIndex === flowStates.length) {
+        done()
+      }
+    })
+    service.start()
+    service.send({ type: 'REMOVECONFIG', clientId })
+  })
+
+  it('should handle multiple HTTP Proxy pull operations with EnumerationContext', (done) => {
+    let pullCount = 0
+    configuration.guards!.hasMoreHTTPProxyData = ({ context }) => {
+      // Check if we have EnumerationContext and no EndOfSequence
+      return (
+        context.message.Envelope.Body.PullResponse?.EnumerationContext != null &&
+        context.message.Envelope.Body.PullResponse?.EndOfSequence == null
+      )
+    }
+    configuration.guards!.hasHTTPProxyAccessPoints = () => true
+    configuration.actors!.pullHTTPProxyAccessPoint = fromPromise(async ({ input }) => {
+      pullCount++
+      if (pullCount === 1) {
+        // First pull response with EnumerationContext
+        return await Promise.resolve({
+          Envelope: {
+            Body: {
+              PullResponse: {
+                EnumerationContext: '50270200-0000-0000-0000-000000000000',
+                Items: {
+                  IPS_HTTPProxyAccessPoint: { Name: 'Intel(r) ME:HTTP Proxy Access Point 0' }
+                }
+              }
+            }
+          }
+        })
+      } else {
+        // Second pull response with EndOfSequence
+        return await Promise.resolve({
+          Envelope: {
+            Body: {
+              PullResponse: {
+                Items: {
+                  IPS_HTTPProxyAccessPoint: { Name: 'Intel(r) ME:HTTP Proxy Access Point 1' }
+                },
+                EndOfSequence: ''
+              }
+            }
+          }
+        })
+      }
+    })
+    configuration.actors!.deleteHTTPProxyAccessPoint = fromPromise(
+      async ({ input }) => await Promise.reject(new Error())
+    )
+    const mockUnconfigurationMachine = unconfiguration.machine.provide(configuration)
+    const flowStates = [
+      'UNCONFIGURED',
+      'ENUMERATE_ETHERNET_PORT_SETTINGS',
+      'PULL_ETHERNET_PORT_SETTINGS',
+      'GET_8021X_PROFILE',
+      'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
+      'PULL_WIFI_ENDPOINT_SETTINGS',
+      'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
+      'PULL_HTTP_PROXY_ACCESS_POINT',
+      'PULL_HTTP_PROXY_ACCESS_POINT', // Second pull after EnumerationContext check
+      'DELETE_HTTP_PROXY_ACCESS_POINT',
+      'FAILURE'
+    ]
+    const service = createActor(mockUnconfigurationMachine, { input: unconfigContext })
+    service.subscribe((state) => {
+      const expectedState: any = flowStates[currentStateIndex++]
+      expect(state.matches(expectedState)).toBe(true)
+      if (state.matches('FAILURE') && currentStateIndex === flowStates.length) {
+        done()
+      }
+    })
+    service.start()
+    service.send({ type: 'REMOVECONFIG', clientId })
+  })
+
   it('should eventually reach FAILURE after ENUMERATE_MANAGEMENT_PRESENCE_REMOTE_SAP', (done) => {
     configuration.actors!.enumerateManagementPresenceRemoteSAP = fromPromise(
       async ({ input }) => await Promise.reject(new Error())
@@ -238,6 +421,8 @@ describe('Unconfiguration State Machine', () => {
       'GET_8021X_PROFILE',
       'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
       'PULL_WIFI_ENDPOINT_SETTINGS',
+      'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
+      'PULL_HTTP_PROXY_ACCESS_POINT',
       'REMOVE_REMOTE_ACCESS_POLICY_RULE_USER_INITIATED',
       'REMOVE_REMOTE_ACCESS_POLICY_RULE_ALERT',
       'REMOVE_REMOTE_ACCESS_POLICY_RULE_PERIODIC',
@@ -256,7 +441,7 @@ describe('Unconfiguration State Machine', () => {
     service.send({ type: 'REMOVECONFIG', clientId })
   })
 
-  it('should eventually reach FAILURE after REMOVE_REMOTE_ACCESS_POLICY_RULE_USER_INITIATED', (done) => {
+  it('should eventually reach FAILURE after DELETE_WIFI_ENDPOINT_SETTINGS', (done) => {
     configuration.guards!.is8021xProfileEnabled = () => true
     configuration.actors!.pullWifiEndpointSettings = fromPromise(
       async ({ input }) =>
@@ -315,6 +500,8 @@ describe('Unconfiguration State Machine', () => {
       'DISABLE_IEEE8021X_WIRED',
       'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
       'PULL_WIFI_ENDPOINT_SETTINGS',
+      'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
+      'PULL_HTTP_PROXY_ACCESS_POINT',
       'REMOVE_REMOTE_ACCESS_POLICY_RULE_USER_INITIATED',
       'REMOVE_REMOTE_ACCESS_POLICY_RULE_ALERT',
       'REMOVE_REMOTE_ACCESS_POLICY_RULE_PERIODIC',
@@ -344,6 +531,8 @@ describe('Unconfiguration State Machine', () => {
       'GET_8021X_PROFILE',
       'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
       'PULL_WIFI_ENDPOINT_SETTINGS',
+      'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
+      'PULL_HTTP_PROXY_ACCESS_POINT',
       'REMOVE_REMOTE_ACCESS_POLICY_RULE_USER_INITIATED',
       'REMOVE_REMOTE_ACCESS_POLICY_RULE_ALERT',
       'REMOVE_REMOTE_ACCESS_POLICY_RULE_PERIODIC',
@@ -374,6 +563,8 @@ describe('Unconfiguration State Machine', () => {
       'GET_8021X_PROFILE',
       'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
       'PULL_WIFI_ENDPOINT_SETTINGS',
+      'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
+      'PULL_HTTP_PROXY_ACCESS_POINT',
       'REMOVE_REMOTE_ACCESS_POLICY_RULE_USER_INITIATED',
       'REMOVE_REMOTE_ACCESS_POLICY_RULE_ALERT',
       'REMOVE_REMOTE_ACCESS_POLICY_RULE_PERIODIC',
@@ -407,6 +598,8 @@ describe('Unconfiguration State Machine', () => {
       'GET_8021X_PROFILE',
       'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
       'PULL_WIFI_ENDPOINT_SETTINGS',
+      'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
+      'PULL_HTTP_PROXY_ACCESS_POINT',
       'REMOVE_REMOTE_ACCESS_POLICY_RULE_USER_INITIATED',
       'REMOVE_REMOTE_ACCESS_POLICY_RULE_ALERT',
       'REMOVE_REMOTE_ACCESS_POLICY_RULE_PERIODIC',
@@ -439,6 +632,8 @@ describe('Unconfiguration State Machine', () => {
       'GET_8021X_PROFILE',
       'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
       'PULL_WIFI_ENDPOINT_SETTINGS',
+      'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
+      'PULL_HTTP_PROXY_ACCESS_POINT',
       'REMOVE_REMOTE_ACCESS_POLICY_RULE_USER_INITIATED',
       'REMOVE_REMOTE_ACCESS_POLICY_RULE_ALERT',
       'REMOVE_REMOTE_ACCESS_POLICY_RULE_PERIODIC',
@@ -462,7 +657,7 @@ describe('Unconfiguration State Machine', () => {
     service.send({ type: 'REMOVECONFIG', clientId })
   })
 
-  it('should eventually reach FAILURE after ENUMERATE_PUBLIC_KEY_CERTIFICATE', (done) => {
+  it('should eventually reach FAILURE after ENUMERATE_PUBLIC_KEY_CERTIFICATE with 8021x updated', (done) => {
     unconfigContext.is8021xProfileUpdated = true
     configuration.actors!.pullPublicPrivateKeyPair = fromPromise(
       async ({ input }) => await Promise.resolve({ Envelope: { Body: { PullResponse: { Items: {} } } } })
@@ -478,6 +673,8 @@ describe('Unconfiguration State Machine', () => {
       'GET_8021X_PROFILE',
       'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
       'PULL_WIFI_ENDPOINT_SETTINGS',
+      'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
+      'PULL_HTTP_PROXY_ACCESS_POINT',
       'REMOVE_REMOTE_ACCESS_POLICY_RULE_USER_INITIATED',
       'REMOVE_REMOTE_ACCESS_POLICY_RULE_ALERT',
       'REMOVE_REMOTE_ACCESS_POLICY_RULE_PERIODIC',
@@ -514,6 +711,8 @@ describe('Unconfiguration State Machine', () => {
       'GET_8021X_PROFILE',
       'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
       'PULL_WIFI_ENDPOINT_SETTINGS',
+      'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
+      'PULL_HTTP_PROXY_ACCESS_POINT',
       'REMOVE_REMOTE_ACCESS_POLICY_RULE_USER_INITIATED',
       'REMOVE_REMOTE_ACCESS_POLICY_RULE_ALERT',
       'REMOVE_REMOTE_ACCESS_POLICY_RULE_PERIODIC',
@@ -793,6 +992,35 @@ describe('Unconfiguration State Machine', () => {
   it('should fail delete public private key pair', async () => {
     unconfigContext.amt = undefined
     await unconfiguration.deletePublicPrivateKeyPair({ input: unconfigContext })
+    expect(loggerSpy).toHaveBeenCalled()
+  })
+  it('should enum HTTP Proxy Access Point', async () => {
+    await unconfiguration.enumerateHTTPProxyAccessPoint({ input: unconfigContext })
+    expect(invokeWsmanCallSpy).toHaveBeenCalled()
+  })
+  it('should fail enum HTTP Proxy Access Point', async () => {
+    unconfigContext.ips = undefined
+    await unconfiguration.enumerateHTTPProxyAccessPoint({ input: unconfigContext })
+    expect(loggerSpy).toHaveBeenCalled()
+  })
+  it('should pull HTTP Proxy Access Point', async () => {
+    unconfigContext.message = { Envelope: { Body: { EnumerateResponse: { EnumerationContext: 'xxx-xx-xxx' } } } }
+    await unconfiguration.pullHTTPProxyAccessPoint({ input: unconfigContext })
+    expect(invokeWsmanCallSpy).toHaveBeenCalled()
+  })
+  it('should fail pull HTTP Proxy Access Point', async () => {
+    unconfigContext.ips = undefined
+    await unconfiguration.pullHTTPProxyAccessPoint({ input: unconfigContext })
+    expect(loggerSpy).toHaveBeenCalled()
+  })
+  it('should delete HTTP Proxy Access Point', async () => {
+    unconfigContext.httpProxyAccessPoints = [{ Name: 'Intel(r) ME:HTTP Proxy Access Point 0' }]
+    await unconfiguration.deleteHTTPProxyAccessPoint({ input: unconfigContext })
+    expect(invokeWsmanCallSpy).toHaveBeenCalled()
+  })
+  it('should fail delete HTTP Proxy Access Point', async () => {
+    unconfigContext.ips = undefined
+    await unconfiguration.deleteHTTPProxyAccessPoint({ input: unconfigContext })
     expect(loggerSpy).toHaveBeenCalled()
   })
 })
