@@ -4619,9 +4619,11 @@
                   "    pm.expect(result.kvmEnabled).to.eql(true)\r",
                   "    pm.expect(result.solEnabled).to.eql(false)\r",
                   "    pm.expect(result.localWifiSyncEnabled).to.eql(true)\r",
+                  "    pm.expect(result.uefiWifiSyncEnabled).to.eql(true)\r",
                   "});"
                 ],
-                "type": "text/javascript"
+                "type": "text/javascript",
+                "packages": {}
               }
             }
           ],
@@ -4642,7 +4644,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\r\n    \"profileName\": \"profile6\",\r\n    \"activation\": \"ccmactivate\",\r\n    \"tags\": [\"tag1\"],\r\n    \"dhcpEnabled\": false,\r\n    \"generateRandomPassword\": true,\r\n    \"generateRandomMEBxPassword\": true,\r\n    \"localWifiSyncEnabled\": true\r\n}"
+              "raw": "{\r\n    \"profileName\": \"profile6\",\r\n    \"activation\": \"ccmactivate\",\r\n    \"tags\": [\"tag1\"],\r\n    \"dhcpEnabled\": false,\r\n    \"generateRandomPassword\": true,\r\n    \"generateRandomMEBxPassword\": true,\r\n    \"localWifiSyncEnabled\": true,\r\n    \"uefiWifiSyncEnabled\": true\r\n}"
             },
             "url": {
               "raw": "{{protocol}}://{{host}}/api/v1/admin/profiles/",
@@ -6495,9 +6497,11 @@
                   "    pm.expect(jsonData.profileName).to.eql(\"profile6\")\r",
                   "    pm.expect(jsonData.dhcpEnabled).to.equal(false)\r",
                   "    pm.expect(jsonData.localWifiSyncEnabled).to.equal(false)\r",
+                  "    pm.expect(jsonData.uefiWifiSyncEnabled).to.eql(true)\r",
                   "});"
                 ],
-                "type": "text/javascript"
+                "type": "text/javascript",
+                "packages": {}
               }
             }
           ],
@@ -6512,7 +6516,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\r\n    \"profileName\": \"profile6\",\r\n    \"activation\": \"ccmactivate\",\r\n    \"mebxPassword\": \"P@ssw0rd\",\r\n    \"amtPassword\": \"P@ssw0rd\",\r\n    \"generateRandomPassword\": false,\r\n    \"generateRandomMEBxPassword\": false,\r\n    \"ipSyncEnabled\": false,\r\n    \"localWifiSyncEnabled\": false,\r\n    \"version\": {{profile6Version}}\r\n}"
+              "raw": "{\r\n    \"profileName\": \"profile6\",\r\n    \"activation\": \"ccmactivate\",\r\n    \"mebxPassword\": \"P@ssw0rd\",\r\n    \"amtPassword\": \"P@ssw0rd\",\r\n    \"generateRandomPassword\": false,\r\n    \"generateRandomMEBxPassword\": false,\r\n    \"ipSyncEnabled\": false,\r\n    \"localWifiSyncEnabled\": false,\r\n    \"uefiWifiSyncEnabled\": true,\r\n    \"version\": {{profile6Version}}\r\n}"
             },
             "url": {
               "raw": "{{protocol}}://{{host}}/api/v1/admin/profiles/",

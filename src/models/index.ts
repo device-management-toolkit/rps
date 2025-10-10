@@ -168,6 +168,7 @@ export class AMTConfiguration {
   ieee8021xProfileName?: string
   ieee8021xProfileObject?: Ieee8021xConfig | null
   version?: string
+  uefiWifiSyncEnabled?: boolean
 }
 
 export interface TLSCerts {
@@ -317,6 +318,7 @@ export interface ExportConfiguration {
       }
       wireless: {
         wifiSyncEnabled: boolean
+        uefiWifiSyncEnabled: boolean
         profiles: ExportWifiConfig[]
       }
     }
