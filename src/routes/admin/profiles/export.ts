@@ -154,6 +154,7 @@ export async function exportProfile(req: Request, res: Response): Promise<void> 
           },
           wireless: {
             wifiSyncEnabled: result.localWifiSyncEnabled ?? false,
+            uefiWifiSyncEnabled: result.uefiWifiSyncEnabled ?? false,
             profiles: wirelessProfiles
           }
         },
