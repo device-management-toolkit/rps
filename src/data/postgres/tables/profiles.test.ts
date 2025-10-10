@@ -46,7 +46,8 @@ describe('profiles tests', () => {
       kvmEnabled: true,
       solEnabled: true,
       tlsSigningAuthority: null,
-      ieee8021xProfileName: null
+      ieee8021xProfileName: null,
+      uefiWifiSyncEnabled: true
     } as any
     db = new PostgresDb('')
     profilesTable = new ProfilesTable(db)
@@ -131,6 +132,7 @@ describe('profiles tests', () => {
       COALESCE(json_agg(json_build_object('profileName',wc.wireless_profile_name, 'priority', wc.priority)) FILTER (WHERE wc.wireless_profile_name IS NOT NULL), '[]') AS "wifiConfigs",
       ip_sync_enabled as "ipSyncEnabled",
       local_wifi_sync_enabled as "localWifiSyncEnabled",
+      uefi_wifi_sync_enabled as "uefiWifiSyncEnabled",
       COALESCE(json_agg(json_build_object('name',pc.proxy_config_name, 'priority', pc.priority)) FILTER (WHERE pc.proxy_config_name IS NOT NULL), '[]') AS "proxyConfigs"
     FROM profiles p
     LEFT JOIN profiles_wirelessconfigs wc ON wc.profile_name = p.profile_name AND wc.tenant_id = p.tenant_id
@@ -191,6 +193,7 @@ describe('profiles tests', () => {
       COALESCE(json_agg(json_build_object('profileName',wc.wireless_profile_name, 'priority', wc.priority)) FILTER (WHERE wc.wireless_profile_name IS NOT NULL), '[]') AS "wifiConfigs",
       ip_sync_enabled as "ipSyncEnabled",
       local_wifi_sync_enabled as "localWifiSyncEnabled",
+      uefi_wifi_sync_enabled as "uefiWifiSyncEnabled",
       COALESCE(json_agg(json_build_object('name',pc.proxy_config_name, 'priority', pc.priority)) FILTER (WHERE pc.proxy_config_name IS NOT NULL), '[]') AS "proxyConfigs"
     FROM profiles p
     LEFT JOIN profiles_wirelessconfigs wc ON wc.profile_name = p.profile_name AND wc.tenant_id = p.tenant_id
@@ -311,8 +314,8 @@ describe('profiles tests', () => {
           mebx_password, generate_random_mebx_password,
           tags, dhcp_enabled, tls_mode,
           user_consent, ider_enabled, kvm_enabled, sol_enabled,
-          tenant_id, tls_signing_authority, ieee8021x_profile_name, ip_sync_enabled, local_wifi_sync_enabled)
-        values($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
+          tenant_id, tls_signing_authority, ieee8021x_profile_name, ip_sync_enabled, local_wifi_sync_enabled, uefi_wifi_sync_enabled)
+        values($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
         [
           amtConfig.profileName,
           amtConfig.activation,
@@ -332,7 +335,8 @@ describe('profiles tests', () => {
           amtConfig.tlsSigningAuthority,
           amtConfig.ieee8021xProfileName,
           amtConfig.ipSyncEnabled,
-          amtConfig.localWifiSyncEnabled
+          amtConfig.localWifiSyncEnabled,
+          amtConfig.uefiWifiSyncEnabled
         ]
       )
     })
@@ -361,8 +365,8 @@ describe('profiles tests', () => {
           mebx_password, generate_random_mebx_password,
           tags, dhcp_enabled, tls_mode,
           user_consent, ider_enabled, kvm_enabled, sol_enabled,
-          tenant_id, tls_signing_authority, ieee8021x_profile_name, ip_sync_enabled, local_wifi_sync_enabled)
-        values($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
+          tenant_id, tls_signing_authority, ieee8021x_profile_name, ip_sync_enabled, local_wifi_sync_enabled, uefi_wifi_sync_enabled)
+        values($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
         [
           amtConfig.profileName,
           amtConfig.activation,
@@ -382,7 +386,8 @@ describe('profiles tests', () => {
           amtConfig.tlsSigningAuthority,
           amtConfig.ieee8021xProfileName,
           amtConfig.ipSyncEnabled,
-          amtConfig.localWifiSyncEnabled
+          amtConfig.localWifiSyncEnabled,
+          amtConfig.uefiWifiSyncEnabled
         ]
       )
     })
@@ -424,7 +429,7 @@ describe('profiles tests', () => {
           tags=$8, dhcp_enabled=$9, tls_mode=$10, user_consent=$13,
           ider_enabled=$14, kvm_enabled=$15, sol_enabled=$16,
           tls_signing_authority=$17, ieee8021x_profile_name=$18,
-          ip_sync_enabled=$19, local_wifi_sync_enabled=$20
+          ip_sync_enabled=$19, local_wifi_sync_enabled=$20, uefi_wifi_sync_enabled=$21
       WHERE profile_name=$1 and tenant_id = $11 and xmin = $12`,
         [
           amtConfig.profileName,
@@ -446,7 +451,8 @@ describe('profiles tests', () => {
           amtConfig.tlsSigningAuthority,
           amtConfig.ieee8021xProfileName,
           amtConfig.ipSyncEnabled,
-          amtConfig.localWifiSyncEnabled
+          amtConfig.localWifiSyncEnabled,
+          amtConfig.uefiWifiSyncEnabled
         ]
       )
     })
@@ -469,7 +475,7 @@ describe('profiles tests', () => {
           tags=$8, dhcp_enabled=$9, tls_mode=$10, user_consent=$13,
           ider_enabled=$14, kvm_enabled=$15, sol_enabled=$16,
           tls_signing_authority=$17, ieee8021x_profile_name=$18,
-          ip_sync_enabled=$19, local_wifi_sync_enabled=$20
+          ip_sync_enabled=$19, local_wifi_sync_enabled=$20, uefi_wifi_sync_enabled=$21
       WHERE profile_name=$1 and tenant_id = $11 and xmin = $12`,
         [
           amtConfig.profileName,
@@ -491,7 +497,8 @@ describe('profiles tests', () => {
           amtConfig.tlsSigningAuthority,
           amtConfig.ieee8021xProfileName,
           amtConfig.ipSyncEnabled,
-          amtConfig.localWifiSyncEnabled
+          amtConfig.localWifiSyncEnabled,
+          amtConfig.uefiWifiSyncEnabled
         ]
       )
     })
@@ -545,8 +552,8 @@ describe('profiles tests', () => {
           mebx_password, generate_random_mebx_password,
           tags, dhcp_enabled, tls_mode,
           user_consent, ider_enabled, kvm_enabled, sol_enabled,
-          tenant_id, tls_signing_authority, ieee8021x_profile_name, ip_sync_enabled, local_wifi_sync_enabled)
-        values($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
+          tenant_id, tls_signing_authority, ieee8021x_profile_name, ip_sync_enabled, local_wifi_sync_enabled, uefi_wifi_sync_enabled)
+        values($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
         [
           amtConfig.profileName,
           amtConfig.activation,
@@ -566,7 +573,8 @@ describe('profiles tests', () => {
           amtConfig.tlsSigningAuthority,
           amtConfig.ieee8021xProfileName,
           amtConfig.ipSyncEnabled,
-          amtConfig.localWifiSyncEnabled
+          amtConfig.localWifiSyncEnabled,
+          amtConfig.uefiWifiSyncEnabled
         ]
       )
     })
@@ -595,8 +603,8 @@ describe('profiles tests', () => {
           mebx_password, generate_random_mebx_password,
           tags, dhcp_enabled, tls_mode,
           user_consent, ider_enabled, kvm_enabled, sol_enabled,
-          tenant_id, tls_signing_authority, ieee8021x_profile_name, ip_sync_enabled, local_wifi_sync_enabled)
-        values($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
+          tenant_id, tls_signing_authority, ieee8021x_profile_name, ip_sync_enabled, local_wifi_sync_enabled, uefi_wifi_sync_enabled)
+        values($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
         [
           amtConfig.profileName,
           amtConfig.activation,
@@ -616,7 +624,8 @@ describe('profiles tests', () => {
           amtConfig.tlsSigningAuthority,
           amtConfig.ieee8021xProfileName,
           amtConfig.ipSyncEnabled,
-          amtConfig.localWifiSyncEnabled
+          amtConfig.localWifiSyncEnabled,
+          amtConfig.uefiWifiSyncEnabled
         ]
       )
     })
@@ -639,7 +648,7 @@ describe('profiles tests', () => {
           tags=$8, dhcp_enabled=$9, tls_mode=$10, user_consent=$13,
           ider_enabled=$14, kvm_enabled=$15, sol_enabled=$16,
           tls_signing_authority=$17, ieee8021x_profile_name=$18,
-          ip_sync_enabled=$19, local_wifi_sync_enabled=$20
+          ip_sync_enabled=$19, local_wifi_sync_enabled=$20, uefi_wifi_sync_enabled=$21
       WHERE profile_name=$1 and tenant_id = $11 and xmin = $12`,
         [
           amtConfig.profileName,
@@ -661,7 +670,8 @@ describe('profiles tests', () => {
           amtConfig.tlsSigningAuthority,
           amtConfig.ieee8021xProfileName,
           amtConfig.ipSyncEnabled,
-          amtConfig.localWifiSyncEnabled
+          amtConfig.localWifiSyncEnabled,
+          amtConfig.uefiWifiSyncEnabled
         ]
       )
     })
