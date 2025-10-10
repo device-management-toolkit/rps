@@ -117,6 +117,10 @@ export const amtProfileValidator = (): ValidationChain[] => [
     .optional({ nullable: true })
     .isBoolean()
     .withMessage('localWifiSyncEnabled must be a boolean'),
+  check('uefiWifiSyncEnabled')
+    .optional({ nullable: true })
+    .isBoolean()
+    .withMessage('uefiWifiSyncEnabled must be a boolean'),
   check('wifiConfigs')
     .optional({ nullable: true })
     .isArray()
@@ -329,6 +333,10 @@ export const profileUpdateValidator = (): any => [
     .optional({ nullable: true })
     .isBoolean()
     .withMessage('localWifiSyncEnabled must be a boolean'),
+  check('uefiWifiSyncEnabled')
+    .optional({ nullable: true })
+    .isBoolean()
+    .withMessage('uefiWifiSyncEnabled must be a boolean'),
   check('wifiConfigs')
     .optional({ nullable: true })
     .isArray()

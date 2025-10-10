@@ -120,7 +120,7 @@ export class NetworkConfiguration {
         if (profile?.wifiConfigs != null) {
           if (
             context.wifiSettings?.MACAddress != null &&
-            (profile.wifiConfigs.length > 0 || profile.localWifiSyncEnabled)
+            (profile.wifiConfigs.length > 0 || profile.localWifiSyncEnabled || profile.uefiWifiSyncEnabled)
           ) {
             return true
           }
