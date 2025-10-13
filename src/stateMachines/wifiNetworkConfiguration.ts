@@ -278,8 +278,8 @@ export class WiFiConfiguration {
       isWiFiProfilesExist: ({ context }) =>
         context.amtProfile?.wifiConfigs != null ? context.amtProfile.wifiConfigs.length > 0 : false,
       isLocalProfileSynchronizationNotEnabled: ({ context }) =>
-        context.message.Envelope.Body.AMT_WiFiPortConfigurationService.localProfileSynchronizationEnabled === 0 &&
-        context.message.Envelope.Body.AMT_WiFiPortConfigurationService.UEFIWiFiProfileShareEnabled === 0,
+        context.message.Envelope.Body.AMT_WiFiPortConfigurationService.localProfileSynchronizationEnabled === 0 ||
+        context.message.Envelope.Body.AMT_WiFiPortConfigurationService.UEFIWiFiProfileShareEnabled === false,
       isTrustedRootCertifcateExists: ({ context }) => {
         const res = devices[context.clientId].trustedRootCertificateResponse
         const cert = devices[context.clientId].trustedRootCertificate
