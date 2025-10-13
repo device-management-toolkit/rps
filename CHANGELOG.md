@@ -1,3 +1,10 @@
+## [2.29.1](https://github.com/device-management-toolkit/rps/compare/v2.29.0...v2.29.1) (2025-10-13)
+
+
+### Bug Fixes
+
+* Local ipsync and wifisync configurations ([#2375](https://github.com/device-management-toolkit/rps/issues/2375)) ([36f1272](https://github.com/device-management-toolkit/rps/commit/36f1272a46dc3e31fb3e60c4fe40dff027f40d23))
+
 # [2.29.0](https://github.com/device-management-toolkit/rps/compare/v2.28.0...v2.29.0) (2025-10-10)
 
 
