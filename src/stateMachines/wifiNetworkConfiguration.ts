@@ -26,6 +26,7 @@ export interface WiFiConfigContext extends CommonContext {
   wifiSettings: any
   wifiProfileCount: number
   retryCount: number
+  maxRetranSetting: any
   wifiProfileName?: string | null
   wifiProfile?: WirelessConfig
   generalSettings?: AMT.Models.GeneralSettings | null
@@ -242,6 +243,12 @@ export class WiFiConfiguration {
     return await invokeWsmanCall(input)
   }
 
+  putMaxRetranSetting = async ({ input }: { input: WiFiConfigContext }): Promise<any> => {
+    input.maxRetranSetting.ConsoleTcpMaxRetransmissions = 7
+    input.xmlMessage = input.amt.EthernetPortSettings.Put(input.maxRetranSetting)
+    return await invokeWsmanCall(input)
+  }
+
   machine = setup({
     types: {} as {
       context: WiFiConfigContext
@@ -264,7 +271,8 @@ export class WiFiConfiguration {
       errorMachine: this.error.machine,
       initiateCertRequest: fromPromise(initiateCertRequest),
       getCertFromEnterpriseAssistant: fromPromise(getCertFromEnterpriseAssistant),
-      sendEnterpriseAssistantKeyPairResponse: fromPromise(sendEnterpriseAssistantKeyPairResponse)
+      sendEnterpriseAssistantKeyPairResponse: fromPromise(sendEnterpriseAssistantKeyPairResponse),
+      putMaxRetranSetting: fromPromise(this.putMaxRetranSetting)
     },
     guards: {
       is8021xProfileAssociated: ({ context }) =>
@@ -290,7 +298,14 @@ export class WiFiConfiguration {
       },
       isMSCHAPv2: ({ context }) => context.wifiProfile?.ieee8021xProfileObject?.authenticationProtocol === 2,
       shouldRetry: ({ context, event }) =>
-        context.retryCount != null ? context.retryCount < 3 && event.output instanceof UNEXPECTED_PARSE_ERROR : false
+        context.retryCount != null ? context.retryCount < 3 && event.output instanceof UNEXPECTED_PARSE_ERROR : false,
+      isNotMaxRetranSettingUpdated: ({ context }) => {
+        const settings: AMT.Models.EthernetPortSettings = context.message.Envelope.Body.AMT_EthernetPortSettings
+        if (settings.ConsoleTcpMaxRetransmissions != 7) {
+          return true
+        }
+        return false
+      }
     },
     actions: {
       'Reset Unauth Count': ({ context }) => {
@@ -645,6 +660,33 @@ export class WiFiConfiguration {
           {
             guard: 'isMoreWiFiProfiles',
             target: 'GET_WIFI_PROFILE'
+          },
+          {
+            target: 'PUT_MAX_RETRAN_SETTING'
+          }
+        ]
+      },
+      PUT_MAX_RETRAN_SETTING: {
+        invoke: {
+          src: 'putMaxRetranSetting',
+          input: ({ context }) => context,
+          id: 'put-max-retran-setting',
+          onDone: {
+            actions: assign({ maxRetranResponse: ({ event }) => event.output }),
+            target: 'CHECK_MAX_RETRAN_SETTING_PUT_RESPONSE'
+          },
+          onError: {
+            actions: assign({ errorMessage: ({ event }) => (event.error as any).message }),
+            target: 'FAILED'
+          }
+        }
+      },
+      CHECK_MAX_RETRAN_SETTING_PUT_RESPONSE: {
+        always: [
+          {
+            guard: 'isNotMaxRetranSettingUpdated',
+            actions: assign({ errorMessage: () => 'Failed to put Max Retransmissions to ethernet port settings' }),
+            target: 'FAILED'
           },
           {
             target: 'SUCCESS'
