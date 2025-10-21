@@ -672,7 +672,7 @@ export class WiFiConfiguration {
           input: ({ context }) => context,
           id: 'put-max-retran-setting',
           onDone: {
-            actions: assign({ maxRetranResponse: ({ event }) => event.output }),
+            actions: assign({ message: ({ event }) => event.output }),
             target: 'CHECK_MAX_RETRAN_SETTING_PUT_RESPONSE'
           },
           onError: {
