@@ -182,6 +182,7 @@ describe('WiFi Network Configuration', () => {
         signCSR: fromPromise(async ({ input }) => await Promise.resolve({ clientId })),
         addCertificate: fromPromise(async ({ input }) => await Promise.resolve({ clientId })),
         addRadiusServerRootCertificate: fromPromise(async ({ input }) => await Promise.resolve({ clientId })),
+        putMaxRetranSetting: fromPromise(async ({ input }) => await Promise.resolve({ clientId })),
         errorMachine: fromPromise(async ({ input }) => await Promise.resolve({ clientId: input.clientId })),
         initiateCertRequest: fromPromise(async ({ input }) => await Promise.resolve({ clientId })),
         getCertFromEnterpriseAssistant: fromPromise(async ({ input }) => await Promise.resolve({ clientId })),
@@ -587,6 +588,55 @@ describe('WiFi Network Configuration', () => {
       service.send({ type: 'WIFICONFIG', clientId })
     })
 
+    it('putMaxRetranSetting should eventually reach FAILED state', (done) => {
+      context.wifiSettings = {
+        ElementName: 'Intel(r) AMT Ethernet Port Settings',
+        InstanceID: 'Intel(r) AMT Ethernet Port Settings 1',
+        MACAddress: '00-00-00-00-00-00'
+      }
+      context.wifiProfileName = 'unsupportedEncryption'
+      context.wifiProfileCount = 1
+      config.guards = {
+        is8021xProfileAssociated: () => true,
+        isMoreWiFiProfiles: () => false,
+        isTrustedRootCertifcateExists: () => true,
+        isMSCHAPv2: () => false
+      }
+      config.actors!.putMaxRetranSetting = fromPromise(async ({ input }) => await Promise.reject(new Error()))
+
+      const mockNetworkConfigurationMachine = wifiConfiguration.machine.provide(config)
+      const flowStates = [
+        'ACTIVATION',
+        'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
+        'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
+        'GET_WIFI_PROFILE',
+        'ENTERPRISE_ASSISTANT_REQUEST',
+        'GENERATE_KEY_PAIR',
+        'ENUMERATE_PUBLIC_PRIVATE_KEY_PAIR',
+        'PULL_PUBLIC_PRIVATE_KEY_PAIR',
+        'ENTERPRISE_ASSISTANT_RESPONSE',
+        'SIGN_CSR',
+        'GET_CERT_FROM_ENTERPRISE_ASSISTANT',
+        'ADD_CERTIFICATE',
+        'ADD_WIFI_SETTINGS',
+        'PUT_MAX_RETRAN_SETTING',
+        'FAILED'
+      ]
+      const service = createActor(mockNetworkConfigurationMachine, { input: context })
+      service.subscribe((state) => {
+        const expectedState: any = flowStates[currentStateIndex++]
+        expect(state.matches(expectedState)).toBe(true)
+        if (state.matches('FAILED') && currentStateIndex === flowStates.length) {
+          const status = devices[clientId].status.Network
+          expect(status).toEqual('Wired Network Configured. Failed to put Max Retransmissions to ethernet port settings')
+          done()
+        }
+      })
+      service.start()
+      service.send({ type: 'WIFICONFIG', clientId })
+    })
+
     it('should add a WiFi profile to AMT.', (done) => {
       context.wifiSettings = {
         ElementName: 'Intel(r) AMT Ethernet Port Settings',
@@ -618,6 +668,7 @@ describe('WiFi Network Configuration', () => {
         'GET_CERT_FROM_ENTERPRISE_ASSISTANT',
         'ADD_CERTIFICATE',
         'ADD_WIFI_SETTINGS',
+        'PUT_MAX_RETRAN_SETTING',
         'SUCCESS'
       ]
       const service = createActor(mockNetworkConfigurationMachine, { input: context })
@@ -701,6 +752,7 @@ describe('WiFi Network Configuration', () => {
         'GET_CERT_FROM_ENTERPRISE_ASSISTANT',
         'ADD_CERTIFICATE',
         'ADD_WIFI_SETTINGS',
+        'PUT_MAX_RETRAN_SETTING',
         'SUCCESS'
       ]
       const service = createActor(mockNetworkConfigurationMachine, { input: context })
@@ -749,6 +801,7 @@ describe('WiFi Network Configuration', () => {
         'GET_CERT_FROM_ENTERPRISE_ASSISTANT',
         'ADD_CERTIFICATE',
         'ADD_WIFI_SETTINGS',
+        'PUT_MAX_RETRAN_SETTING',
         'SUCCESS'
       ]
       const service = createActor(mockNetworkConfigurationMachine, { input: context })
@@ -799,6 +852,7 @@ describe('WiFi Network Configuration', () => {
         'GET_CERT_FROM_ENTERPRISE_ASSISTANT',
         'ADD_CERTIFICATE',
         'ADD_WIFI_SETTINGS',
+        'PUT_MAX_RETRAN_SETTING',
         'SUCCESS'
       ]
       const service = createActor(mockNetworkConfigurationMachine, { input: context })
@@ -850,6 +904,7 @@ describe('WiFi Network Configuration', () => {
         'GET_CERT_FROM_ENTERPRISE_ASSISTANT',
         'ADD_CERTIFICATE',
         'ADD_WIFI_SETTINGS',
+        'PUT_MAX_RETRAN_SETTING',
         'SUCCESS'
       ]
       const service = createActor(mockNetworkConfigurationMachine, { input: context })

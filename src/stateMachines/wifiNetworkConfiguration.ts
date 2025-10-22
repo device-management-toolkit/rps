@@ -26,7 +26,6 @@ export interface WiFiConfigContext extends CommonContext {
   wifiSettings: any
   wifiProfileCount: number
   retryCount: number
-  maxRetranSetting: any
   wifiProfileName?: string | null
   wifiProfile?: WirelessConfig
   generalSettings?: AMT.Models.GeneralSettings | null
@@ -244,8 +243,9 @@ export class WiFiConfiguration {
   }
 
   putMaxRetranSetting = async ({ input }: { input: WiFiConfigContext }): Promise<any> => {
-    input.maxRetranSetting.ConsoleTcpMaxRetransmissions = 7
-    input.xmlMessage = input.amt.EthernetPortSettings.Put(input.maxRetranSetting)
+    const maxRetranSetting: AMT.Models.EthernetPortSettings = {}
+    maxRetranSetting.ConsoleTcpMaxRetransmissions = 7
+    input.xmlMessage = input.amt?.EthernetPortSettings.Put(maxRetranSetting)
     return await invokeWsmanCall(input)
   }
 
@@ -298,14 +298,7 @@ export class WiFiConfiguration {
       },
       isMSCHAPv2: ({ context }) => context.wifiProfile?.ieee8021xProfileObject?.authenticationProtocol === 2,
       shouldRetry: ({ context, event }) =>
-        context.retryCount != null ? context.retryCount < 3 && event.output instanceof UNEXPECTED_PARSE_ERROR : false,
-      isNotMaxRetranSettingUpdated: ({ context }) => {
-        const settings: AMT.Models.EthernetPortSettings = context.message.Envelope.Body.AMT_EthernetPortSettings
-        if (settings.ConsoleTcpMaxRetransmissions != 7) {
-          return true
-        }
-        return false
-      }
+        context.retryCount != null ? context.retryCount < 3 && event.output instanceof UNEXPECTED_PARSE_ERROR : false
     },
     actions: {
       'Reset Unauth Count': ({ context }) => {
@@ -673,25 +666,13 @@ export class WiFiConfiguration {
           id: 'put-max-retran-setting',
           onDone: {
             actions: assign({ message: ({ event }) => event.output }),
-            target: 'CHECK_MAX_RETRAN_SETTING_PUT_RESPONSE'
+            target: 'SUCCESS'
           },
           onError: {
-            actions: assign({ errorMessage: ({ event }) => (event.error as any).message }),
+            actions: assign({ errorMessage: 'Failed to put Max Retransmissions to ethernet port settings' }),
             target: 'FAILED'
           }
         }
-      },
-      CHECK_MAX_RETRAN_SETTING_PUT_RESPONSE: {
-        always: [
-          {
-            guard: 'isNotMaxRetranSettingUpdated',
-            actions: assign({ errorMessage: () => 'Failed to put Max Retransmissions to ethernet port settings' }),
-            target: 'FAILED'
-          },
-          {
-            target: 'SUCCESS'
-          }
-        ]
       },
       ERROR: {
         entry: sendTo('error-machine', { type: 'PARSE' }),
