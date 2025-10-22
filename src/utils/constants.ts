@@ -127,6 +127,9 @@ export const WIFIENDPOINT = {
   Name: 'WiFi Endpoint 0'
 }
 
+// AMT Configuration Constants
+export const DEFAULT_MAX_TCP_RETRANSMISSIONS = 7
+
 // Default limit and offset for api pagination
 
 export const DEFAULT_TOP = 25

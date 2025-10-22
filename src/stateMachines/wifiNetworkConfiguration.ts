@@ -14,7 +14,7 @@ import { Configurator } from '../Configurator.js'
 import { DbCreatorFactory } from '../factories/DbCreatorFactory.js'
 import { type CommonContext, invokeWsmanCall } from './common.js'
 import { type WifiCredentials } from '../interfaces/ISecretManagerService.js'
-import { UNEXPECTED_PARSE_ERROR } from '../utils/constants.js'
+import { UNEXPECTED_PARSE_ERROR, DEFAULT_MAX_TCP_RETRANSMISSIONS } from '../utils/constants.js'
 import {
   getCertFromEnterpriseAssistant,
   initiateCertRequest,
@@ -243,8 +243,9 @@ export class WiFiConfiguration {
   }
 
   putMaxRetranSetting = async ({ input }: { input: WiFiConfigContext }): Promise<any> => {
-    const maxRetranSetting: AMT.Models.EthernetPortSettings = {}
-    maxRetranSetting.ConsoleTcpMaxRetransmissions = 7
+    const maxRetranSetting: AMT.Models.EthernetPortSettings = {
+      ConsoleTcpMaxRetransmissions: DEFAULT_MAX_TCP_RETRANSMISSIONS
+    }
     input.xmlMessage = input.amt?.EthernetPortSettings.Put(maxRetranSetting)
     return await invokeWsmanCall(input)
   }
