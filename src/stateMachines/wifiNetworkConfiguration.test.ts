@@ -202,6 +202,28 @@ describe('WiFi Network Configuration', () => {
   })
 
   describe('State machines', () => {
+    it('putMaxRetranSetting should eventually reach FAILED state', (done) => {
+      config.actors!.putMaxRetranSetting = fromPromise(async ({ input }) => await Promise.reject(new Error()))
+      const mockNetworkConfigurationMachine = wifiConfiguration.machine.provide(config)
+      const flowStates = [
+        'ACTIVATION',
+        'PUT_MAX_RETRAN_SETTING',
+        'FAILED'
+      ]
+      const service = createActor(mockNetworkConfigurationMachine, { input: context })
+      service.subscribe((state) => {
+        const expectedState: any = flowStates[currentStateIndex++]
+        expect(state.matches(expectedState)).toBe(true)
+        if (state.matches('FAILED') && currentStateIndex === flowStates.length) {
+          const status = devices[clientId].status.Network
+          expect(status).toEqual('Wired Network Configured. Failed to put Max Retransmissions to ethernet port settings')
+          done()
+        }
+      })
+      service.start()
+      service.send({ type: 'WIFICONFIG', clientId })
+    })
+
     it('GetWifiPortCfgService should eventually reach FAILED state', (done) => {
       devices[clientId].status.Network = undefined
       config.actors!.getWifiPortConfigurationService = fromPromise(
@@ -210,6 +232,7 @@ describe('WiFi Network Configuration', () => {
       const mockNetworkConfigurationMachine = wifiConfiguration.machine.provide(config)
       const flowStates = [
         'ACTIVATION',
+        'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
         'FAILED'
       ]
@@ -234,6 +257,7 @@ describe('WiFi Network Configuration', () => {
       const mockNetworkConfigurationMachine = wifiConfiguration.machine.provide(config)
       const flowStates = [
         'ACTIVATION',
+        'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'FAILED'
@@ -257,6 +281,7 @@ describe('WiFi Network Configuration', () => {
       const mockNetworkConfigurationMachine = wifiConfiguration.machine.provide(config)
       const flowStates = [
         'ACTIVATION',
+        'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
@@ -281,6 +306,7 @@ describe('WiFi Network Configuration', () => {
       const mockNetworkConfigurationMachine = wifiConfiguration.machine.provide(config)
       const flowStates = [
         'ACTIVATION',
+        'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
@@ -307,6 +333,7 @@ describe('WiFi Network Configuration', () => {
       const mockNetworkConfigurationMachine = wifiConfiguration.machine.provide(config)
       const flowStates = [
         'ACTIVATION',
+        'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
@@ -336,6 +363,7 @@ describe('WiFi Network Configuration', () => {
       const mockNetworkConfigurationMachine = wifiConfiguration.machine.provide(config)
       const flowStates = [
         'ACTIVATION',
+        'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
@@ -363,6 +391,7 @@ describe('WiFi Network Configuration', () => {
       const mockNetworkConfigurationMachine = wifiConfiguration.machine.provide(config)
       const flowStates = [
         'ACTIVATION',
+        'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
@@ -392,6 +421,7 @@ describe('WiFi Network Configuration', () => {
       const mockNetworkConfigurationMachine = wifiConfiguration.machine.provide(config)
       const flowStates = [
         'ACTIVATION',
+        'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
@@ -424,6 +454,7 @@ describe('WiFi Network Configuration', () => {
       const mockNetworkConfigurationMachine = wifiConfiguration.machine.provide(config)
       const flowStates = [
         'ACTIVATION',
+        'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
@@ -455,6 +486,7 @@ describe('WiFi Network Configuration', () => {
       const mockNetworkConfigurationMachine = wifiConfiguration.machine.provide(config)
       const flowStates = [
         'ACTIVATION',
+        'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
@@ -489,6 +521,7 @@ describe('WiFi Network Configuration', () => {
       const mockNetworkConfigurationMachine = wifiConfiguration.machine.provide(config)
       const flowStates = [
         'ACTIVATION',
+        'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
@@ -521,6 +554,7 @@ describe('WiFi Network Configuration', () => {
       const mockNetworkConfigurationMachine = wifiConfiguration.machine.provide(config)
       const flowStates = [
         'ACTIVATION',
+        'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
@@ -559,6 +593,7 @@ describe('WiFi Network Configuration', () => {
       const mockNetworkConfigurationMachine = wifiConfiguration.machine.provide(config)
       const flowStates = [
         'ACTIVATION',
+        'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
@@ -588,55 +623,6 @@ describe('WiFi Network Configuration', () => {
       service.send({ type: 'WIFICONFIG', clientId })
     })
 
-    it('putMaxRetranSetting should eventually reach FAILED state', (done) => {
-      context.wifiSettings = {
-        ElementName: 'Intel(r) AMT Ethernet Port Settings',
-        InstanceID: 'Intel(r) AMT Ethernet Port Settings 1',
-        MACAddress: '00-00-00-00-00-00'
-      }
-      context.wifiProfileName = 'unsupportedEncryption'
-      context.wifiProfileCount = 1
-      config.guards = {
-        is8021xProfileAssociated: () => true,
-        isMoreWiFiProfiles: () => false,
-        isTrustedRootCertifcateExists: () => true,
-        isMSCHAPv2: () => false
-      }
-      config.actors!.putMaxRetranSetting = fromPromise(async ({ input }) => await Promise.reject(new Error()))
-
-      const mockNetworkConfigurationMachine = wifiConfiguration.machine.provide(config)
-      const flowStates = [
-        'ACTIVATION',
-        'GET_WIFI_PORT_CONFIGURATION_SERVICE',
-        'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
-        'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
-        'GET_WIFI_PROFILE',
-        'ENTERPRISE_ASSISTANT_REQUEST',
-        'GENERATE_KEY_PAIR',
-        'ENUMERATE_PUBLIC_PRIVATE_KEY_PAIR',
-        'PULL_PUBLIC_PRIVATE_KEY_PAIR',
-        'ENTERPRISE_ASSISTANT_RESPONSE',
-        'SIGN_CSR',
-        'GET_CERT_FROM_ENTERPRISE_ASSISTANT',
-        'ADD_CERTIFICATE',
-        'ADD_WIFI_SETTINGS',
-        'PUT_MAX_RETRAN_SETTING',
-        'FAILED'
-      ]
-      const service = createActor(mockNetworkConfigurationMachine, { input: context })
-      service.subscribe((state) => {
-        const expectedState: any = flowStates[currentStateIndex++]
-        expect(state.matches(expectedState)).toBe(true)
-        if (state.matches('FAILED') && currentStateIndex === flowStates.length) {
-          const status = devices[clientId].status.Network
-          expect(status).toEqual('Wired Network Configured. Failed to put Max Retransmissions to ethernet port settings')
-          done()
-        }
-      })
-      service.start()
-      service.send({ type: 'WIFICONFIG', clientId })
-    })
-
     it('should add a WiFi profile to AMT.', (done) => {
       context.wifiSettings = {
         ElementName: 'Intel(r) AMT Ethernet Port Settings',
@@ -655,6 +641,7 @@ describe('WiFi Network Configuration', () => {
       const mockNetworkConfigurationMachine = wifiConfiguration.machine.provide(config)
       const flowStates = [
         'ACTIVATION',
+        'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
@@ -668,7 +655,6 @@ describe('WiFi Network Configuration', () => {
         'GET_CERT_FROM_ENTERPRISE_ASSISTANT',
         'ADD_CERTIFICATE',
         'ADD_WIFI_SETTINGS',
-        'PUT_MAX_RETRAN_SETTING',
         'SUCCESS'
       ]
       const service = createActor(mockNetworkConfigurationMachine, { input: context })
@@ -701,6 +687,7 @@ describe('WiFi Network Configuration', () => {
       const mockNetworkConfigurationMachine = wifiConfiguration.machine.provide(config)
       const flowStates = [
         'ACTIVATION',
+        'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
@@ -739,6 +726,7 @@ describe('WiFi Network Configuration', () => {
       const mockNetworkConfigurationMachine = wifiConfiguration.machine.provide(config)
       const flowStates = [
         'ACTIVATION',
+        'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
@@ -752,7 +740,6 @@ describe('WiFi Network Configuration', () => {
         'GET_CERT_FROM_ENTERPRISE_ASSISTANT',
         'ADD_CERTIFICATE',
         'ADD_WIFI_SETTINGS',
-        'PUT_MAX_RETRAN_SETTING',
         'SUCCESS'
       ]
       const service = createActor(mockNetworkConfigurationMachine, { input: context })
@@ -788,6 +775,7 @@ describe('WiFi Network Configuration', () => {
       const mockNetworkConfigurationMachine = wifiConfiguration.machine.provide(config)
       const flowStates = [
         'ACTIVATION',
+        'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
@@ -801,7 +789,6 @@ describe('WiFi Network Configuration', () => {
         'GET_CERT_FROM_ENTERPRISE_ASSISTANT',
         'ADD_CERTIFICATE',
         'ADD_WIFI_SETTINGS',
-        'PUT_MAX_RETRAN_SETTING',
         'SUCCESS'
       ]
       const service = createActor(mockNetworkConfigurationMachine, { input: context })
@@ -839,6 +826,7 @@ describe('WiFi Network Configuration', () => {
       const mockNetworkConfigurationMachine = wifiConfiguration.machine.provide(config)
       const flowStates = [
         'ACTIVATION',
+        'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
@@ -852,7 +840,6 @@ describe('WiFi Network Configuration', () => {
         'GET_CERT_FROM_ENTERPRISE_ASSISTANT',
         'ADD_CERTIFICATE',
         'ADD_WIFI_SETTINGS',
-        'PUT_MAX_RETRAN_SETTING',
         'SUCCESS'
       ]
       const service = createActor(mockNetworkConfigurationMachine, { input: context })
@@ -891,6 +878,7 @@ describe('WiFi Network Configuration', () => {
       const mockNetworkConfigurationMachine = wifiConfiguration.machine.provide(config)
       const flowStates = [
         'ACTIVATION',
+        'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
@@ -904,7 +892,6 @@ describe('WiFi Network Configuration', () => {
         'GET_CERT_FROM_ENTERPRISE_ASSISTANT',
         'ADD_CERTIFICATE',
         'ADD_WIFI_SETTINGS',
-        'PUT_MAX_RETRAN_SETTING',
         'SUCCESS'
       ]
       const service = createActor(mockNetworkConfigurationMachine, { input: context })
@@ -1146,5 +1133,84 @@ describe('WiFi Network Configuration', () => {
       await wifiConfiguration.signCSR({ input: context })
       expect(invokeWsmanCallSpy).toHaveBeenCalled()
     })
+
+    it('should putMaxRetranSetting, DHCPEnabled is set to true', async () => {
+        context.wifiSettings = {
+          ConsoleTcpMaxRetransmissions: 5,
+          DHCPEnabled: true,
+          DefaultGateway: '192.168.1.1',
+          ElementName: 'Intel(r) AMT Ethernet Port Settings',
+          IPAddress: '192.168.1.139',
+          InstanceID: 'Intel(r) AMT Ethernet Port Settings 1',
+          LinkControl: 2,
+          LinkIsUp: true,
+          LinkPolicy: [
+            1,
+            14,
+            16
+          ],
+          LinkPreference: 2,
+          MACAddress: 'a4-bb-6d-89-52-e4',
+          PhysicalConnectionType: 3,
+          PrimaryDNS: '192.168.1.1',
+          SecondaryDNS: '192.168.1.2',
+          SharedMAC: true,
+          SubnetMask: '255.255.255.0',
+          WLANLinkProtectionLevel: 1
+        }
+        const ethernetPortSettingsSpy = spyOn(context.amt.EthernetPortSettings, 'Put').mockImplementation(() => 'abcdef')
+        await wifiConfiguration.putMaxRetranSetting({ input: context })
+        expect(ethernetPortSettingsSpy).toHaveBeenCalled()
+        expect(invokeWsmanCallSpy).toHaveBeenCalled()
+      })
+
+      it('should putMaxRetranSetting, DHCPEnabled is set to false', async () => {
+        context.wifiSettings = {
+          ConsoleTcpMaxRetransmissions: 5,
+          DHCPEnabled: false,
+          DefaultGateway: '192.168.1.1',
+          ElementName: 'Intel(r) AMT Ethernet Port Settings',
+          IPAddress: '192.168.1.139',
+          InstanceID: 'Intel(r) AMT Ethernet Port Settings 1',
+          LinkControl: 2,
+          LinkIsUp: true,
+          LinkPolicy: [
+            1,
+            14,
+            16
+          ],
+          LinkPreference: 2,
+          MACAddress: 'a4-bb-6d-89-52-e4',
+          PhysicalConnectionType: 3,
+          PrimaryDNS: '192.168.1.1',
+          SecondaryDNS: '192.168.1.2',
+          SharedMAC: true,
+          SubnetMask: '255.255.255.0',
+          WLANLinkProtectionLevel: 1
+        }
+        const ethernetPortSettingsSpy = spyOn(context.amt.EthernetPortSettings, 'Put').mockImplementation(() => 'abcdef')
+        await wifiConfiguration.putMaxRetranSetting({ input: context })
+        expect(ethernetPortSettingsSpy).toHaveBeenCalled()
+        expect(invokeWsmanCallSpy).toHaveBeenCalled()
+      })
+
+      it('should fail putMaxRetranSetting if DHCPEnabled is false and missing ip address or subnetmask', async () => {
+        context.amtProfile.dhcpEnabled = false
+        context.amtProfile.ipSyncEnabled = false
+        context.wifiSettings = {
+          DHCPEnabled: false,
+          DefaultGateway: '',
+          IPAddress: '',
+          SubnetMask: ''
+        }
+        await expect(wifiConfiguration.putMaxRetranSetting({ input: context })).rejects.toThrow()
+        context.wifiSettings = {
+          DHCPEnabled: false,
+          DefaultGateway: '',
+          IPAddress: '192.168.1.100',
+          SubnetMask: ''
+        }
+        await expect(wifiConfiguration.putMaxRetranSetting({ input: context })).rejects.toThrow()
+      })
   })
 })

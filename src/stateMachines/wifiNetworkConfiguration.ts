@@ -20,6 +20,7 @@ import {
   initiateCertRequest,
   sendEnterpriseAssistantKeyPairResponse
 } from './enterpriseAssistant.js'
+import { RPSError } from '../utils/RPSError.js'
 
 export interface WiFiConfigContext extends CommonContext {
   amtProfile: AMTConfiguration | null
@@ -243,11 +244,24 @@ export class WiFiConfiguration {
   }
 
   putMaxRetranSetting = async ({ input }: { input: WiFiConfigContext }): Promise<any> => {
-    const maxRetranSetting: AMT.Models.EthernetPortSettings = {
-      ConsoleTcpMaxRetransmissions: DEFAULT_MAX_TCP_RETRANSMISSIONS
+    if (input.wifiSettings.DHCPEnabled) {
+      // When 'DHCPEnabled' property is set to true the following properties should be removed:
+      // SubnetMask, DefaultGateway, IPAddress, PrimaryDNS, SecondaryDNS.
+      delete input.wifiSettings.SubnetMask
+      delete input.wifiSettings.DefaultGateway
+      delete input.wifiSettings.IPAddress
+      delete input.wifiSettings.PrimaryDNS
+      delete input.wifiSettings.SecondaryDNS
+    } else {
+      if (!input.wifiSettings.IPAddress || !input.wifiSettings.SubnetMask) {
+        throw new RPSError(
+          'Invalid configuration - IPAddress and SubnetMask are required when AMT profile is static'
+        )
+      }
     }
-    input.xmlMessage = input.amt?.EthernetPortSettings.Put(maxRetranSetting)
-    return await invokeWsmanCall(input)
+    input.wifiSettings.ConsoleTcpMaxRetransmissions = DEFAULT_MAX_TCP_RETRANSMISSIONS
+    input.xmlMessage = input.amt?.EthernetPortSettings.Put(input.wifiSettings)
+    return await invokeWsmanCall(input, 2)
   }
 
   machine = setup({
@@ -373,7 +387,22 @@ export class WiFiConfiguration {
               'Reset Unauth Count',
               'Reset Retry Count'
             ],
+            target: 'PUT_MAX_RETRAN_SETTING'
+          }
+        }
+      },
+      PUT_MAX_RETRAN_SETTING: {
+        invoke: {
+          src: 'putMaxRetranSetting',
+          input: ({ context }) => context,
+          id: 'put-max-retran-setting',
+          onDone: {
+            actions: assign({ message: ({ event }) => event.output }),
             target: 'GET_WIFI_PORT_CONFIGURATION_SERVICE'
+          },
+          onError: {
+            actions: assign({ errorMessage: () => 'Failed to put Max Retransmissions to ethernet port settings' }),
+            target: 'FAILED'
           }
         }
       },
@@ -656,24 +685,9 @@ export class WiFiConfiguration {
             target: 'GET_WIFI_PROFILE'
           },
           {
-            target: 'PUT_MAX_RETRAN_SETTING'
+            target: 'SUCCESS'
           }
         ]
-      },
-      PUT_MAX_RETRAN_SETTING: {
-        invoke: {
-          src: 'putMaxRetranSetting',
-          input: ({ context }) => context,
-          id: 'put-max-retran-setting',
-          onDone: {
-            actions: assign({ message: ({ event }) => event.output }),
-            target: 'SUCCESS'
-          },
-          onError: {
-            actions: assign({ errorMessage: 'Failed to put Max Retransmissions to ethernet port settings' }),
-            target: 'FAILED'
-          }
-        }
       },
       ERROR: {
         entry: sendTo('error-machine', { type: 'PARSE' }),
