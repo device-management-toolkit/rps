@@ -39,8 +39,13 @@ describe('WiFi Network Configuration', () => {
   let wifiConfiguration: WiFiConfigurationType
   let context
   let wifiProfile
+  let activeActors: any[] = []
 
   beforeEach(() => {
+    activeActors = []
+    jest.clearAllMocks()
+    invokeWsmanCallSpy.mockClear()
+    invokeEnterpriseAssistantCallSpy.mockClear()
     wifiProfile = {
       profileName: 'test-profile',
       authenticationMethod: 5,
@@ -170,6 +175,18 @@ describe('WiFi Network Configuration', () => {
               }
             })
         ),
+        getAmtBootCapabilities: fromPromise(
+          async ({ input }) =>
+            await Promise.resolve({
+              Envelope: {
+                Body: {
+                  AMT_BootCapabilities: {
+                    UEFIWiFiCoExistenceAndProfileShare: true
+                  }
+                }
+              }
+            })
+        ),
         updateWifiPort: fromPromise(async ({ input }) => await Promise.resolve({ clientId })),
         getWifiProfile: fromPromise(async ({ input }) => await Promise.resolve({ clientId })),
         addWifiConfigs: fromPromise(
@@ -201,6 +218,35 @@ describe('WiFi Network Configuration', () => {
     }
   })
 
+  afterEach(() => {
+    activeActors.forEach((actor) => {
+      try {
+        if (actor && typeof actor.stop === 'function') {
+          actor.stop()
+        }
+      } catch (error) {
+        // Ignore stop errors
+      }
+    })
+    activeActors = []
+
+    try {
+      if (devices && devices[clientId]) {
+        delete devices[clientId]
+      }
+    } catch (error) {
+      // Ignore cleanup errors to prevent test failures
+    }
+
+    currentStateIndex = 0
+  })
+
+  const createTrackedActor = (machine: any, options: any) => {
+    const actor = createActor(machine, options)
+    activeActors.push(actor)
+    return actor
+  }
+
   describe('State machines', () => {
     it('putMaxRetranSetting should eventually reach FAILED state', (done) => {
       config.actors!.putMaxRetranSetting = fromPromise(async ({ input }) => await Promise.reject(new Error()))
@@ -210,20 +256,24 @@ describe('WiFi Network Configuration', () => {
         'PUT_MAX_RETRAN_SETTING',
         'FAILED'
       ]
-      const service = createActor(mockNetworkConfigurationMachine, { input: context })
+      const service = createTrackedActor(mockNetworkConfigurationMachine, { input: context })
       service.subscribe((state) => {
-        const expectedState: any = flowStates[currentStateIndex++]
-        expect(state.matches(expectedState)).toBe(true)
-        if (state.matches('FAILED') && currentStateIndex === flowStates.length) {
-          const status = devices[clientId].status.Network
-          expect(status).toEqual(
-            'Wired Network Configured. Failed to put Max Retransmissions to ethernet port settings'
-          )
-          done()
+        try {
+          const expectedState: any = flowStates[currentStateIndex++]
+          expect(state.matches(expectedState)).toBe(true)
+          if (state.matches('FAILED') && currentStateIndex === flowStates.length) {
+            const status = devices[clientId].status.Network
+            expect(status).toEqual(
+              'Wired Network Configured. Failed to put Max Retransmissions to ethernet port settings'
+            )
+            done()
+          }
+        } catch (error) {
+          done(error)
         }
       })
       service.start()
-      service.send({ type: 'WIFICONFIG', clientId })
+      service.send({ type: 'WIFICONFIG', clientId } as any)
     })
 
     it('GetWifiPortCfgService should eventually reach FAILED state', (done) => {
@@ -238,7 +288,7 @@ describe('WiFi Network Configuration', () => {
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
         'FAILED'
       ]
-      const service = createActor(mockNetworkConfigurationMachine, { input: context })
+      const service = createTrackedActor(mockNetworkConfigurationMachine, { input: context })
       service.subscribe((state) => {
         const expectedState: any = flowStates[currentStateIndex++]
         expect(state.matches(expectedState)).toBe(true)
@@ -249,7 +299,7 @@ describe('WiFi Network Configuration', () => {
         }
       })
       service.start()
-      service.send({ type: 'WIFICONFIG', clientId })
+      service.send({ type: 'WIFICONFIG', clientId } as any)
     })
 
     it('PutWifiPortCfgService should eventually reach FAILED state', (done) => {
@@ -261,10 +311,11 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOTCAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'FAILED'
       ]
-      const service = createActor(mockNetworkConfigurationMachine, { input: context })
+      const service = createTrackedActor(mockNetworkConfigurationMachine, { input: context })
       service.subscribe((state) => {
         const expectedState: any = flowStates[currentStateIndex++]
         expect(state.matches(expectedState)).toBe(true)
@@ -275,7 +326,7 @@ describe('WiFi Network Configuration', () => {
         }
       })
       service.start()
-      service.send({ type: 'WIFICONFIG', clientId })
+      service.send({ type: 'WIFICONFIG', clientId } as any)
     })
 
     it('RqstStateChange should eventually reach FAILED state', (done) => {
@@ -285,11 +336,12 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOTCAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'FAILED'
       ]
-      const service = createActor(mockNetworkConfigurationMachine, { input: context })
+      const service = createTrackedActor(mockNetworkConfigurationMachine, { input: context })
       service.subscribe((state) => {
         const expectedState: any = flowStates[currentStateIndex++]
         expect(state.matches(expectedState)).toBe(true)
@@ -300,7 +352,7 @@ describe('WiFi Network Configuration', () => {
         }
       })
       service.start()
-      service.send({ type: 'WIFICONFIG', clientId })
+      service.send({ type: 'WIFICONFIG', clientId } as any)
     })
 
     it('GetWifiProfile should eventually reach FAILED state', (done) => {
@@ -310,12 +362,13 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOTCAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'GET_WIFI_PROFILE',
         'FAILED'
       ]
-      const service = createActor(mockNetworkConfigurationMachine, { input: context })
+      const service = createTrackedActor(mockNetworkConfigurationMachine, { input: context })
       service.subscribe((state) => {
         const expectedState: any = flowStates[currentStateIndex++]
         expect(state.matches(expectedState)).toBe(true)
@@ -326,7 +379,7 @@ describe('WiFi Network Configuration', () => {
         }
       })
       service.start()
-      service.send({ type: 'WIFICONFIG', clientId })
+      service.send({ type: 'WIFICONFIG', clientId } as any)
     })
 
     it('EARequest should eventually reach FAILED state', (done) => {
@@ -337,13 +390,14 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOTCAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'GET_WIFI_PROFILE',
         'ENTERPRISE_ASSISTANT_REQUEST',
         'FAILED'
       ]
-      const service = createActor(mockNetworkConfigurationMachine, { input: context })
+      const service = createTrackedActor(mockNetworkConfigurationMachine, { input: context })
       service.subscribe((state) => {
         const expectedState: any = flowStates[currentStateIndex++]
         expect(state.matches(expectedState)).toBe(true)
@@ -356,7 +410,7 @@ describe('WiFi Network Configuration', () => {
         }
       })
       service.start()
-      service.send({ type: 'WIFICONFIG', clientId })
+      service.send({ type: 'WIFICONFIG', clientId } as any)
     })
 
     it('GenerateKeyPair should eventually reach FAILED state', (done) => {
@@ -367,6 +421,7 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOTCAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'GET_WIFI_PROFILE',
@@ -374,7 +429,7 @@ describe('WiFi Network Configuration', () => {
         'GENERATE_KEY_PAIR',
         'FAILED'
       ]
-      const service = createActor(mockNetworkConfigurationMachine, { input: context })
+      const service = createTrackedActor(mockNetworkConfigurationMachine, { input: context })
       service.subscribe((state) => {
         const expectedState: any = flowStates[currentStateIndex++]
         expect(state.matches(expectedState)).toBe(true)
@@ -385,7 +440,7 @@ describe('WiFi Network Configuration', () => {
         }
       })
       service.start()
-      service.send({ type: 'WIFICONFIG', clientId })
+      service.send({ type: 'WIFICONFIG', clientId } as any)
     })
     it('EnumPubPrivKeyPair should eventually reach FAILED state', (done) => {
       context.wifiProfile = wifiProfile
@@ -395,6 +450,7 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOTCAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'GET_WIFI_PROFILE',
@@ -403,7 +459,7 @@ describe('WiFi Network Configuration', () => {
         'ENUMERATE_PUBLIC_PRIVATE_KEY_PAIR',
         'FAILED'
       ]
-      const service = createActor(mockNetworkConfigurationMachine, { input: context })
+      const service = createTrackedActor(mockNetworkConfigurationMachine, { input: context })
       service.subscribe((state) => {
         const expectedState: any = flowStates[currentStateIndex++]
         expect(state.matches(expectedState)).toBe(true)
@@ -414,7 +470,7 @@ describe('WiFi Network Configuration', () => {
         }
       })
       service.start()
-      service.send({ type: 'WIFICONFIG', clientId })
+      service.send({ type: 'WIFICONFIG', clientId } as any)
     })
 
     it('PullPubPrivKeyPair should eventually reach FAILED state', (done) => {
@@ -425,6 +481,7 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOTCAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'GET_WIFI_PROFILE',
@@ -434,7 +491,7 @@ describe('WiFi Network Configuration', () => {
         'PULL_PUBLIC_PRIVATE_KEY_PAIR',
         'FAILED'
       ]
-      const service = createActor(mockNetworkConfigurationMachine, { input: context })
+      const service = createTrackedActor(mockNetworkConfigurationMachine, { input: context })
       service.subscribe((state) => {
         const expectedState: any = flowStates[currentStateIndex++]
         expect(state.matches(expectedState)).toBe(true)
@@ -445,7 +502,7 @@ describe('WiFi Network Configuration', () => {
         }
       })
       service.start()
-      service.send({ type: 'WIFICONFIG', clientId })
+      service.send({ type: 'WIFICONFIG', clientId } as any)
     })
 
     it('EAResponse should eventually reach FAILED state', (done) => {
@@ -458,6 +515,7 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOTCAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'GET_WIFI_PROFILE',
@@ -468,7 +526,7 @@ describe('WiFi Network Configuration', () => {
         'ENTERPRISE_ASSISTANT_RESPONSE',
         'FAILED'
       ]
-      const service = createActor(mockNetworkConfigurationMachine, { input: context })
+      const service = createTrackedActor(mockNetworkConfigurationMachine, { input: context })
       service.subscribe((state) => {
         const expectedState: any = flowStates[currentStateIndex++]
         expect(state.matches(expectedState)).toBe(true)
@@ -479,7 +537,7 @@ describe('WiFi Network Configuration', () => {
         }
       })
       service.start()
-      service.send({ type: 'WIFICONFIG', clientId })
+      service.send({ type: 'WIFICONFIG', clientId } as any)
     })
 
     it('SignCSR should eventually reach FAILED state', (done) => {
@@ -490,6 +548,7 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOTCAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'GET_WIFI_PROFILE',
@@ -501,7 +560,7 @@ describe('WiFi Network Configuration', () => {
         'SIGN_CSR',
         'FAILED'
       ]
-      const service = createActor(mockNetworkConfigurationMachine, { input: context })
+      const service = createTrackedActor(mockNetworkConfigurationMachine, { input: context })
       service.subscribe((state) => {
         const expectedState: any = flowStates[currentStateIndex++]
         expect(state.matches(expectedState)).toBe(true)
@@ -512,7 +571,7 @@ describe('WiFi Network Configuration', () => {
         }
       })
       service.start()
-      service.send({ type: 'WIFICONFIG', clientId })
+      service.send({ type: 'WIFICONFIG', clientId } as any)
     })
 
     it('GetCertFromEA should eventually reach FAILED state', (done) => {
@@ -525,6 +584,7 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOTCAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'GET_WIFI_PROFILE',
@@ -537,7 +597,7 @@ describe('WiFi Network Configuration', () => {
         'GET_CERT_FROM_ENTERPRISE_ASSISTANT',
         'FAILED'
       ]
-      const service = createActor(mockNetworkConfigurationMachine, { input: context })
+      const service = createTrackedActor(mockNetworkConfigurationMachine, { input: context })
       service.subscribe((state) => {
         const expectedState: any = flowStates[currentStateIndex++]
         expect(state.matches(expectedState)).toBe(true)
@@ -548,7 +608,7 @@ describe('WiFi Network Configuration', () => {
         }
       })
       service.start()
-      service.send({ type: 'WIFICONFIG', clientId })
+      service.send({ type: 'WIFICONFIG', clientId } as any)
     })
     it('AddCert should eventually reach FAILED state', (done) => {
       context.wifiProfile = wifiProfile
@@ -558,6 +618,7 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOTCAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'GET_WIFI_PROFILE',
@@ -571,7 +632,7 @@ describe('WiFi Network Configuration', () => {
         'ADD_CERTIFICATE',
         'FAILED'
       ]
-      const service = createActor(mockNetworkConfigurationMachine, { input: context })
+      const service = createTrackedActor(mockNetworkConfigurationMachine, { input: context })
       service.subscribe((state) => {
         const expectedState: any = flowStates[currentStateIndex++]
         expect(state.matches(expectedState)).toBe(true)
@@ -582,7 +643,7 @@ describe('WiFi Network Configuration', () => {
         }
       })
       service.start()
-      service.send({ type: 'WIFICONFIG', clientId })
+      service.send({ type: 'WIFICONFIG', clientId } as any)
     })
 
     it('AddRadiusSrvrRootCert should eventually reach FAILED state', (done) => {
@@ -597,6 +658,7 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOTCAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'GET_WIFI_PROFILE',
@@ -611,7 +673,7 @@ describe('WiFi Network Configuration', () => {
         'ADD_RADIUS_SERVER_ROOT_CERTIFICATE',
         'FAILED'
       ]
-      const service = createActor(mockNetworkConfigurationMachine, { input: context })
+      const service = createTrackedActor(mockNetworkConfigurationMachine, { input: context })
       service.subscribe((state) => {
         const expectedState: any = flowStates[currentStateIndex++]
         expect(state.matches(expectedState)).toBe(true)
@@ -622,7 +684,7 @@ describe('WiFi Network Configuration', () => {
         }
       })
       service.start()
-      service.send({ type: 'WIFICONFIG', clientId })
+      service.send({ type: 'WIFICONFIG', clientId } as any)
     })
 
     it('should add a WiFi profile to AMT.', (done) => {
@@ -645,6 +707,7 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOTCAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'GET_WIFI_PROFILE',
@@ -659,7 +722,7 @@ describe('WiFi Network Configuration', () => {
         'ADD_WIFI_SETTINGS',
         'SUCCESS'
       ]
-      const service = createActor(mockNetworkConfigurationMachine, { input: context })
+      const service = createTrackedActor(mockNetworkConfigurationMachine, { input: context })
       service.subscribe((state) => {
         const expectedState: any = flowStates[currentStateIndex++]
         expect(state.matches(expectedState)).toBe(true)
@@ -670,7 +733,7 @@ describe('WiFi Network Configuration', () => {
         }
       })
       service.start()
-      service.send({ type: 'WIFICONFIG', clientId })
+      service.send({ type: 'WIFICONFIG', clientId } as any)
     })
     it('should enable OS profile sync.', (done) => {
       context.wifiSettings = {
@@ -691,11 +754,12 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOTCAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'SUCCESS_SYNC_ONLY'
       ]
-      const service = createActor(mockNetworkConfigurationMachine, { input: context })
+      const service = createTrackedActor(mockNetworkConfigurationMachine, { input: context })
       service.subscribe((state) => {
         const expectedState: any = flowStates[currentStateIndex++]
         expect(state.matches(expectedState)).toBe(true)
@@ -706,7 +770,7 @@ describe('WiFi Network Configuration', () => {
         }
       })
       service.start()
-      service.send({ type: 'WIFICONFIG', clientId })
+      service.send({ type: 'WIFICONFIG', clientId } as any)
     })
 
     it('should fail to add wifi profile when not supported by AMT.', (done) => {
@@ -730,6 +794,7 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOTCAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'GET_WIFI_PROFILE',
@@ -744,7 +809,7 @@ describe('WiFi Network Configuration', () => {
         'ADD_WIFI_SETTINGS',
         'SUCCESS'
       ]
-      const service = createActor(mockNetworkConfigurationMachine, { input: context })
+      const service = createTrackedActor(mockNetworkConfigurationMachine, { input: context })
       service.subscribe((state) => {
         const expectedState: any = flowStates[currentStateIndex++]
         expect(state.matches(expectedState)).toBe(true)
@@ -755,7 +820,7 @@ describe('WiFi Network Configuration', () => {
         }
       })
       service.start()
-      service.send({ type: 'WIFICONFIG', clientId })
+      service.send({ type: 'WIFICONFIG', clientId } as any)
     })
 
     it('should fail and report the detail message with added and failed profiles.', (done) => {
@@ -779,6 +844,7 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOTCAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'GET_WIFI_PROFILE',
@@ -793,7 +859,7 @@ describe('WiFi Network Configuration', () => {
         'ADD_WIFI_SETTINGS',
         'SUCCESS'
       ]
-      const service = createActor(mockNetworkConfigurationMachine, { input: context })
+      const service = createTrackedActor(mockNetworkConfigurationMachine, { input: context })
       service.subscribe((state) => {
         const expectedState: any = flowStates[currentStateIndex++]
         expect(state.matches(expectedState)).toBe(true)
@@ -804,7 +870,7 @@ describe('WiFi Network Configuration', () => {
         }
       })
       service.start()
-      service.send({ type: 'WIFICONFIG', clientId })
+      service.send({ type: 'WIFICONFIG', clientId } as any)
     })
     it('should fail and report the detail message with added and return value 1.', (done) => {
       context.wifiSettings = {
@@ -830,6 +896,7 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOTCAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'GET_WIFI_PROFILE',
@@ -844,7 +911,7 @@ describe('WiFi Network Configuration', () => {
         'ADD_WIFI_SETTINGS',
         'SUCCESS'
       ]
-      const service = createActor(mockNetworkConfigurationMachine, { input: context })
+      const service = createTrackedActor(mockNetworkConfigurationMachine, { input: context })
       service.subscribe((state) => {
         const expectedState: any = flowStates[currentStateIndex++]
         expect(state.matches(expectedState)).toBe(true)
@@ -855,7 +922,7 @@ describe('WiFi Network Configuration', () => {
         }
       })
       service.start()
-      service.send({ type: 'WIFICONFIG', clientId })
+      service.send({ type: 'WIFICONFIG', clientId } as any)
     })
     it('should fail and report the detail message with added', (done) => {
       context.wifiSettings = {
@@ -882,6 +949,7 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOTCAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'GET_WIFI_PROFILE',
@@ -896,7 +964,7 @@ describe('WiFi Network Configuration', () => {
         'ADD_WIFI_SETTINGS',
         'SUCCESS'
       ]
-      const service = createActor(mockNetworkConfigurationMachine, { input: context })
+      const service = createTrackedActor(mockNetworkConfigurationMachine, { input: context })
       service.subscribe((state) => {
         const expectedState: any = flowStates[currentStateIndex++]
         expect(state.matches(expectedState)).toBe(true)
@@ -907,7 +975,7 @@ describe('WiFi Network Configuration', () => {
         }
       })
       service.start()
-      service.send({ type: 'WIFICONFIG', clientId })
+      service.send({ type: 'WIFICONFIG', clientId } as any)
     })
   })
 
@@ -1070,6 +1138,57 @@ describe('WiFi Network Configuration', () => {
       await wifiConfiguration.addWifiConfigs({ input: context })
       expect(addWiFiSettingsSpy).toHaveBeenCalledTimes(1)
       expect(invokeWsmanCallSpy).toHaveBeenCalled()
+    })
+    it('should put WiFi Port Configuration Service without modifying UEFIWiFiProfileShareEnabled when UEFIWiFiCoExistenceAndProfileShare is false', async () => {
+      context.message = {
+        Envelope: {
+          Header: {},
+          Body: {
+            AMT_WiFiPortConfigurationService: {
+              localProfileSynchronizationEnabled: 0,
+              UEFIWiFiProfileShareEnabled: 0
+            }
+          }
+        }
+      }
+      context.bootCapabilitiesResponse = {
+        AMT_BootCapabilities: {
+          UEFIWiFiCoExistenceAndProfileShare: false
+        }
+      }
+      const WiFiPortConfigurationServiceSpy = spyOn(context.amt.WiFiPortConfigurationService, 'Put').mockReturnValue(
+        'done'
+      )
+      await wifiConfiguration.putWifiPortConfigurationService({ input: context })
+      expect(invokeWsmanCallSpy).toHaveBeenCalled()
+      expect(WiFiPortConfigurationServiceSpy).toHaveBeenCalledWith({
+        localProfileSynchronizationEnabled: 3,
+        UEFIWiFiProfileShareEnabled: 0
+      })
+    })
+    it('should put WiFi Port Configuration Service without UEFIWiFiProfileShareEnabled when UEFIWiFiCoExistenceAndProfileShare is unavailable', async () => {
+      context.message = {
+        Envelope: {
+          Header: {},
+          Body: {
+            AMT_WiFiPortConfigurationService: {
+              localProfileSynchronizationEnabled: 0
+            }
+          }
+        }
+      }
+      context.bootCapabilitiesResponse = {
+        AMT_BootCapabilities: {}
+      }
+      context.uefiWifiSyncEnabled = true
+      const WiFiPortConfigurationServiceSpy = spyOn(context.amt.WiFiPortConfigurationService, 'Put').mockReturnValue(
+        'done'
+      )
+      await wifiConfiguration.putWifiPortConfigurationService({ input: context })
+      expect(invokeWsmanCallSpy).toHaveBeenCalled()
+      expect(WiFiPortConfigurationServiceSpy).toHaveBeenCalledWith({
+        localProfileSynchronizationEnabled: 3
+      })
     })
   })
 

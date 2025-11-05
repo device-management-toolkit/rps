@@ -40,6 +40,7 @@ export interface WiFiConfigContext extends CommonContext {
   profilesFailed?: string
   onlyLocalWifiSyncEnabled?: boolean
   uefiWifiSyncEnabled?: boolean
+  bootCapabilitiesResponse?: AMT.Models.BootCapabilities | null
   amt?: AMT.Messages
   cim?: CIM.Messages
 }
@@ -168,9 +169,16 @@ export class WiFiConfiguration {
     return await invokeWsmanCall(input, 2)
   }
 
+  getAmtBootCapabilities = async ({ input }: { input: WiFiConfigContext }): Promise<any> => {
+    input.xmlMessage = input.amt?.BootCapabilities.Get()
+    return await invokeWsmanCall(input, 2)
+  }
+
   putWifiPortConfigurationService = async ({ input }: { input: WiFiConfigContext }): Promise<any> => {
     const wifiPortConfigurationService: AMT.Models.WiFiPortConfigurationService =
       input.message.Envelope.Body.AMT_WiFiPortConfigurationService
+    const amtBootCapabilities: AMT.Models.BootCapabilities =
+      input.bootCapabilitiesResponse as AMT.Models.BootCapabilities
 
     if (input.amtProfile?.localWifiSyncEnabled === true) {
       // 3 = Unrestricted synchronization
@@ -183,11 +191,13 @@ export class WiFiConfiguration {
       wifiPortConfigurationService.localProfileSynchronizationEnabled = 3
     }
 
-    if (input.amtProfile?.uefiWifiSyncEnabled === true) {
-      // Enable UEFI WiFi Profile Synchronization
-      wifiPortConfigurationService.UEFIWiFiProfileShareEnabled = 1
-    } else {
-      wifiPortConfigurationService.UEFIWiFiProfileShareEnabled = 0
+    if (amtBootCapabilities?.AMT_BootCapabilities?.UEFIWiFiCoExistenceAndProfileShare) {
+      if (input.amtProfile?.uefiWifiSyncEnabled === true) {
+        // Enable UEFI WiFi Profile Synchronization
+        wifiPortConfigurationService.UEFIWiFiProfileShareEnabled = 1
+      } else {
+        wifiPortConfigurationService.UEFIWiFiProfileShareEnabled = 0
+      }
     }
 
     input.xmlMessage = input.amt?.WiFiPortConfigurationService.Put(wifiPortConfigurationService)
@@ -272,6 +282,7 @@ export class WiFiConfiguration {
     actors: {
       getWifiPortConfigurationService: fromPromise(this.getWifiPortConfigurationService),
       putWifiPortConfigurationService: fromPromise(this.putWifiPortConfigurationService),
+      getAmtBootCapabilities: fromPromise(this.getAmtBootCapabilities),
       updateWifiPort: fromPromise(this.updateWifiPort),
       getWifiProfile: fromPromise(this.getWifiProfile),
       addWifiConfigs: fromPromise(this.addWifiConfigs),
@@ -423,12 +434,29 @@ export class WiFiConfiguration {
         always: [
           {
             guard: 'isLocalProfileSynchronizationNotEnabled',
-            target: 'PUT_WIFI_PORT_CONFIGURATION_SERVICE'
+            target: 'GET_AMT_BOOTCAPABILITIES'
           },
           {
             target: 'REQUEST_STATE_CHANGE_FOR_WIFI_PORT'
           }
         ]
+      },
+      GET_AMT_BOOTCAPABILITIES: {
+        invoke: {
+          src: 'getAmtBootCapabilities',
+          input: ({ context }) => context,
+          id: 'get-amt-boot-capabilities',
+          onDone: {
+            actions: assign({
+              bootCapabilitiesResponse: ({ event }) => event.output.Envelope?.Body as AMT.Models.BootCapabilities
+            }),
+            target: 'PUT_WIFI_PORT_CONFIGURATION_SERVICE'
+          },
+          onError: {
+            actions: assign({ errorMessage: () => 'Failed to get AMT Boot Capabilities' }),
+            target: 'FAILED'
+          }
+        }
       },
       PUT_WIFI_PORT_CONFIGURATION_SERVICE: {
         invoke: {
