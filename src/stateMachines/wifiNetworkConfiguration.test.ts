@@ -170,6 +170,18 @@ describe('WiFi Network Configuration', () => {
               }
             })
         ),
+        getAmtBootCapabilities: fromPromise(
+          async ({ input }) =>
+            await Promise.resolve({
+              Envelope: {
+                Body: {
+                  AMT_BootCapabilities: {
+                    UEFIWiFiCoExistenceAndProfileShare: true
+                  }
+                }
+              }
+            })
+        ),
         updateWifiPort: fromPromise(async ({ input }) => await Promise.resolve({ clientId })),
         getWifiProfile: fromPromise(async ({ input }) => await Promise.resolve({ clientId })),
         addWifiConfigs: fromPromise(
@@ -261,6 +273,7 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOT_CAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'FAILED'
       ]
@@ -285,6 +298,7 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOT_CAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'FAILED'
@@ -310,6 +324,7 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOT_CAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'GET_WIFI_PROFILE',
@@ -337,6 +352,7 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOT_CAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'GET_WIFI_PROFILE',
@@ -367,6 +383,7 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOT_CAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'GET_WIFI_PROFILE',
@@ -395,6 +412,7 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOT_CAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'GET_WIFI_PROFILE',
@@ -425,6 +443,7 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOT_CAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'GET_WIFI_PROFILE',
@@ -458,6 +477,7 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOT_CAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'GET_WIFI_PROFILE',
@@ -490,6 +510,7 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOT_CAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'GET_WIFI_PROFILE',
@@ -525,6 +546,7 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOT_CAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'GET_WIFI_PROFILE',
@@ -558,6 +580,7 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOT_CAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'GET_WIFI_PROFILE',
@@ -597,6 +620,7 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOT_CAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'GET_WIFI_PROFILE',
@@ -645,6 +669,7 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOT_CAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'GET_WIFI_PROFILE',
@@ -691,6 +716,7 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOT_CAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'SUCCESS_SYNC_ONLY'
@@ -730,6 +756,7 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOT_CAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'GET_WIFI_PROFILE',
@@ -779,6 +806,7 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOT_CAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'GET_WIFI_PROFILE',
@@ -830,6 +858,7 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOT_CAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'GET_WIFI_PROFILE',
@@ -882,6 +911,7 @@ describe('WiFi Network Configuration', () => {
         'ACTIVATION',
         'PUT_MAX_RETRAN_SETTING',
         'GET_WIFI_PORT_CONFIGURATION_SERVICE',
+        'GET_AMT_BOOT_CAPABILITIES',
         'PUT_WIFI_PORT_CONFIGURATION_SERVICE',
         'REQUEST_STATE_CHANGE_FOR_WIFI_PORT',
         'GET_WIFI_PROFILE',
@@ -1070,6 +1100,57 @@ describe('WiFi Network Configuration', () => {
       await wifiConfiguration.addWifiConfigs({ input: context })
       expect(addWiFiSettingsSpy).toHaveBeenCalledTimes(1)
       expect(invokeWsmanCallSpy).toHaveBeenCalled()
+    })
+    it('should put WiFi Port Configuration Service without modifying UEFIWiFiProfileShareEnabled when UEFIWiFiCoExistenceAndProfileShare is false', async () => {
+      context.message = {
+        Envelope: {
+          Header: {},
+          Body: {
+            AMT_WiFiPortConfigurationService: {
+              localProfileSynchronizationEnabled: 0,
+              UEFIWiFiProfileShareEnabled: 0
+            }
+          }
+        }
+      }
+      context.bootCapabilitiesResponse = {
+        AMT_BootCapabilities: {
+          UEFIWiFiCoExistenceAndProfileShare: false
+        }
+      }
+      const WiFiPortConfigurationServiceSpy = spyOn(context.amt.WiFiPortConfigurationService, 'Put').mockReturnValue(
+        'done'
+      )
+      await wifiConfiguration.putWifiPortConfigurationService({ input: context })
+      expect(invokeWsmanCallSpy).toHaveBeenCalled()
+      expect(WiFiPortConfigurationServiceSpy).toHaveBeenCalledWith({
+        localProfileSynchronizationEnabled: 3,
+        UEFIWiFiProfileShareEnabled: 0
+      })
+    })
+    it('should put WiFi Port Configuration Service without UEFIWiFiProfileShareEnabled when UEFIWiFiCoExistenceAndProfileShare is unavailable', async () => {
+      context.message = {
+        Envelope: {
+          Header: {},
+          Body: {
+            AMT_WiFiPortConfigurationService: {
+              localProfileSynchronizationEnabled: 0
+            }
+          }
+        }
+      }
+      context.bootCapabilitiesResponse = {
+        AMT_BootCapabilities: {}
+      }
+      context.uefiWifiSyncEnabled = true
+      const WiFiPortConfigurationServiceSpy = spyOn(context.amt.WiFiPortConfigurationService, 'Put').mockReturnValue(
+        'done'
+      )
+      await wifiConfiguration.putWifiPortConfigurationService({ input: context })
+      expect(invokeWsmanCallSpy).toHaveBeenCalled()
+      expect(WiFiPortConfigurationServiceSpy).toHaveBeenCalledWith({
+        localProfileSynchronizationEnabled: 3
+      })
     })
   })
 
