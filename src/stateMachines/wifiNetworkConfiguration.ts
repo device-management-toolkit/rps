@@ -14,12 +14,13 @@ import { Configurator } from '../Configurator.js'
 import { DbCreatorFactory } from '../factories/DbCreatorFactory.js'
 import { type CommonContext, invokeWsmanCall } from './common.js'
 import { type WifiCredentials } from '../interfaces/ISecretManagerService.js'
-import { UNEXPECTED_PARSE_ERROR } from '../utils/constants.js'
+import { UNEXPECTED_PARSE_ERROR, DEFAULT_MAX_TCP_RETRANSMISSIONS } from '../utils/constants.js'
 import {
   getCertFromEnterpriseAssistant,
   initiateCertRequest,
   sendEnterpriseAssistantKeyPairResponse
 } from './enterpriseAssistant.js'
+import { RPSError } from '../utils/RPSError.js'
 
 export interface WiFiConfigContext extends CommonContext {
   amtProfile: AMTConfiguration | null
@@ -39,6 +40,7 @@ export interface WiFiConfigContext extends CommonContext {
   profilesFailed?: string
   onlyLocalWifiSyncEnabled?: boolean
   uefiWifiSyncEnabled?: boolean
+  bootCapabilitiesResponse?: AMT.Models.BootCapabilities | null
   amt?: AMT.Messages
   cim?: CIM.Messages
 }
@@ -167,9 +169,16 @@ export class WiFiConfiguration {
     return await invokeWsmanCall(input, 2)
   }
 
+  getAmtBootCapabilities = async ({ input }: { input: WiFiConfigContext }): Promise<any> => {
+    input.xmlMessage = input.amt?.BootCapabilities.Get()
+    return await invokeWsmanCall(input, 2)
+  }
+
   putWifiPortConfigurationService = async ({ input }: { input: WiFiConfigContext }): Promise<any> => {
     const wifiPortConfigurationService: AMT.Models.WiFiPortConfigurationService =
       input.message.Envelope.Body.AMT_WiFiPortConfigurationService
+    const amtBootCapabilities: AMT.Models.BootCapabilities =
+      input.bootCapabilitiesResponse as AMT.Models.BootCapabilities
 
     if (input.amtProfile?.localWifiSyncEnabled === true) {
       // 3 = Unrestricted synchronization
@@ -182,11 +191,13 @@ export class WiFiConfiguration {
       wifiPortConfigurationService.localProfileSynchronizationEnabled = 3
     }
 
-    if (input.amtProfile?.uefiWifiSyncEnabled === true) {
-      // Enable UEFI WiFi Profile Synchronization
-      wifiPortConfigurationService.UEFIWiFiProfileShareEnabled = 1
-    } else {
-      wifiPortConfigurationService.UEFIWiFiProfileShareEnabled = 0
+    if (amtBootCapabilities?.AMT_BootCapabilities?.UEFIWiFiCoExistenceAndProfileShare) {
+      if (input.amtProfile?.uefiWifiSyncEnabled === true) {
+        // Enable UEFI WiFi Profile Synchronization
+        wifiPortConfigurationService.UEFIWiFiProfileShareEnabled = 1
+      } else {
+        wifiPortConfigurationService.UEFIWiFiProfileShareEnabled = 0
+      }
     }
 
     input.xmlMessage = input.amt?.WiFiPortConfigurationService.Put(wifiPortConfigurationService)
@@ -242,6 +253,25 @@ export class WiFiConfiguration {
     return await invokeWsmanCall(input)
   }
 
+  putMaxRetranSetting = async ({ input }: { input: WiFiConfigContext }): Promise<any> => {
+    if (input.wifiSettings.DHCPEnabled) {
+      // When 'DHCPEnabled' property is set to true the following properties should be removed:
+      // SubnetMask, DefaultGateway, IPAddress, PrimaryDNS, SecondaryDNS.
+      delete input.wifiSettings.SubnetMask
+      delete input.wifiSettings.DefaultGateway
+      delete input.wifiSettings.IPAddress
+      delete input.wifiSettings.PrimaryDNS
+      delete input.wifiSettings.SecondaryDNS
+    } else {
+      if (!input.wifiSettings.IPAddress || !input.wifiSettings.SubnetMask) {
+        throw new RPSError('Invalid configuration - IPAddress and SubnetMask are required when AMT profile is static')
+      }
+    }
+    input.wifiSettings.ConsoleTcpMaxRetransmissions = DEFAULT_MAX_TCP_RETRANSMISSIONS
+    input.xmlMessage = input.amt?.EthernetPortSettings.Put(input.wifiSettings)
+    return await invokeWsmanCall(input, 2)
+  }
+
   machine = setup({
     types: {} as {
       context: WiFiConfigContext
@@ -252,6 +282,7 @@ export class WiFiConfiguration {
     actors: {
       getWifiPortConfigurationService: fromPromise(this.getWifiPortConfigurationService),
       putWifiPortConfigurationService: fromPromise(this.putWifiPortConfigurationService),
+      getAmtBootCapabilities: fromPromise(this.getAmtBootCapabilities),
       updateWifiPort: fromPromise(this.updateWifiPort),
       getWifiProfile: fromPromise(this.getWifiProfile),
       addWifiConfigs: fromPromise(this.addWifiConfigs),
@@ -264,7 +295,8 @@ export class WiFiConfiguration {
       errorMachine: this.error.machine,
       initiateCertRequest: fromPromise(initiateCertRequest),
       getCertFromEnterpriseAssistant: fromPromise(getCertFromEnterpriseAssistant),
-      sendEnterpriseAssistantKeyPairResponse: fromPromise(sendEnterpriseAssistantKeyPairResponse)
+      sendEnterpriseAssistantKeyPairResponse: fromPromise(sendEnterpriseAssistantKeyPairResponse),
+      putMaxRetranSetting: fromPromise(this.putMaxRetranSetting)
     },
     guards: {
       is8021xProfileAssociated: ({ context }) =>
@@ -364,7 +396,22 @@ export class WiFiConfiguration {
               'Reset Unauth Count',
               'Reset Retry Count'
             ],
+            target: 'PUT_MAX_RETRAN_SETTING'
+          }
+        }
+      },
+      PUT_MAX_RETRAN_SETTING: {
+        invoke: {
+          src: 'putMaxRetranSetting',
+          input: ({ context }) => context,
+          id: 'put-max-retran-setting',
+          onDone: {
+            actions: assign({ message: ({ event }) => event.output }),
             target: 'GET_WIFI_PORT_CONFIGURATION_SERVICE'
+          },
+          onError: {
+            actions: assign({ errorMessage: () => 'Failed to put Max Retransmissions to ethernet port settings' }),
+            target: 'FAILED'
           }
         }
       },
@@ -387,12 +434,29 @@ export class WiFiConfiguration {
         always: [
           {
             guard: 'isLocalProfileSynchronizationNotEnabled',
-            target: 'PUT_WIFI_PORT_CONFIGURATION_SERVICE'
+            target: 'GET_AMT_BOOTCAPABILITIES'
           },
           {
             target: 'REQUEST_STATE_CHANGE_FOR_WIFI_PORT'
           }
         ]
+      },
+      GET_AMT_BOOTCAPABILITIES: {
+        invoke: {
+          src: 'getAmtBootCapabilities',
+          input: ({ context }) => context,
+          id: 'get-amt-boot-capabilities',
+          onDone: {
+            actions: assign({
+              bootCapabilitiesResponse: ({ event }) => event.output.Envelope?.Body as AMT.Models.BootCapabilities
+            }),
+            target: 'PUT_WIFI_PORT_CONFIGURATION_SERVICE'
+          },
+          onError: {
+            actions: assign({ errorMessage: () => 'Failed to get AMT Boot Capabilities' }),
+            target: 'FAILED'
+          }
+        }
       },
       PUT_WIFI_PORT_CONFIGURATION_SERVICE: {
         invoke: {
