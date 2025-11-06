@@ -1,3 +1,17 @@
+## [2.30.1](https://github.com/device-management-toolkit/rps/compare/v2.30.0...v2.30.1) (2025-11-05)
+
+
+### Bug Fixes
+
+* add coexistence check for profile share ([#2401](https://github.com/device-management-toolkit/rps/issues/2401)) ([790ffdd](https://github.com/device-management-toolkit/rps/commit/790ffddbb899b50141ce9950a54fda91cedc89c8))
+
+# [2.30.0](https://github.com/device-management-toolkit/rps/compare/v2.29.1...v2.30.0) (2025-11-05)
+
+
+### Features
+
+* extend max retransmission setting for WiFi network configuration ([#2390](https://github.com/device-management-toolkit/rps/issues/2390)) ([39ee524](https://github.com/device-management-toolkit/rps/commit/39ee524cf44e7b3dc50c94010ea6981bcb7768b4))
+
 ## [2.29.1](https://github.com/device-management-toolkit/rps/compare/v2.29.0...v2.29.1) (2025-10-13)
 
 
