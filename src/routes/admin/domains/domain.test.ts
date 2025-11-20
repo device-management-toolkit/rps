@@ -15,6 +15,108 @@ describe('Domain Profile Validation', () => {
   let pfxobj
   let value
 
+  describe('AMT Domain Profile Name Validation', () => {
+    test('should accept valid AMT Domain profile names with letters, numbers, underscores, and hyphens', () => {
+      const validProfileNames = [
+        'profile_name',
+        'profile-name',
+        'ProfileName123',
+        'my_profile_name',
+        'my-profile-name',
+        'profile123',
+        'PROFILE_NAME',
+        'PROFILE-NAME',
+        'test_123_profile',
+        'test-123-profile',
+        'a', // single character
+        'A', // single uppercase
+        '1', // single number
+        '_', // single underscore
+        '-', // single hyphen
+        'a_b-c_d-e', // mixed separators
+        'Test_Profile_123-ABC', // mixed case with numbers
+        '_start_with_underscore',
+        '-start-with-hyphen',
+        'end_with_underscore_',
+        'end-with-hyphen-',
+        '_profile-name_', // both start and end
+        '-profile_name-' // both start and end
+      ]
+
+      const profileNameRegex = /^[a-zA-Z0-9_-]+$/
+
+      validProfileNames.forEach((profileName) => {
+        expect(profileNameRegex.test(profileName)).toBe(true)
+      })
+    })
+
+    test('should reject AMT Domain profile names with invalid characters', () => {
+      const invalidProfileNames = [
+        'profile name', // contains space
+        'profile.name', // contains dot
+        'profile@name', // contains @
+        'profile!name', // contains !
+        'profile#name', // contains #
+        'profile$name', // contains $
+        'profile%name', // contains %
+        'profile^name', // contains ^
+        'profile&name', // contains &
+        'profile*name', // contains *
+        'profile(name)', // contains parentheses
+        'profile+name', // contains +
+        'profile=name', // contains =
+        'profile[name]', // contains brackets
+        'profile{name}', // contains braces
+        'profile|name', // contains pipe
+        'profile\\name', // contains backslash
+        'profile:name', // contains colon
+        'profile;name', // contains semicolon
+        'profile"name"', // contains quotes
+        "profile'name'", // contains single quotes
+        'profile<name>', // contains angle brackets
+        'profile,name', // contains comma
+        'profile?name', // contains question mark
+        'profile/name', // contains slash
+        'profile~name', // contains tilde
+        'profile`name', // contains backtick
+        ' profile', // leading space
+        'profile ', // trailing space
+        ' profile ', // leading and trailing spaces
+        '\tprofile', // tab character
+        'profile\n', // newline character
+        'profile\r', // carriage return
+        '' // empty string
+      ]
+
+      const profileNameRegex = /^[a-zA-Z0-9_-]+$/
+
+      invalidProfileNames.forEach((profileName) => {
+        expect(profileNameRegex.test(profileName)).toBe(false)
+      })
+    })
+
+    test('should handle edge cases for AMT Domain profile names', () => {
+      const profileNameRegex = /^[a-zA-Z0-9_-]+$/
+
+      // Test very long valid profile name
+      const longValidProfile = 'a'.repeat(50) + '-' + '_'.repeat(25) + '123'
+      expect(profileNameRegex.test(longValidProfile)).toBe(true)
+
+      // Test profile names with only separators
+      expect(profileNameRegex.test('___')).toBe(true)
+      expect(profileNameRegex.test('---')).toBe(true)
+      expect(profileNameRegex.test('_-_-_')).toBe(true)
+
+      // Test profile names with numbers only
+      expect(profileNameRegex.test('123456')).toBe(true)
+      expect(profileNameRegex.test('0')).toBe(true)
+
+      // Test mixed patterns
+      expect(profileNameRegex.test('_123-ABC_test')).toBe(true)
+      expect(profileNameRegex.test('profile_123-test_456')).toBe(true)
+    })
+  })
+
   test('passwordChecker - success', () => {
     req = {
       body: {

@@ -18,8 +18,8 @@ export const domainInsertValidator = (): any => [
     .not()
     .isEmpty()
     .withMessage('AMT Domain profile name is required')
-    .matches('^[a-zA-Z0-9$@$!%*#?&-_~^]+$')
-    .withMessage('AMT Domain profile name accepts letters, numbers, special characters and no spaces'),
+    .matches('^[a-zA-Z0-9_-]+$')
+    .withMessage('AMT Domain profile name accepts letters, numbers, hyphens (-), and underscores (_)'),
   check('provisioningCertPassword')
     .not()
     .isEmpty()
@@ -46,8 +46,8 @@ export const domainUpdateValidator = (): any => [
     .not()
     .isEmpty()
     .withMessage('AMT Domain profile name is required')
-    .matches('^[a-zA-Z0-9$@$!%*#?&-_~^]+$')
-    .withMessage('AMT Domain name accepts letters, numbers, special characters and no spaces'),
+    .matches('^[a-zA-Z0-9_-]+$')
+    .withMessage('AMT Domain profile name accepts letters, numbers, hyphens (-), and underscores (_)'),
   check('domainSuffix'),
   check('provisioningCert'),
   check('provisioningCertStorageFormat')
