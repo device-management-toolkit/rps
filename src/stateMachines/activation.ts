@@ -312,20 +312,25 @@ export class Activation {
 
   compareCertHashes({ context }): void {
     const { clientId, certChainPfx } = context
-    // check that provisioning certificate root matches one of the trusted roots from AMT
-    for (const hash in devices[clientId].ClientData.payload.certHashes) {
-      if (
-        devices[clientId].ClientData.payload.certHashes[hash]?.toLowerCase() ===
-        certChainPfx.fingerprint?.sha256?.toLowerCase()
-      ) {
+
+    for (const hash of devices[clientId].ClientData.payload.certHashes || []) {
+      if (!hash) continue
+
+      const certFingerprint =
+        hash.toLowerCase().length === 40
+          ? certChainPfx?.fingerprint?.sha1?.toLowerCase()
+          : hash.toLowerCase().length === 64
+            ? certChainPfx?.fingerprint?.sha256?.toLowerCase()
+            : hash.toLowerCase().length === 96
+              ? certChainPfx?.fingerprint?.sha384?.toLowerCase()
+              : null
+
+      if (hash.toLowerCase() === certFingerprint) {
         devices[clientId].certObj = certChainPfx.provisioningCertificateObj
-      } else if (
-        devices[clientId].ClientData.payload.certHashes[hash]?.toLowerCase() ===
-        certChainPfx.fingerprint?.sha1?.toLowerCase()
-      ) {
-        devices[clientId].certObj = certChainPfx.provisioningCertificateObj
+        return
       }
     }
+    this.logger.debug(`No matching certificate hash found for client ${clientId}`)
   }
 
   readGeneralSettings({ context }): void {
