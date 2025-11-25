@@ -58,6 +58,7 @@ export interface CertAttributes {
 export interface RootCertFingerprint {
   sha1: string
   sha256: string
+  sha384: string
 }
 
 export interface CertCreationResult {

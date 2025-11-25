@@ -393,6 +393,7 @@ const EXPECTED_CERT: any = {
   },
   fingerprint: {
     sha256: '82f2ed575db4abe462499cf550dbff9584980d70a0272894639c3653b9ad932c',
+    sha384: 'bb00173b0fb55bc1b24fff5a32a02d210d2bbe16dc6ba4f8300729c1d545313a66930bcd1bcf9ed5a76e82ce602ef04a',
     sha1: '47d7b7db23f3e300189f54802482b1bd18b945ef'
   },
   hashAlgorithm: 'sha256'

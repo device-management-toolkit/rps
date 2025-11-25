@@ -316,6 +316,11 @@ export class Activation {
     for (const hash in devices[clientId].ClientData.payload.certHashes) {
       if (
         devices[clientId].ClientData.payload.certHashes[hash]?.toLowerCase() ===
+        certChainPfx.fingerprint?.sha384?.toLowerCase()
+      ) {
+        devices[clientId].certObj = certChainPfx.provisioningCertificateObj
+      } else if (
+        devices[clientId].ClientData.payload.certHashes[hash]?.toLowerCase() ===
         certChainPfx.fingerprint?.sha256?.toLowerCase()
       ) {
         devices[clientId].certObj = certChainPfx.provisioningCertificateObj
