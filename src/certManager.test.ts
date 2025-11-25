@@ -80,6 +80,17 @@ describe('certManager tests', () => {
       expect(certChainPfx.provisioningCertificateObj).toHaveProperty('privateKey')
       expect(certChainPfx.provisioningCertificateObj.privateKey).toBeDefined()
     })
+
+    test('should generate SHA384 fingerprint along with SHA256 and SHA1', () => {
+      const nodeForge = new NodeForge()
+      const certManager = new CertManager(new Logger('CertManager'), nodeForge)
+      const pfxObj = certManager.convertPfxToObject(TEST_PFXCERT, 'P@ssw0rd')
+      const certChainPfx = certManager.dumpPfx(pfxObj)
+
+      expect(certChainPfx.fingerprint).toHaveProperty('sha384')
+      expect(certChainPfx.fingerprint.sha384).toBeDefined()
+      expect(certChainPfx.fingerprint.sha384).toHaveLength(96) // SHA384 produces 96 hex characters
+    })
   })
 
   describe('createCertificate tests', () => {

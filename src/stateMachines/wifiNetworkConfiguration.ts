@@ -229,7 +229,7 @@ export class WiFiConfiguration {
         '<a:Address>http://schemas.xmlsoap.org/ws/2004/08/addressing/role/anonymous</a:Address><a:ReferenceParameters><w:ResourceURI>http://intel.com/wbem/wscim/1/amt-schema/1/AMT_PublicPrivateKeyPair</w:ResourceURI><w:SelectorSet><w:Selector Name="InstanceID">' +
         (input.message.response.keyInstanceId as string) +
         '</w:Selector></w:SelectorSet></a:ReferenceParameters>',
-      SigningAlgorithm: 1,
+      SigningAlgorithm: 2 as any,
       NullSignedCertificateRequest: input.message.response.csr
     })
     return await invokeWsmanCall(input)

@@ -84,6 +84,8 @@ export class CertManager {
           const der = this.nodeForge.asn1ToDer(this.nodeForge.pkiCertificateToAsn1(cert)).getBytes()
           // Generate SHA256 fingerprint of root certificate
           fingerprint.sha256 = this.nodeForge.sha256Create().update(der).digest().toHex()
+          // Generate SHA384 fingerprint of root certificate
+          fingerprint.sha384 = this.nodeForge.sha384Create().update(der).digest().toHex()
           // Generate SHA1 fingerprint of root certificate
           fingerprint.sha1 = this.nodeForge.sha1Create().update(der).digest().toHex()
         } else {
