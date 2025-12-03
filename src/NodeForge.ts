@@ -44,6 +44,10 @@ export class NodeForge {
     return forge.md.sha256.create()
   }
 
+  sha384Create(): forge.md.MessageDigest {
+    return forge.md.sha384.create()
+  }
+
   sha1Create(): forge.md.MessageDigest {
     return forge.md.sha1.create()
   }
