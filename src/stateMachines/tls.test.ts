@@ -195,7 +195,7 @@ describe('TLS State Machine', () => {
 
     expect(publicKeyManagementSpy).toHaveBeenCalledWith({
       KeyPair: expect.stringContaining('ABC123'),
-      SigningAlgorithm: 1,
+      SigningAlgorithm: 2,
       NullSignedCertificateRequest: context.message.response.csr
     })
   })
