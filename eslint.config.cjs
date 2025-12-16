@@ -8,6 +8,9 @@ const eslintConfigPrettier = require('eslint-config-prettier')
 // Export our config array, which is composed together thanks to the typed utility function from typescript-eslint
 module.exports = tseslint.config(
   {
+    ignores: ['coverage/**', 'dist/**', 'node_modules/**']
+  },
+  {
     // Everything in this config object targets our TypeScript files (Components, Directives, Pipes etc)
     files: ['**/*.ts'],
     extends: [
