@@ -1,3 +1,12 @@
+## [2.30.4](https://github.com/device-management-toolkit/rps/compare/v2.30.3...v2.30.4) (2025-12-16)
+
+## [2.30.3](https://github.com/device-management-toolkit/rps/compare/v2.30.2...v2.30.3) (2025-11-28)
+
+
+### Bug Fixes
+
+* Update the AMT Domain Profile Name to only support letters, numbers, underscores and hyphens ([#2425](https://github.com/device-management-toolkit/rps/issues/2425)) ([c00a8db](https://github.com/device-management-toolkit/rps/commit/c00a8dbd4081340dd0332430f828c857af463a07))
+
 ## [2.30.2](https://github.com/device-management-toolkit/rps/compare/v2.30.1...v2.30.2) (2025-11-06)
 
 ## [2.30.1](https://github.com/device-management-toolkit/rps/compare/v2.30.0...v2.30.1) (2025-11-05)

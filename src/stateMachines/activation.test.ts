@@ -404,12 +404,13 @@ describe('Activation State Machine', () => {
     })
 
     it('should send WSMan to set up admin mode', async () => {
-      const createSignedStringSpy = spyOn(activation, 'createSignedString').mockImplementation(
-        (clientId: string, hashAlgorithm: string): boolean => {
-          devices[clientId].signature = 'abcdefgh'
-          return true
-        }
-      )
+      const createSignedStringSpy = spyOn(activation, 'createSignedString').mockImplementation((
+        clientId: string,
+        hashAlgorithm: string
+      ): boolean => {
+        devices[clientId].signature = 'abcdefgh'
+        return true
+      })
       context.certChainPfx = { provisioningCertificateObj: { certChain: [
             'leaf',
             'inter1',
@@ -434,12 +435,12 @@ describe('Activation State Machine', () => {
     })
 
     it('should send WSMan to upgrade from client to admin mode', async () => {
-      const createSignedStringSpy = spyOn(activation, 'createSignedString').mockImplementation(
-        (clientId: string): boolean => {
-          devices[clientId].signature = 'abcdefgh'
-          return true
-        }
-      )
+      const createSignedStringSpy = spyOn(activation, 'createSignedString').mockImplementation((
+        clientId: string
+      ): boolean => {
+        devices[clientId].signature = 'abcdefgh'
+        return true
+      })
       devices[clientId].nonce = PasswordHelper.generateNonce()
       context.certChainPfx = { provisioningCertificateObj: { certChain: [
             'leaf',

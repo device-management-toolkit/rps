@@ -302,7 +302,7 @@ export class CertManager {
       if (issuerAttributes?.O) rootattrs.push({ name: 'organizationName', value: issuerAttributes.O })
       cert.setIssuer(rootattrs)
       cert = this.generateLeafCertificate(cert, extKeyUsage)
-      cert.sign(caPrivateKey, this.nodeForge.sha256Create())
+      cert.sign(caPrivateKey as pki.rsa.PrivateKey, this.nodeForge.sha256Create())
     } else {
       // Use our own attributes
       cert.setIssuer(attrs)
