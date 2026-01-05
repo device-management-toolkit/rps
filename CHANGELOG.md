@@ -1,3 +1,10 @@
+# [2.31.0](https://github.com/device-management-toolkit/rps/compare/v2.30.4...v2.31.0) (2025-12-29)
+
+
+### Features
+
+* Support for SHA384 Provisioning Certificates for RPS ([#2434](https://github.com/device-management-toolkit/rps/issues/2434)) ([01650c3](https://github.com/device-management-toolkit/rps/commit/01650c34ebf2778c6e3a77bfdfb809baf73ea857))
+
 ## [2.30.4](https://github.com/device-management-toolkit/rps/compare/v2.30.3...v2.30.4) (2025-12-16)
 
 ## [2.30.3](https://github.com/device-management-toolkit/rps/compare/v2.30.2...v2.30.3) (2025-11-28)
