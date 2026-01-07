@@ -47,7 +47,7 @@
   },
   "dependencies": {
     "@device-management-toolkit/wsman-messages": "^5.14.1",
-    "body-parser": "^2.2.1",
+    "body-parser": "^2.2.2",
     "consul": "^2.0.1",
     "cors": "^2.8.5",
     "crypto-random-string": "^3.3.1",
