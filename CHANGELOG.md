@@ -1,3 +1,5 @@
+## [2.31.1](https://github.com/device-management-toolkit/rps/compare/v2.31.0...v2.31.1) (2026-01-08)
+
 # [2.31.0](https://github.com/device-management-toolkit/rps/compare/v2.30.4...v2.31.0) (2025-12-29)
 
 
