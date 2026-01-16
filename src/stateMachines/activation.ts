@@ -482,6 +482,9 @@ export class Activation {
       },
       isSHBCCMComplete: ({ context }) => context.shbcCCMComplete === true,
       isSHBCACMComplete: ({ context }) => context.shbcACMComplete === true,
+      isSHBCUpgradeSuccessful: ({ context }) =>
+        context.shbcCCMComplete === true &&
+        context.message.Envelope.Body?.UpgradeClientToAdmin_OUTPUT?.ReturnValue === 0,
       isCertExtracted: ({ context }) => context.certChainPfx != null,
       isValidCert: ({ context }) => devices[context.clientId].certObj != null,
       isDigestRealmInvalid: ({ context }) =>
@@ -926,7 +929,7 @@ export class Activation {
       CHECK_UPGRADE: {
         always: [
           {
-            guard: 'isSHBCCMComplete',
+            guard: 'isSHBCUpgradeSuccessful',
             actions: [
               ({ context }) => {
                 devices[context.clientId].status.Status = 'admin control mode.'
