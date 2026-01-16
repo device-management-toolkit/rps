@@ -1,3 +1,10 @@
+## [2.31.2](https://github.com/device-management-toolkit/rps/compare/v2.31.1...v2.31.2) (2026-01-16)
+
+
+### Bug Fixes
+
+* **activation:** check upgrade result before reporting ACM activation success ([#2503](https://github.com/device-management-toolkit/rps/issues/2503)) ([765cb93](https://github.com/device-management-toolkit/rps/commit/765cb932bbf87bdd0e63d2a71827fb953fd4a03c))
+
 ## [2.31.1](https://github.com/device-management-toolkit/rps/compare/v2.31.0...v2.31.1) (2026-01-08)
 
 # [2.31.0](https://github.com/device-management-toolkit/rps/compare/v2.30.4...v2.31.0) (2025-12-29)
