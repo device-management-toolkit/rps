@@ -138,8 +138,11 @@ export const processTLSTunnelResponse = (clientId: string, data: Buffer, httpHan
   const clientObj = devices[clientId]
 
   if (clientObj == null || clientObj.pendingPromise == null) {
+    invokeWsmanLogger.debug(`TLS response received but no pending promise (${data.length} bytes)`)
     return
   }
+
+  invokeWsmanLogger.debug(`TLS response chunk received: ${data.length} bytes`)
 
   // Accumulate data in buffer
   if (clientObj.tlsResponseBuffer == null) {
@@ -147,6 +150,8 @@ export const processTLSTunnelResponse = (clientId: string, data: Buffer, httpHan
   } else {
     clientObj.tlsResponseBuffer = Buffer.concat([clientObj.tlsResponseBuffer, data])
   }
+
+  invokeWsmanLogger.debug(`TLS response buffer total: ${clientObj.tlsResponseBuffer.length} bytes`)
 
   // Check if we have a complete HTTP response
   const bufferStr = clientObj.tlsResponseBuffer.toString()

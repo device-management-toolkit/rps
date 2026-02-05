@@ -184,13 +184,17 @@ export class CIRAConfiguration {
 
   addTrustedRootCertificate = async ({ input }: { input: CIRAConfigContext }): Promise<any> => {
     if (input.amt != null) {
+      const certBlob = input.ciraConfig?.mpsRootCertificate ?? ''
+      this.logger.info(`AddTrustedRootCertificate: cert length=${certBlob.length} chars`)
       input.xmlMessage = input.amt.PublicKeyManagementService.AddTrustedRootCertificate({
-        CertificateBlob: input.ciraConfig?.mpsRootCertificate ?? ''
+        CertificateBlob: certBlob
       })
+      this.logger.info(`AddTrustedRootCertificate: XML message length=${input.xmlMessage?.length ?? 0} chars`)
       // Use longer timeout for TLS-enforced devices as operation may trigger AMT reconfiguration
       const clientObj = devices[input.clientId]
       const tlsTimeoutMs = (Environment.Config.delay_tls_timer ?? 30) * 1000 + 15000 // delay_tls_timer + 15s buffer
       const timeoutMs = clientObj?.tlsEnforced === true ? tlsTimeoutMs : undefined
+      this.logger.info(`AddTrustedRootCertificate: timeout=${timeoutMs ?? 'default'}ms, tlsEnforced=${clientObj?.tlsEnforced}`)
       return await invokeWsmanCall(input, 2, timeoutMs)
     } else {
       this.logger.error('Null object in addTrustedRootCertificate()')
