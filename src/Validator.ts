@@ -42,9 +42,7 @@ export class Validator implements IValidator {
         msg = this.jsonParser.parse(message)
 
         if (msg?.protocolVersion) {
-          if (VersionChecker.isCompatible(msg.protocolVersion)) {
-            this.logger.silly(`protocol version supported: ${msg.protocolVersion}`)
-          } else {
+          if (!VersionChecker.isCompatible(msg.protocolVersion)) {
             throw new RPSError(`protocol version NOT supported: ${msg.protocolVersion}`)
           }
         }
@@ -74,6 +72,13 @@ export class Validator implements IValidator {
     // Check for password
     if (!payload.password) {
       throw new RPSError(`Device ${payload.uuid} activation failed. Missing password.`)
+    }
+    // Extract TLS enforcement flag from payload
+    if (msg.payload.tlsEnforced != null) {
+      clientObj.tlsEnforced = msg.payload.tlsEnforced === true
+      if (clientObj.tlsEnforced) {
+        this.logger.info(`Device ${payload.uuid} has TLS enforced - enabling TLS tunnel mode`)
+      }
     }
     // Check for client requested action and profile activation
     const profile: AMTConfiguration | null = await this.configurator.profileManager.getAmtProfile(

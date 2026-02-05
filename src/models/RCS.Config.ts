@@ -7,6 +7,7 @@ import { type AMT } from '@device-management-toolkit/wsman-messages'
 import { type DigestChallenge } from '@device-management-toolkit/wsman-messages/models/common.js'
 import type Server from 'ws'
 import { type AMTConfiguration, type AMTDomain, type ProvisioningCertObj } from './index.js'
+import { type TLSTunnelManager } from '../TLSTunnelManager.js'
 
 export interface WebSocketConfig {
   WebSocketPort: number
@@ -124,6 +125,14 @@ export interface ClientObject {
   pendingPromise?: Promise<any>
   resolve: (value: unknown) => void
   reject: (value: unknown) => void
+  tlsEnforced?: boolean
+  tlsTunnelManager?: TLSTunnelManager
+  tlsTunnelNeedsReset?: boolean
+  tlsTunnelSessionId?: string // Current TLS session ID for filtering stale data
+  amtReconfiguring?: boolean // Set when connection_reset received - AMT may be reconfiguring TLS
+  tunnelResetPromise?: Promise<void>
+  resolveTunnelReset?: () => void
+  tlsResponseBuffer?: Buffer // Buffer for accumulating HTTP response data across TLS records
 }
 
 export interface CIRAConfigFlow {
@@ -230,6 +239,7 @@ export interface Payload {
   username?: string
   client: string
   profile?: any
+  tlsEnforced?: boolean
 }
 
 export interface ConnectionObject {
@@ -259,7 +269,9 @@ export enum ClientMethods {
   DEACTIVATION = 'deactivate',
   CIRACONFIG = 'ciraconfig',
   HEARTBEAT = 'heartbeat_response',
-  MAINTENANCE = 'maintenance'
+  MAINTENANCE = 'maintenance',
+  TLS_DATA = 'tls_data',
+  CONNECTION_RESET = 'connection_reset'
 }
 
 export interface apiResponse {

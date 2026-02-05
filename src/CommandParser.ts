@@ -44,21 +44,17 @@ const CommandParser = {
 
         if (args.t) {
           msg.method = args.t
-          this.logger.silly(`parsed method: ${msg.method}`)
 
           if (args.profile && msg.payload) {
             msg.payload.profile = args.profile
-            this.logger.silly(`parsed profile: ${msg.payload.profile}`)
           }
 
           if (args.password && msg.payload) {
             msg.payload.password = args.password
-            this.logger.silly('parsed password')
           }
 
           if (args.force && msg.payload) {
             msg.payload.force = args.force
-            this.logger.silly(`bypass password check: ${msg.payload.force}`)
           }
 
           if (msg.method === ClientMethods.MAINTENANCE && msg.payload) {
@@ -74,7 +70,6 @@ const CommandParser = {
             } else if (args.syncdeviceinfo) {
               msg.payload.task = 'syncdeviceinfo'
             }
-            this.logger.silly(`parsed maintenance task: ${msg.payload.task}`)
           }
         }
       }

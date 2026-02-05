@@ -101,15 +101,27 @@ export class WebSocketListener {
     } else {
       messageLength = maxMessageSize + 1
     }
+
+    this.logger.debug(`Received message from client ${clientId} (${messageLength} bytes)`)
+
     if (messageLength > maxMessageSize) {
-      this.logger.error('Incoming message exceeds allowed length')
+      this.logger.error(`Incoming message exceeds allowed length (${messageLength} > ${maxMessageSize})`)
       const clientDevice = devices[clientId]
       if (clientDevice?.ClientSocket != null) {
         clientDevice.ClientSocket.close()
       }
     }
     try {
-      // this.logger.debug(`Message from client ${clientId}: ${JSON.stringify(message, null, "\t")}`);
+      // Parse to extract method for logging
+      if (typeof message === 'string') {
+        try {
+          const parsed = JSON.parse(message)
+          this.logger.debug(`  <- Method: ${parsed.method}, Status: ${parsed.status}`)
+        } catch {
+          // Not JSON, might be binary or other format
+        }
+      }
+
       let responseMsg: ClientMsg | null
       if (this.dataProcessor) {
         responseMsg = await this.dataProcessor.processData(message, clientId)
@@ -130,10 +142,12 @@ export class WebSocketListener {
    */
   sendMessage(message: ClientMsg, clientId: string): void {
     try {
-      this.logger.debug(`${clientId} : response message sent to device: ${JSON.stringify(message, null, '\t')}`)
+      const messageJson = JSON.stringify(message)
+      this.logger.debug(`Sending message to client ${clientId}`)
+      this.logger.debug(`  -> Method: ${message.method}, Status: ${message.status} (${messageJson.length} bytes)`)
       const clientDevice = devices[clientId]
       if (clientDevice?.ClientSocket != null) {
-        clientDevice.ClientSocket.send(JSON.stringify(message))
+        clientDevice.ClientSocket.send(messageJson)
       }
     } catch (error) {
       this.logger.error(`Failed to send message to AMT: ${error}`)

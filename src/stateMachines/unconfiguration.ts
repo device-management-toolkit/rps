@@ -357,7 +357,8 @@ export class Unconfiguration {
       input.tlsSettingData[0].MutualAuthentication = false
       delete input.tlsSettingData[0].TrustedCN
       input.xmlMessage = input.amt.TLSSettingData.Put(input.tlsSettingData[0])
-      return await invokeWsmanCall(input)
+      // Use longer timeout for TLS Put - AMT may take 30+ seconds to reconfigure
+      return await invokeWsmanCall(input, 0, Environment.Config.delay_tls_timer * 1000)
     } else {
       this.logger.error('Null object in disableRemoteTLSSettingData()')
     }
@@ -366,7 +367,8 @@ export class Unconfiguration {
   commitSetupAndConfigurationService = async ({ input }): Promise<any> => {
     if (input.amt != null) {
       input.xmlMessage = input.amt.SetupAndConfigurationService.CommitChanges()
-      return await invokeWsmanCall(input)
+      // Use longer timeout - AMT may still be reconfiguring after TLS Put
+      return await invokeWsmanCall(input, 0, Environment.Config.delay_tls_timer * 1000)
     } else {
       this.logger.error('Null object in commitSetupAndConfigurationService()')
     }
@@ -377,7 +379,8 @@ export class Unconfiguration {
       input.tlsSettingData[1].Enabled = false
       delete input.tlsSettingData[1].TrustedCN
       input.xmlMessage = input.amt.TLSSettingData.Put(input.tlsSettingData[1])
-      return await invokeWsmanCall(input)
+      // Use longer timeout for TLS Put - AMT may take 30+ seconds to reconfigure
+      return await invokeWsmanCall(input, 0, Environment.Config.delay_tls_timer * 1000)
     } else {
       this.logger.error('Null object in disableLocalTLSSettingData()')
     }
@@ -524,6 +527,8 @@ export class Unconfiguration {
       isWifiOnlyDevice: ({ context }) => context.wifiSettings != null && context.wiredSettings?.MACAddress == null,
       isWifiSupportedOnDevice: ({ context }) => context.wifiSettings?.MACAddress != null,
       isWiredSupportedOnDevice: ({ context }) => context.wiredSettings?.MACAddress != null,
+      // Skip TLS disable operations for TLS-enforced devices - Put on AMT_TLSSettingData doesn't work through TLS tunnel
+      isTLSEnforced: ({ context }) => devices[context.clientId]?.tlsEnforced === true,
       shouldRetry: ({ context, event }) => context.retryCount < 3 && event.output instanceof UNEXPECTED_PARSE_ERROR
     },
     actions: {
@@ -970,6 +975,8 @@ export class Unconfiguration {
       },
       PULL_TLS_SETTING_DATA_RESPONSE: {
         always: [
+          // Skip TLS disable for TLS-enforced devices - Put on AMT_TLSSettingData doesn't work through TLS tunnel
+          { guard: 'isTLSEnforced', target: 'ENUMERATE_PUBLIC_KEY_CERTIFICATE' },
           { guard: 'tlsSettingDataEnabled', target: 'DISABLE_TLS_SETTING_DATA' },
           { guard: 'is8021xProfileDisabled', target: 'ENUMERATE_PUBLIC_PRIVATE_KEY_PAIR' },
           { target: 'ENUMERATE_PUBLIC_KEY_CERTIFICATE' }]

@@ -27,6 +27,16 @@ export class ClientMsgJsonParser {
    */
   convertClientMsg(message: ClientMsg): ClientMsg {
     if (message.payload) {
+      // TLS_DATA payloads are binary and should remain base64-encoded for later processing
+      if (message.method === ClientMethods.TLS_DATA) {
+        // Keep payload as-is (base64 string) - will be decoded in handleTLSData
+        return message
+      }
+      // CONNECTION_RESET has simple text payload, decode but don't parse as JSON
+      if (message.method === ClientMethods.CONNECTION_RESET) {
+        message.payload = Buffer.from(message.payload, 'base64').toString('utf8')
+        return message
+      }
       const decodedPayload = Buffer.from(message.payload, 'base64').toString('utf8')
       if (message.method !== ClientMethods.RESPONSE) {
         message.payload = this.parsePayload(decodedPayload)

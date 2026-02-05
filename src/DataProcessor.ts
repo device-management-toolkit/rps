@@ -16,13 +16,16 @@ import { Maintenance, type MaintenanceEvent } from './stateMachines/maintenance/
 import { Activation, type ActivationEvent } from './stateMachines/activation.js'
 import ClientResponseMsg from './utils/ClientResponseMsg.js'
 import { parseChunkedMessage } from './utils/parseChunkedMessage.js'
-import { UNEXPECTED_PARSE_ERROR, type UnexpectedParseError } from './utils/constants.js'
+import { UNEXPECTED_PARSE_ERROR, CONNECTION_RESET_ERROR, type UnexpectedParseError } from './utils/constants.js'
 import { SyncTimeEventType } from './stateMachines/maintenance/syncTime.js'
 import { ChangePasswordEventType } from './stateMachines/maintenance/changePassword.js'
 import { SyncHostNameEventType } from './stateMachines/maintenance/syncHostName.js'
 import { SyncIPEventType } from './stateMachines/maintenance/syncIP.js'
 import { SyncDeviceInfoEventType } from './stateMachines/maintenance/syncDeviceInfo.js'
 import { devices } from './devices.js'
+import Logger from './Logger.js'
+
+const tlsLogger = new Logger('TLSDataHandler')
 export class DataProcessor {
   httpHandler: HttpHandler
   constructor(
@@ -47,21 +50,35 @@ export class DataProcessor {
       } catch (parseErr) {
         throw new RPSError(parseErr)
       }
+      this.logger.debug(`Processing message: method=${clientMsg.method}, client=${clientId}`)
+
       switch (clientMsg.method) {
         case ClientMethods.ACTIVATION: {
+          this.logger.debug(`Routing to ACTIVATION handler`)
           await this.activateDevice(clientMsg, clientId)
           break
         }
         case ClientMethods.DEACTIVATION: {
+          this.logger.debug(`Routing to DEACTIVATION handler`)
           await this.deactivateDevice(clientMsg, clientId)
           break
         }
         case ClientMethods.RESPONSE: {
+          this.logger.debug(`Routing to RESPONSE handler`)
           await this.handleResponse(clientMsg, clientId)
           break
         }
         case ClientMethods.MAINTENANCE: {
+          this.logger.debug(`Routing to MAINTENANCE handler`)
           await this.maintainDevice(clientMsg, clientId)
+          break
+        }
+        case ClientMethods.TLS_DATA: {
+          await this.handleTLSData(clientMsg, clientId)
+          break
+        }
+        case ClientMethods.CONNECTION_RESET: {
+          await this.handleConnectionReset(clientMsg, clientId)
           break
         }
         default: {
@@ -134,12 +151,20 @@ export class DataProcessor {
         resolveValue = this.httpHandler.parseXML(xmlBody)
         if (!xmlBody || !resolveValue) {
           // AMT fulfilled the request, but there is some problem with the response
+          this.logger.warn(`WSMAN RESPONSE: parse failed`)
           rejectValue = new UNEXPECTED_PARSE_ERROR()
+        } else {
+          const actionMatch = xmlBody.match(/<a:Action>([^<]+)<\/a:Action>/)
+          const action = actionMatch ? actionMatch[1].split('/').pop() : 'unknown'
+          this.logger.info(`WSMAN RESPONSE: ${action}`)
+          this.logger.debug(`WSMAN RESPONSE XML:\n${xmlBody}`)
         }
       } else {
+        this.logger.warn(`WSMAN RESPONSE: HTTP ${statusCode}`)
         rejectValue = httpRsp
       }
     } catch (error) {
+      this.logger.warn(`WSMAN RESPONSE: parse error`)
       rejectValue = new UNEXPECTED_PARSE_ERROR()
     }
     if (clientObj.pendingPromise != null) {
@@ -151,11 +176,6 @@ export class DataProcessor {
         }
       }
     }
-    this.logger.debug(
-      `Device ${clientId} ` +
-        `wsman response ${statusCode} ${resolveValue ? 'resolved' : 'rejected'}: ` +
-        `${JSON.stringify(clientMsg.payload, null, '\t')}`
-    )
   }
 
   async maintainDevice(
@@ -218,6 +238,42 @@ export class DataProcessor {
       guid: uuid ?? clientObj.ClientData.payload.uuid,
       username: username ?? clientObj.ClientData.payload.username,
       password: password ?? clientObj.ClientData.payload.password
+    }
+  }
+
+  async handleTLSData(clientMsg: ClientMsg, clientId: string): Promise<void> {
+    const clientObj = devices[clientId]
+
+    if (clientObj?.tlsTunnelNeedsReset === true) {
+      return
+    }
+
+    if (clientObj?.tlsTunnelManager != null && clientMsg.payload != null) {
+      const data = Buffer.from(clientMsg.payload, 'base64')
+      clientObj.tlsTunnelManager.injectData(data)
+    }
+  }
+
+  async handleConnectionReset(clientMsg: ClientMsg, clientId: string): Promise<void> {
+    const clientObj = devices[clientId]
+    tlsLogger.warn(`CONNECTION RESET from rpc-go`)
+
+    if (clientObj == null) {
+      return
+    }
+
+    if (clientObj.tlsTunnelManager != null) {
+      clientObj.tlsTunnelManager.close()
+      clientObj.tlsTunnelManager = undefined
+      clientObj.tlsTunnelSessionId = undefined
+    }
+
+    clientObj.tlsResponseBuffer = undefined
+    clientObj.tlsTunnelNeedsReset = true
+    clientObj.amtReconfiguring = true // Signal that AMT may be reconfiguring - need delay before reconnect
+
+    if (clientObj.pendingPromise != null && clientObj.reject != null) {
+      clientObj.reject(new CONNECTION_RESET_ERROR())
     }
   }
 }

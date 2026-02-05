@@ -17,7 +17,7 @@ export default {
   get(
     clientId: string,
     payload: string | null,
-    method: 'error' | 'wsman' | 'success' | 'heartbeat_request',
+    method: 'error' | 'wsman' | 'success' | 'heartbeat_request' | 'tls_data',
     status: 'failed' | 'success' | 'ok' | 'heartbeat',
     message = ''
   ): ClientMsg {
@@ -34,6 +34,9 @@ export default {
 
     if (method === 'heartbeat_request') {
       msg.payload = ''
+    } else if (method === 'tls_data' && payload != null) {
+      // TLS data is already base64-encoded, pass through as-is
+      msg.payload = payload
     } else if (method !== 'error' && method !== 'success' && payload != null) {
       msg.payload = Buffer.from(payload).toString('base64')
     }

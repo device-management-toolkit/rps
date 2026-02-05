@@ -22,6 +22,8 @@ const config: RPSConfig = rc('rps')
 config.delay_activation_sync = config.delay_timer * 1000
 config.delay_setup_and_config_sync = 5000
 config.delay_tls_put_data_sync = 5000
+// TLS operations may take longer due to AMT reconfiguration (30+ seconds)
+config.delay_tls_timer = config.delay_tls_timer ?? 50
 log.silly(`config: ${JSON.stringify(config, null, 2)}`)
 
 const Environment = {

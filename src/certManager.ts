@@ -58,6 +58,8 @@ export class CertManager {
     const fingerprint: RootCertFingerprint = {} as RootCertFingerprint
     let hashAlgorithm: string | null = null
 
+    this.logger.debug(`Processing PFX with ${pfxobj.certs?.length ?? 0} certificates and ${pfxobj.keys?.length ?? 0} keys`)
+
     if (pfxobj.certs?.length > 0) {
       for (let i = 0; i < pfxobj.certs.length; i++) {
         const cert = pfxobj.certs[i]
@@ -77,6 +79,7 @@ export class CertManager {
           leaf.subject = cert.subject.hash
           leaf.issuer = cert.issuer.hash
           hashAlgorithm = cert.md.algorithm
+          this.logger.debug(`  Certificate[${i}]: LEAF (subject=${cert.subject.hash}, issuer=${cert.issuer.hash}, algo=${hashAlgorithm})`)
         } else if (cert.subject.hash === cert.issuer.hash) {
           root.pem = pem
           root.subject = cert.subject.hash
@@ -88,6 +91,8 @@ export class CertManager {
           fingerprint.sha384 = this.nodeForge.sha384Create().update(der).digest().toHex()
           // Generate SHA1 fingerprint of root certificate
           fingerprint.sha1 = this.nodeForge.sha1Create().update(der).digest().toHex()
+          this.logger.debug(`  Certificate[${i}]: ROOT (subject=${cert.subject.hash}, self-signed)`)
+          this.logger.debug(`    Fingerprints: SHA256=${fingerprint.sha256.substring(0, 16)}..., SHA1=${fingerprint.sha1.substring(0, 16)}...`)
         } else {
           const inter: CertificateObject = {
             pem,
@@ -95,6 +100,7 @@ export class CertManager {
             subject: cert.subject.hash
           }
           interObj.push(inter)
+          this.logger.debug(`  Certificate[${i}]: INTERMEDIATE (subject=${cert.subject.hash}, issuer=${cert.issuer.hash})`)
         }
       }
     }
@@ -125,6 +131,8 @@ export class CertManager {
       }
     }
 
+    this.logger.debug(`Certificate chain built: ${provisioningCertificateObj.certChain.length} certificates (leaf -> intermediate -> root)`)
+
     return { provisioningCertificateObj, fingerprint, hashAlgorithm }
   }
 
@@ -138,17 +146,23 @@ export class CertManager {
     const pfxOut: CertsAndKeys = { certs: [], keys: [] }
     const pfxder = Buffer.from(pfxb64, 'base64').toString('binary')
 
+    this.logger.debug(`Converting PFX to object (${pfxder.length} bytes)`)
+
     // Convert DER to ASN.1
     let asn
     try {
       asn = this.nodeForge.asn1FromDer(pfxder)
+      this.logger.debug('ASN.1 parsing successful')
     } catch (e) {
+      this.logger.error('ASN.1 parsing failed')
       throw new Error('ASN.1 parsing failed')
     }
     let pfx: pkcs12.Pkcs12Pfx
     try {
       pfx = this.nodeForge.pkcs12FromAsn1(asn, true, passphrase)
+      this.logger.debug('PKCS#12 decryption successful')
     } catch (e) {
+      this.logger.error('Decrypting provisioning certificate failed')
       throw new Error('Decrypting provisioning certificate failed')
     }
 
@@ -161,7 +175,9 @@ export class CertManager {
           pfxOut.certs.push(certBag.cert)
         }
       }
+      this.logger.debug(`Extracted ${pfxOut.certs.length} certificates from PFX`)
     } else {
+      this.logger.error('No certificate bags found in PFX')
       throw new Error('No certificate bags found')
     }
 
@@ -174,7 +190,9 @@ export class CertManager {
           pfxOut.keys.push(keyBag.key)
         }
       }
+      this.logger.debug(`Extracted ${pfxOut.keys.length} private keys from PFX`)
     } else {
+      this.logger.error('No key bags found in PFX')
       throw new Error('No key bags found')
     }
 

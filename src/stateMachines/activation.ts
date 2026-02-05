@@ -25,12 +25,13 @@ import { DbCreatorFactory } from '../factories/DbCreatorFactory.js'
 import { AMTUserName, GATEWAY_TIMEOUT_ERROR } from '../utils/constants.js'
 import { CIRAConfiguration } from './ciraConfiguration.js'
 import { TLS } from './tls.js'
-import { type CommonContext, invokeWsmanCall } from './common.js'
+import { type CommonContext, invokeWsmanCall, processTLSTunnelResponse } from './common.js'
 import ClientResponseMsg from '../utils/ClientResponseMsg.js'
 import { Unconfiguration } from './unconfiguration.js'
 import { type DeviceCredentials } from '../interfaces/ISecretManagerService.js'
 import { NetworkConfiguration } from './networkConfiguration.js'
 import { error } from 'console'
+import { TLSTunnelManager } from '../TLSTunnelManager.js'
 
 export interface ActivationContext extends CommonContext {
   profile: AMTConfiguration
@@ -156,6 +157,42 @@ export class Activation {
       }
     } catch (err) {
       MqttProvider.publishEvent('fail', ['Activator'], 'Failed to activate', clientObj.uuid)
+      return false
+    }
+  }
+
+  /**
+   * Initializes the TLS tunnel if TLS is enforced on the device.
+   * This must be called before any WSMAN calls when tlsEnforced is true.
+   */
+  initializeTLSTunnel = async ({ input }: { input: ActivationContext }): Promise<boolean> => {
+    const clientObj = devices[input.clientId]
+
+    if (clientObj.tlsEnforced !== true) {
+      this.logger.debug(`TLS not enforced for device ${clientObj.uuid}, skipping tunnel setup`)
+      return true
+    }
+
+    this.logger.info(`Initializing TLS tunnel for device ${clientObj.uuid}`)
+
+    try {
+      // Create TLS tunnel manager
+      clientObj.tlsTunnelManager = new TLSTunnelManager(clientObj.ClientSocket, input.clientId)
+
+      // Connect (initiates TLS handshake)
+      await clientObj.tlsTunnelManager.connect()
+
+      // Set up data handler to process responses
+      clientObj.tlsTunnelManager.onData((data: Buffer) => {
+        processTLSTunnelResponse(input.clientId, data, input.httpHandler)
+      })
+
+      this.logger.info(`TLS tunnel established for device ${clientObj.uuid}`)
+      return true
+    } catch (err: unknown) {
+      const errMsg = err instanceof globalThis.Error ? err.message : String(err)
+      this.logger.error(`Failed to establish TLS tunnel for device ${clientObj.uuid}: ${errMsg}`)
+      clientObj.tlsTunnelManager = undefined
       return false
     }
   }
@@ -434,6 +471,7 @@ export class Activation {
       getAMTProfile: fromPromise(this.getAMTProfile.bind(this)),
       getDeviceFromMPS: fromPromise(this.getDeviceFromMPS.bind(this)),
       getAMTDomainCert: fromPromise(this.getAMTDomainCert.bind(this)),
+      initializeTLSTunnel: fromPromise(this.initializeTLSTunnel.bind(this)),
       getGeneralSettings: fromPromise(this.getGeneralSettings.bind(this)),
       getHostBasedSetupService: fromPromise(this.getHostBasedSetupService.bind(this)),
       getNextCERTInChain: fromPromise(this.getNextCERTInChain.bind(this)),
@@ -455,7 +493,8 @@ export class Activation {
       error: this.error.machine
     },
     delays: {
-      DELAY_TIME_ACTIVATION_SYNC: () => Environment.Config.delay_activation_sync
+      DELAY_TIME_ACTIVATION_SYNC: () => Environment.Config.delay_activation_sync,
+      DELAY_AFTER_TLS_COMMIT: () => (Environment.Config.delay_tls_timer ?? 30) * 1000
     },
     guards: {
       isAdminMode: ({ context }) =>
@@ -536,6 +575,13 @@ export class Activation {
           context.shbcACMComplete !== true &&
           context.profile?.activation === ClientAction.ADMINCTLMODE
         )
+      },
+      isTLSEnforced: ({ context }) => {
+        const isTlsEnforced = devices[context.clientId]?.tlsEnforced === true
+        if (isTlsEnforced) {
+          this.logger.info(`Skipping TLS configuration for TLS-enforced device ${devices[context.clientId]?.uuid} - TLS already enabled`)
+        }
+        return isTlsEnforced
       }
     },
     actions: {
@@ -622,14 +668,14 @@ export class Activation {
           },
           {
             guard: 'isSHBC',
-            target: 'GET_GENERAL_SETTINGS'
+            target: 'INIT_TLS_TUNNEL'
           },
           {
             guard: 'isAdminMode',
             target: 'GET_AMT_DOMAIN_CERT'
           },
           {
-            target: 'GET_GENERAL_SETTINGS'
+            target: 'INIT_TLS_TUNNEL'
           }
         ]
       },
@@ -643,7 +689,7 @@ export class Activation {
             target: 'DETERMINE_CAN_ACTIVATE'
           },
           onError: {
-            target: 'GET_GENERAL_SETTINGS'
+            target: 'INIT_TLS_TUNNEL'
           }
         }
       },
@@ -651,7 +697,7 @@ export class Activation {
         always: [
           {
             guard: 'isSHBC',
-            target: 'GET_GENERAL_SETTINGS'
+            target: 'INIT_TLS_TUNNEL'
           },
           {
             guard: 'canUpgrade',
@@ -660,7 +706,7 @@ export class Activation {
           },
           {
             guard: 'canActivate',
-            target: 'GET_GENERAL_SETTINGS'
+            target: 'INIT_TLS_TUNNEL'
           },
           {
             actions: assign({
@@ -709,7 +755,7 @@ export class Activation {
             actions: ({ context }) => {
               devices[context.clientId].count = 1
             },
-            target: 'GET_GENERAL_SETTINGS'
+            target: 'INIT_TLS_TUNNEL'
           },
           {
             actions: assign({
@@ -719,6 +765,20 @@ export class Activation {
             target: 'FAILED'
           }
         ]
+      },
+      INIT_TLS_TUNNEL: {
+        invoke: {
+          src: 'initializeTLSTunnel',
+          input: ({ context }) => context,
+          id: 'init-tls-tunnel',
+          onDone: {
+            target: 'GET_GENERAL_SETTINGS'
+          },
+          onError: {
+            actions: assign({ errorMessage: 'Failed to initialize TLS tunnel' }),
+            target: 'FAILED'
+          }
+        }
       },
       GET_GENERAL_SETTINGS: {
         invoke: {
@@ -1171,8 +1231,62 @@ export class Activation {
           src: 'saveDeviceInfoToMPS',
           input: ({ context }) => context,
           id: 'save-device-to-mps',
-          onDone: 'UNCONFIGURATION',
+          onDone: [
+            {
+              // For TLS-enforced devices, commit changes after activation before further configuration
+              guard: 'isTLSEnforced',
+              target: 'COMMIT_CHANGES_FOR_TLS'
+            },
+            { target: 'UNCONFIGURATION' }
+          ],
           onError: 'SAVE_DEVICE_TO_MPS_FAILURE'
+        }
+      },
+      COMMIT_CHANGES_FOR_TLS: {
+        invoke: {
+          src: 'commitChanges',
+          input: ({ context }) => context,
+          id: 'commit-changes-for-tls',
+          onDone: {
+            actions: [
+              assign({ message: ({ event }) => event.output }),
+              ({ context }) => {
+                this.logger.info(`CommitChanges completed for TLS-enforced device ${devices[context.clientId]?.uuid}, waiting for AMT to stabilize...`)
+              }
+            ],
+            target: 'WAIT_AFTER_TLS_COMMIT'
+          },
+          onError: {
+            actions: ({ context }) => {
+              this.logger.warn(`CommitChanges failed for TLS-enforced device ${devices[context.clientId]?.uuid}, waiting before continuing...`)
+            },
+            target: 'WAIT_AFTER_TLS_COMMIT'
+          }
+        }
+      },
+      WAIT_AFTER_TLS_COMMIT: {
+        entry: ({ context }) => {
+          const delaySeconds = Environment.Config.delay_tls_timer ?? 30
+          this.logger.info(`Waiting ${delaySeconds}s after CommitChanges for TLS-enforced device ${devices[context.clientId]?.uuid}`)
+        },
+        after: {
+          DELAY_AFTER_TLS_COMMIT: {
+            actions: ({ context }) => {
+              // Mark tunnel for reset - it will be stale after the long wait
+              const clientObj = devices[context.clientId]
+              if (clientObj != null) {
+                clientObj.tlsTunnelNeedsReset = true
+                clientObj.amtReconfiguring = false // Clear to prevent double delay in invokeWsmanCall
+                if (clientObj.tlsTunnelManager != null) {
+                  clientObj.tlsTunnelManager.close()
+                  clientObj.tlsTunnelManager = undefined
+                  clientObj.tlsTunnelSessionId = undefined
+                }
+                this.logger.info(`TLS tunnel marked for reset after delay for device ${clientObj.uuid}`)
+              }
+            },
+            target: 'UNCONFIGURATION'
+          }
         }
       },
       SAVE_DEVICE_TO_SECRET_PROVIDER_FAILURE: {
@@ -1265,6 +1379,12 @@ export class Activation {
             {
               guard: 'hasCIRAProfile',
               target: 'CIRA'
+            },
+            {
+              // Skip TLS configuration for TLS-enforced devices - TLS is already enabled and working.
+              // AMT 19.x with TLS enforced doesn't respond to Put on AMT_TLSSettingData through the TLS tunnel.
+              guard: 'isTLSEnforced',
+              target: 'PROVISIONED'
             },
             { target: 'TLS' }
           ]
