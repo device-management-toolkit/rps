@@ -273,21 +273,56 @@ export class WiredConfiguration {
     states: {
       ACTIVATION: {
         on: {
-          WIREDCONFIG: {
-            actions: [
-              assign({
-                statusMessage: () => '',
-                authProtocol: ({ context }) =>
-                  context.amtProfile?.ieee8021xProfileObject != null
-                    ? context.amtProfile?.ieee8021xProfileObject?.authenticationProtocol
-                    : 0
-              }),
-              'Reset Unauth Count',
-              'Reset Retry Count'
-            ],
-            target: 'PUT_ETHERNET_PORT_SETTINGS'
-          }
+          WIREDCONFIG: [
+            {
+              // For TLS-enforced devices, skip Put on AMT_EthernetPortSettings - it causes AMT 19.x
+              // to become unresponsive for an extended period. Since TLS is already working,
+              // the network config is already acceptable.
+              guard: 'isTLSEnforced',
+              actions: [
+                assign({
+                  statusMessage: () => '',
+                  authProtocol: ({ context }) =>
+                    context.amtProfile?.ieee8021xProfileObject != null
+                      ? context.amtProfile?.ieee8021xProfileObject?.authenticationProtocol
+                      : 0
+                }),
+                'Reset Unauth Count',
+                'Reset Retry Count',
+                ({ context }) => {
+                  this.logger.info(`Skipping Put on AMT_EthernetPortSettings for TLS-enforced device ${devices[context.clientId]?.uuid} - network already configured`)
+                }
+              ],
+              target: 'CHECK_8021X_OR_SUCCESS'
+            },
+            {
+              actions: [
+                assign({
+                  statusMessage: () => '',
+                  authProtocol: ({ context }) =>
+                    context.amtProfile?.ieee8021xProfileObject != null
+                      ? context.amtProfile?.ieee8021xProfileObject?.authenticationProtocol
+                      : 0
+                }),
+                'Reset Unauth Count',
+                'Reset Retry Count'
+              ],
+              target: 'PUT_ETHERNET_PORT_SETTINGS'
+            }
+          ]
         }
+      },
+      CHECK_8021X_OR_SUCCESS: {
+        // For TLS-enforced devices that skipped ethernet port settings
+        always: [
+          {
+            guard: 'is8021xProfilesExists',
+            target: 'GET_8021X_PROFILE'
+          },
+          {
+            target: 'SUCCESS'
+          }
+        ]
       },
       PUT_ETHERNET_PORT_SETTINGS: {
         invoke: {
