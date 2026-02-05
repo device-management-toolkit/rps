@@ -582,15 +582,6 @@ export class Activation {
           this.logger.info(`Skipping TLS configuration for TLS-enforced device ${devices[context.clientId]?.uuid} - TLS already enabled`)
         }
         return isTlsEnforced
-      },
-      // Temporary guard for CCM mode to skip other state machines and go directly to CIRA
-      isCCMWithCIRA: ({ context }) => {
-        const isCCM = context.profile?.activation === ClientAction.CLIENTCTLMODE
-        const hasCIRA = context.profile?.ciraConfigName != null
-        if (isCCM && hasCIRA) {
-          this.logger.info(`CCM mode with CIRA profile - skipping other configurations, going directly to CIRA`)
-        }
-        return isCCM && hasCIRA
       }
     },
     actions: {
@@ -1241,11 +1232,6 @@ export class Activation {
           input: ({ context }) => context,
           id: 'save-device-to-mps',
           onDone: [
-            {
-              // Temporary: For CCM with CIRA, skip other configurations and go directly to CIRA
-              guard: 'isCCMWithCIRA',
-              target: 'CIRA'
-            },
             {
               // For TLS-enforced devices, commit changes after activation before further configuration
               guard: 'isTLSEnforced',
