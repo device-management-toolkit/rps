@@ -24,6 +24,8 @@ export class TLSTunnelManager {
   private pendingData: Buffer[] = []
   private sessionId: string
   private intentionalClose: boolean = false
+  private writeBuffer: Buffer[] = []
+  private flushPending: boolean = false
 
   constructor(clientSocket: Server, clientId: string) {
     this.clientSocket = clientSocket
@@ -41,17 +43,47 @@ export class TLSTunnelManager {
     return new Duplex({
       read(): void {},
       write(chunk: Buffer, encoding: BufferEncoding, callback: (error?: Error | null) => void): void {
-        const base64Data = Buffer.from(chunk).toString('base64')
-        const msg = ClientResponseMsg.get(self.clientId, base64Data, 'tls_data', 'ok')
-        try {
-          self.clientSocket.send(JSON.stringify(msg), (err?: Error) => {
-            callback(err ?? null)
+        // Buffer the chunk - will be flushed after TLS write completes
+        self.writeBuffer.push(Buffer.from(chunk))
+        logger.debug(`Duplex buffered ${chunk.length} bytes (total buffered: ${self.writeBuffer.reduce((sum, b) => sum + b.length, 0)} bytes)`)
+
+        // Schedule flush on next tick to collect all TLS record fragments
+        if (!self.flushPending) {
+          self.flushPending = true
+          setImmediate(() => {
+            self.flushWriteBuffer()
           })
-        } catch (err) {
-          callback(err as Error)
         }
+        callback(null)
       }
     })
+  }
+
+  private flushWriteBuffer(): void {
+    this.flushPending = false
+    if (this.writeBuffer.length === 0) {
+      return
+    }
+
+    // Combine all buffered chunks into a single message
+    const combined = Buffer.concat(this.writeBuffer)
+    this.writeBuffer = []
+
+    logger.debug(`Flushing ${combined.length} bytes as single tls_data message`)
+
+    const base64Data = combined.toString('base64')
+    const msg = ClientResponseMsg.get(this.clientId, base64Data, 'tls_data', 'ok')
+    try {
+      this.clientSocket.send(JSON.stringify(msg), (err?: Error) => {
+        if (err) {
+          logger.error(`Flush failed: ${err.message}`)
+        } else {
+          logger.debug(`Flush completed successfully`)
+        }
+      })
+    } catch (err) {
+      logger.error(`Flush exception: ${(err as Error).message}`)
+    }
   }
 
   injectData(data: Buffer): void {
