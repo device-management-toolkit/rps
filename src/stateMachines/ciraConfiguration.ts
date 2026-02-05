@@ -172,7 +172,11 @@ export class CIRAConfiguration {
         envSettings.DetectionStrings = [`${randomUUID()}.com`]
       }
       input.xmlMessage = input.amt.EnvironmentDetectionSettingData.Put(envSettings)
-      return await invokeWsmanCall(input, 2)
+      // Use longer timeout for TLS-enforced devices as Put may trigger AMT reconfiguration
+      const clientObj = devices[input.clientId]
+      const tlsTimeoutMs = (Environment.Config.delay_tls_timer ?? 30) * 1000 + 15000 // delay_tls_timer + 15s buffer
+      const timeoutMs = clientObj?.tlsEnforced === true ? tlsTimeoutMs : undefined
+      return await invokeWsmanCall(input, 2, timeoutMs)
     } else {
       this.logger.error('Null object in putEnvironmentDetectionSettings()')
     }
@@ -183,7 +187,11 @@ export class CIRAConfiguration {
       input.xmlMessage = input.amt.PublicKeyManagementService.AddTrustedRootCertificate({
         CertificateBlob: input.ciraConfig?.mpsRootCertificate ?? ''
       })
-      return await invokeWsmanCall(input, 2)
+      // Use longer timeout for TLS-enforced devices as operation may trigger AMT reconfiguration
+      const clientObj = devices[input.clientId]
+      const tlsTimeoutMs = (Environment.Config.delay_tls_timer ?? 30) * 1000 + 15000 // delay_tls_timer + 15s buffer
+      const timeoutMs = clientObj?.tlsEnforced === true ? tlsTimeoutMs : undefined
+      return await invokeWsmanCall(input, 2, timeoutMs)
     } else {
       this.logger.error('Null object in addTrustedRootCertificate()')
     }
@@ -203,7 +211,11 @@ export class CIRAConfiguration {
         server.CommonName = input.ciraConfig.commonName
       }
       input.xmlMessage = input.amt.RemoteAccessService.AddMPS(server)
-      return await invokeWsmanCall(input, 2)
+      // Use longer timeout for TLS-enforced devices as operation may trigger AMT reconfiguration
+      const clientObj = devices[input.clientId]
+      const tlsTimeoutMs = (Environment.Config.delay_tls_timer ?? 30) * 1000 + 15000 // delay_tls_timer + 15s buffer
+      const timeoutMs = clientObj?.tlsEnforced === true ? tlsTimeoutMs : undefined
+      return await invokeWsmanCall(input, 2, timeoutMs)
     } else {
       this.logger.error('Null object in addMPS()')
     }
@@ -249,7 +261,11 @@ export class CIRAConfiguration {
       const customSelector = `</w:OperationTimeout><wsman:SelectorSet xmlns:wsman="http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd"><wsman:Selector Name="ManagedElement"><EndpointReference xmlns="http://schemas.xmlsoap.org/ws/2004/08/addressing"><Address xmlns="http://schemas.xmlsoap.org/ws/2004/08/addressing">http://schemas.xmlsoap.org/ws/2004/08/addressing/role/anonymous</Address><ReferenceParameters xmlns="http://schemas.xmlsoap.org/ws/2004/08/addressing"><ResourceURI xmlns="http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd">http://intel.com/wbem/wscim/1/amt-schema/1/AMT_ManagementPresenceRemoteSAP</ResourceURI><SelectorSet xmlns="http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd"><Selector Name="CreationClassName">AMT_ManagementPresenceRemoteSAP</Selector><Selector Name="Name">Intel(r) AMT:Management Presence Server 0</Selector><Selector Name="SystemCreationClassName">CIM_ComputerSystem</Selector><Selector Name="SystemName">Intel(r) AMT</Selector></SelectorSet></ReferenceParameters></EndpointReference></wsman:Selector><wsman:Selector Name="PolicySet"><EndpointReference xmlns="http://schemas.xmlsoap.org/ws/2004/08/addressing"><Address xmlns="http://schemas.xmlsoap.org/ws/2004/08/addressing">http://schemas.xmlsoap.org/ws/2004/08/addressing/role/anonymous</Address><ReferenceParameters xmlns="http://schemas.xmlsoap.org/ws/2004/08/addressing"><ResourceURI xmlns="http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd">http://intel.com/wbem/wscim/1/amt-schema/1/AMT_RemoteAccessPolicyRule</ResourceURI><SelectorSet xmlns="http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd"><Selector Name="CreationClassName">AMT_RemoteAccessPolicyRule</Selector><Selector Name="PolicyRuleName">${policyName}</Selector><Selector Name="SystemCreationClassName">CIM_ComputerSystem</Selector><Selector Name="SystemName">Intel(r) AMT</Selector></SelectorSet></ReferenceParameters></EndpointReference></wsman:Selector></wsman:SelectorSet>`
       input.xmlMessage = baseXml.replace('</w:OperationTimeout>', customSelector.trim())
 
-      return await invokeWsmanCall(input, 2)
+      // Use longer timeout for TLS-enforced devices as Put may trigger AMT reconfiguration
+      const clientObj = devices[input.clientId]
+      const tlsTimeoutMs = (Environment.Config.delay_tls_timer ?? 30) * 1000 + 15000 // delay_tls_timer + 15s buffer
+      const timeoutMs = clientObj?.tlsEnforced === true ? tlsTimeoutMs : undefined
+      return await invokeWsmanCall(input, 2, timeoutMs)
     } else {
       this.logger.error('Null object in putRemoteAccessPolicyAppliesToMPS()')
     }

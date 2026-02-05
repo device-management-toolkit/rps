@@ -142,7 +142,11 @@ export class WiredConfiguration {
     input.ieee8021xProfile.Enabled = 2
     input.ieee8021xProfile.AvailableInS0 = true
     input.xmlMessage = input.ips?.IEEE8021xSettings.Put(input.ieee8021xProfile)
-    return await invokeWsmanCall(input, 2)
+    // Use longer timeout for TLS-enforced devices as Put may trigger AMT reconfiguration
+    const clientObj = devices[input.clientId]
+    const tlsTimeoutMs = (Environment.Config.delay_tls_timer ?? 30) * 1000 + 15000 // delay_tls_timer + 15s buffer
+    const timeoutMs = clientObj?.tlsEnforced === true ? tlsTimeoutMs : undefined
+    return await invokeWsmanCall(input, 2, timeoutMs)
   }
 
   setCertificates = async ({ input }: { input: WiredConfigContext }): Promise<any> => {
