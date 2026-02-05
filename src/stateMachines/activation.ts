@@ -582,6 +582,15 @@ export class Activation {
           this.logger.info(`Skipping TLS configuration for TLS-enforced device ${devices[context.clientId]?.uuid} - TLS already enabled`)
         }
         return isTlsEnforced
+      },
+      // Temporary guard for CCM mode to skip other state machines and go directly to CIRA
+      isCCMWithCIRA: ({ context }) => {
+        const isCCM = context.profile?.activation === ClientAction.CLIENTCTLMODE
+        const hasCIRA = context.profile?.ciraConfigName != null
+        if (isCCM && hasCIRA) {
+          this.logger.info(`CCM mode with CIRA profile - skipping other configurations, going directly to CIRA`)
+        }
+        return isCCM && hasCIRA
       }
     },
     actions: {
@@ -1233,6 +1242,11 @@ export class Activation {
           id: 'save-device-to-mps',
           onDone: [
             {
+              // Temporary: For CCM with CIRA, skip other configurations and go directly to CIRA
+              guard: 'isCCMWithCIRA',
+              target: 'CIRA'
+            },
+            {
               // For TLS-enforced devices, commit changes after activation before further configuration
               guard: 'isTLSEnforced',
               target: 'COMMIT_CHANGES_FOR_TLS'
@@ -1270,23 +1284,44 @@ export class Activation {
           this.logger.info(`Waiting ${delaySeconds}s after CommitChanges for TLS-enforced device ${devices[context.clientId]?.uuid}`)
         },
         after: {
-          DELAY_AFTER_TLS_COMMIT: {
-            actions: ({ context }) => {
-              // Mark tunnel for reset - it will be stale after the long wait
-              const clientObj = devices[context.clientId]
-              if (clientObj != null) {
-                clientObj.tlsTunnelNeedsReset = true
-                clientObj.amtReconfiguring = false // Clear to prevent double delay in invokeWsmanCall
-                if (clientObj.tlsTunnelManager != null) {
-                  clientObj.tlsTunnelManager.close()
-                  clientObj.tlsTunnelManager = undefined
-                  clientObj.tlsTunnelSessionId = undefined
+          DELAY_AFTER_TLS_COMMIT: [
+            {
+              // Temporary: For CCM with CIRA, skip other configurations and go directly to CIRA
+              guard: 'isCCMWithCIRA',
+              actions: ({ context }) => {
+                // Mark tunnel for reset - it will be stale after the long wait
+                const clientObj = devices[context.clientId]
+                if (clientObj != null) {
+                  clientObj.tlsTunnelNeedsReset = true
+                  clientObj.amtReconfiguring = false
+                  if (clientObj.tlsTunnelManager != null) {
+                    clientObj.tlsTunnelManager.close()
+                    clientObj.tlsTunnelManager = undefined
+                    clientObj.tlsTunnelSessionId = undefined
+                  }
+                  this.logger.info(`TLS tunnel marked for reset after delay for device ${clientObj.uuid}`)
                 }
-                this.logger.info(`TLS tunnel marked for reset after delay for device ${clientObj.uuid}`)
-              }
+              },
+              target: 'CIRA'
             },
-            target: 'UNCONFIGURATION'
-          }
+            {
+              actions: ({ context }) => {
+                // Mark tunnel for reset - it will be stale after the long wait
+                const clientObj = devices[context.clientId]
+                if (clientObj != null) {
+                  clientObj.tlsTunnelNeedsReset = true
+                  clientObj.amtReconfiguring = false // Clear to prevent double delay in invokeWsmanCall
+                  if (clientObj.tlsTunnelManager != null) {
+                    clientObj.tlsTunnelManager.close()
+                    clientObj.tlsTunnelManager = undefined
+                    clientObj.tlsTunnelSessionId = undefined
+                  }
+                  this.logger.info(`TLS tunnel marked for reset after delay for device ${clientObj.uuid}`)
+                }
+              },
+              target: 'UNCONFIGURATION'
+            }
+          ]
         }
       },
       SAVE_DEVICE_TO_SECRET_PROVIDER_FAILURE: {
