@@ -1270,44 +1270,23 @@ export class Activation {
           this.logger.info(`Waiting ${delaySeconds}s after CommitChanges for TLS-enforced device ${devices[context.clientId]?.uuid}`)
         },
         after: {
-          DELAY_AFTER_TLS_COMMIT: [
-            {
-              // Temporary: For CCM with CIRA, skip other configurations and go directly to CIRA
-              guard: 'isCCMWithCIRA',
-              actions: ({ context }) => {
-                // Mark tunnel for reset - it will be stale after the long wait
-                const clientObj = devices[context.clientId]
-                if (clientObj != null) {
-                  clientObj.tlsTunnelNeedsReset = true
-                  clientObj.amtReconfiguring = false
-                  if (clientObj.tlsTunnelManager != null) {
-                    clientObj.tlsTunnelManager.close()
-                    clientObj.tlsTunnelManager = undefined
-                    clientObj.tlsTunnelSessionId = undefined
-                  }
-                  this.logger.info(`TLS tunnel marked for reset after delay for device ${clientObj.uuid}`)
+          DELAY_AFTER_TLS_COMMIT: {
+            actions: ({ context }) => {
+              // Mark tunnel for reset - it will be stale after the long wait
+              const clientObj = devices[context.clientId]
+              if (clientObj != null) {
+                clientObj.tlsTunnelNeedsReset = true
+                clientObj.amtReconfiguring = false // Clear to prevent double delay in invokeWsmanCall
+                if (clientObj.tlsTunnelManager != null) {
+                  clientObj.tlsTunnelManager.close()
+                  clientObj.tlsTunnelManager = undefined
+                  clientObj.tlsTunnelSessionId = undefined
                 }
-              },
-              target: 'CIRA'
+                this.logger.info(`TLS tunnel marked for reset after delay for device ${clientObj.uuid}`)
+              }
             },
-            {
-              actions: ({ context }) => {
-                // Mark tunnel for reset - it will be stale after the long wait
-                const clientObj = devices[context.clientId]
-                if (clientObj != null) {
-                  clientObj.tlsTunnelNeedsReset = true
-                  clientObj.amtReconfiguring = false // Clear to prevent double delay in invokeWsmanCall
-                  if (clientObj.tlsTunnelManager != null) {
-                    clientObj.tlsTunnelManager.close()
-                    clientObj.tlsTunnelManager = undefined
-                    clientObj.tlsTunnelSessionId = undefined
-                  }
-                  this.logger.info(`TLS tunnel marked for reset after delay for device ${clientObj.uuid}`)
-                }
-              },
-              target: 'UNCONFIGURATION'
-            }
-          ]
+            target: 'UNCONFIGURATION'
+          }
         }
       },
       SAVE_DEVICE_TO_SECRET_PROVIDER_FAILURE: {
