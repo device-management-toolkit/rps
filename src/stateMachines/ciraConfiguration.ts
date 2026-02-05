@@ -314,6 +314,11 @@ export class CIRAConfiguration {
         event.output.Envelope.Body?.RequestStateChange_OUTPUT?.ReturnValue === 0,
       shouldRetry: ({ context, event }) => context.retryCount < 3 && event.output instanceof UNEXPECTED_PARSE_ERROR,
       isRemoteAccessPolicyExists: ({ context }) => {
+        // Handle case where remoteAccessPolicies is not an array (single object or undefined)
+        if (!Array.isArray(context.remoteAccessPolicies)) {
+          context.remoteAccessPolicies = []
+          return false
+        }
         context.remoteAccessPolicies = context.remoteAccessPolicies.slice(1)
         if (context.remoteAccessPolicies.length > 0) {
           return true
