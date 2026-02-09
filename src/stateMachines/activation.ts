@@ -145,10 +145,11 @@ export class Activation {
     const arr: Buffer[] = [clientObj.ClientData.payload.fwNonce, clientObj.nonce]
     try {
       if (clientObj.certObj != null) {
+        // firmware does not support sha384 yet, always use sha256
         clientObj.signature = this.signatureHelper.signString(
           Buffer.concat(arr),
           clientObj.certObj.privateKey,
-          hashAlgorithm
+          'sha256'
         )
         return true
       } else {
