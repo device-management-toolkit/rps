@@ -1,3 +1,10 @@
+## [2.31.3](https://github.com/device-management-toolkit/rps/compare/v2.31.2...v2.31.3) (2026-02-18)
+
+
+### Bug Fixes
+
+* always use sha256 in createSignedString for firmware compatibility ([#2537](https://github.com/device-management-toolkit/rps/issues/2537)) ([8fc2c95](https://github.com/device-management-toolkit/rps/commit/8fc2c952985b4f655954ac9fd8bdc6dcefbec44a))
+
 ## [2.31.2](https://github.com/device-management-toolkit/rps/compare/v2.31.1...v2.31.2) (2026-01-16)
 
 
