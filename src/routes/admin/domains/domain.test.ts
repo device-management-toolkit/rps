@@ -146,9 +146,7 @@ describe('Domain Profile Validation', () => {
     expect(() => {
       passwordChecker(certManager, req)
     }).toThrowError(
-      new Error(
-        'Unable to decrypt provisioning certificate. Please check that the password is correct, and that the certificate is a valid certificate.'
-      )
+      'Unable to decrypt provisioning certificate. Please check that the password is correct, and that the certificate is a valid certificate.'
     )
   })
 

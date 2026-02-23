@@ -143,13 +143,13 @@ export class CertManager {
     try {
       asn = this.nodeForge.asn1FromDer(pfxder)
     } catch (e) {
-      throw new Error('ASN.1 parsing failed')
+      throw new Error('ASN.1 parsing failed', { cause: e })
     }
     let pfx: pkcs12.Pkcs12Pfx
     try {
       pfx = this.nodeForge.pkcs12FromAsn1(asn, true, passphrase)
     } catch (e) {
-      throw new Error('Decrypting provisioning certificate failed')
+      throw new Error('Decrypting provisioning certificate failed', { cause: e })
     }
 
     // Process certificate bags

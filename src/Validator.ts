@@ -168,7 +168,7 @@ export class Validator implements IValidator {
   isDigestRealmValid(realm: string): boolean {
     const regex = /[0-9A-Fa-f]{32}/g
     let isValidRealm = false
-    let realmElements: any = {}
+    let realmElements: any
     if (realm?.startsWith('Digest:')) {
       realmElements = realm.split('Digest:')
       if (realmElements[1].length === 32 && regex.test(realmElements[1])) {
@@ -179,7 +179,7 @@ export class Validator implements IValidator {
   }
 
   async updateTags(uuid: string, profile: AMTConfiguration): Promise<void> {
-    let tags: any[] = []
+    let tags: any[]
     if (profile.tags != null && profile?.tags.length > 0) {
       tags = profile.tags
       await got(`${Environment.Config.mps_server}/api/v1/devices`, {
@@ -238,7 +238,7 @@ export class Validator implements IValidator {
       if (error instanceof RPSError) {
         throw new RPSError(`${error.message}`)
       } else {
-        throw new Error('AMT device secret provider exception')
+        throw new Error('AMT device secret provider exception', { cause: error })
       }
     }
   }

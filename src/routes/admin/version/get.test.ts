@@ -10,7 +10,7 @@ import { version } from '../../../utils/version.js'
 
 describe('Checks getVersion', () => {
   let resSpy
-  let req
+  const req: any = undefined
   beforeEach(() => {
     resSpy = createSpyObj('Response', [
       'status',

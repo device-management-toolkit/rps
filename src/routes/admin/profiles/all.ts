@@ -12,7 +12,7 @@ import handleError from '../../../utils/handleError.js'
 
 export async function allProfiles(req: Request, res: Response): Promise<void> {
   const log = new Logger('allProfiles')
-  let amtConfigs: AMTConfiguration[] = [] as AMTConfiguration[]
+  let amtConfigs: AMTConfiguration[]
   const top = Number(req.query.$top)
   const skip = Number(req.query.$skip)
   const includeCount = req.query.$count

@@ -173,10 +173,9 @@ export const handleProxyConfigs = async (
   oldConfig: AMTConfiguration,
   profileProxyConfigsDb: IProfileProxyConfigsTable
 ): Promise<ProfileProxyConfigs[] | null> => {
-  let proxyConfigs: ProfileProxyConfigs[] | null = null
   // Always delete existing proxy configs and set new ones if provided
   await profileProxyConfigsDb.deleteProfileProxyConfigs(newConfig.profileName, newConfig.tenantId)
-  proxyConfigs = newConfig.proxyConfigs ?? null
+  const proxyConfigs: ProfileProxyConfigs[] | null = newConfig.proxyConfigs ?? null
   return proxyConfigs
 }
 

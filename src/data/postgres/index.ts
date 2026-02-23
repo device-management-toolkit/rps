@@ -70,7 +70,7 @@ export default class Db implements IDB {
         this.log.info('PostgreSQL SSL configuration enabled')
       } catch (error) {
         this.log.error(`Failed to load PostgreSQL SSL certificates: ${error}`)
-        throw new Error(`Failed to load PostgreSQL SSL certificates: ${error}`)
+        throw new Error(`Failed to load PostgreSQL SSL certificates: ${error}`, { cause: error })
       }
     } else {
       this.log.info('PostgreSQL SSL configuration not provided, using non-SSL connection')
