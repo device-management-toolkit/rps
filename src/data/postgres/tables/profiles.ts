@@ -307,7 +307,7 @@ export class ProfilesTable implements IProfilesTable {
    * @returns {AMTConfiguration} Returns amtConfig object
    */
   async update(amtConfig: AMTConfiguration): Promise<AMTConfiguration | null> {
-    let latestItem: AMTConfiguration | null = null
+    let latestItem: AMTConfiguration | null
     try {
       const results = await this.db.query(
         `

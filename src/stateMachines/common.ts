@@ -37,9 +37,8 @@ export class HttpResponseError extends Error {
 }
 const invokeWsmanCallInternal = async <T>(context: any): Promise<T> => {
   const { clientId, xmlMessage, httpHandler } = context
-  let { message } = context
   const clientObj = devices[clientId]
-  message = httpHandler.wrapIt(xmlMessage, clientObj.connectionParams)
+  const message = httpHandler.wrapIt(xmlMessage, clientObj.connectionParams)
   const clientMsg = ClientResponseMsg.get(clientId, message, 'wsman', 'ok')
   const clientMsgStr = JSON.stringify(clientMsg)
   clientObj.pendingPromise = new Promise<T>((resolve, reject) => {
@@ -133,7 +132,7 @@ export function coalesceMessage(prefixMsg: string, err: any): string {
 const isDigestRealmValid = (realm: string): boolean => {
   const regex = /[0-9A-Fa-f]{32}/g
   let isValidRealm = false
-  let realmElements: any = {}
+  let realmElements: any
   if (realm?.startsWith('Digest:')) {
     realmElements = realm.split('Digest:')
     if (realmElements[1].length === 32 && regex.test(realmElements[1])) {

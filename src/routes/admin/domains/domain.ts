@@ -89,7 +89,8 @@ export function passwordChecker(certManager: CertManager, req: any): CertsAndKey
     return pfxobj
   } catch (error) {
     throw new Error(
-      'Unable to decrypt provisioning certificate. Please check that the password is correct, and that the certificate is a valid certificate.'
+      'Unable to decrypt provisioning certificate. Please check that the password is correct, and that the certificate is a valid certificate.',
+      { cause: error }
     )
   }
 }

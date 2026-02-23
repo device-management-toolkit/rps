@@ -174,7 +174,7 @@ export class IEEE8021xProfilesTable implements IIEEE8021xProfileTable {
   }
 
   async update(item: Ieee8021xConfig): Promise<Ieee8021xConfig | null> {
-    let latestItem: Ieee8021xConfig | null = null
+    let latestItem: Ieee8021xConfig | null
     try {
       const results = await this.db.query(
         `

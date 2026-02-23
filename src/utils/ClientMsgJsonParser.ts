@@ -13,10 +13,9 @@ export class ClientMsgJsonParser {
    * @returns {ClientMsg} returns ClientMsg object if client message is valid
    */
   parse(message: string): ClientMsg {
-    let msg: ClientMsg | null = null
     // Parse and convert the message
     const clientMsg: ClientMsg = JSON.parse(message)
-    msg = this.convertClientMsg(clientMsg)
+    const msg = this.convertClientMsg(clientMsg)
     return msg
   }
 

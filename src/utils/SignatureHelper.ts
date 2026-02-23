@@ -27,7 +27,7 @@ export class SignatureHelper {
       const sign = signer.sign(this.nodeForge.privateKeyToPem(key), 'base64')
       return sign
     } catch (e) {
-      throw new Error('Unable to create Digital Signature')
+      throw new Error('Unable to create Digital Signature', { cause: e })
     }
   }
 

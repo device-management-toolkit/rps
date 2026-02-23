@@ -63,7 +63,7 @@ export class TLS {
 
   addCertificate = async ({ input }: { input: { context: TLSContext; event: TLSEvent } }): Promise<any> => {
     const clientObj = devices[input.context.clientId]
-    let cert = ''
+    let cert: string
     if (
       input.context.amtProfile?.tlsSigningAuthority === TlsSigningAuthority.SELF_SIGNED ||
       input.context.amtProfile?.tlsSigningAuthority == null

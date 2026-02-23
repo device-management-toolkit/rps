@@ -127,7 +127,7 @@ export class Activation {
   sendMessageToDevice({ context }): void {
     const { clientId, status } = context
     const clientObj = devices[clientId]
-    let method: 'failed' | 'success' | 'ok' | 'heartbeat' | null = null
+    let method: 'failed' | 'success' | 'ok' | 'heartbeat' | null
     if (status === 'success') {
       method = 'success'
     } else {
@@ -271,7 +271,6 @@ export class Activation {
     // inject certificates in proper order with proper flags
     if (clientObj.count != null && clientObj.certObj != null) {
       if (clientObj.count <= clientObj.certObj.certChain.length) {
-        let xmlRequestBody = ''
         let isLeaf = false
         let isRoot = false
         if (clientObj.count === 1) {
@@ -279,7 +278,7 @@ export class Activation {
         } else if (clientObj.count === clientObj.certObj.certChain.length) {
           isRoot = true
         }
-        xmlRequestBody = ips.HostBasedSetupService.AddNextCertInChain(
+        const xmlRequestBody = ips.HostBasedSetupService.AddNextCertInChain(
           clientObj.certObj.certChain[clientObj.count - 1],
           isLeaf,
           isRoot
