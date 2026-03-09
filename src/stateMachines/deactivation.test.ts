@@ -29,7 +29,8 @@ jest.unstable_mockModule('./common.js', () => ({
   invokeEnterpriseAssistantCall: jest.fn(),
   HttpResponseError,
   isDigestRealmValid,
-  coalesceMessage
+  coalesceMessage,
+  processTLSTunnelResponse: jest.fn()
 }))
 const { Deactivation } = await import('./deactivation.js')
 

@@ -27,7 +27,8 @@ jest.unstable_mockModule('./common.js', () => ({
   invokeEnterpriseAssistantCall: jest.fn(),
   HttpResponseError,
   isDigestRealmValid,
-  coalesceMessage
+  coalesceMessage,
+  processTLSTunnelResponse: jest.fn()
 }))
 
 const { CIRAConfiguration, MPSType } = await import('./ciraConfiguration.js')

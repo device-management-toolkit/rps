@@ -34,7 +34,8 @@ jest.unstable_mockModule('./common.js', () => ({
   invokeEnterpriseAssistantCall: jest.fn(),
   HttpResponseError,
   isDigestRealmValid,
-  coalesceMessage
+  coalesceMessage,
+  processTLSTunnelResponse: jest.fn()
 }))
 const { Activation } = await import('./activation.js')
 
@@ -131,6 +132,7 @@ describe('Activation State Machine', () => {
       canActivate: true,
       shbcCCMComplete: false,
       shbcACMComplete: false,
+      secureCCMComplete: false,
       message: '',
       clientId,
       xmlMessage: '',

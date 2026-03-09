@@ -9,6 +9,8 @@ export interface DeviceCredentials {
   AMT_PASSWORD: string | null
   MPS_PASSWORD?: string // only required for CIRA
   MEBX_PASSWORD?: string | null
+  TLS_ROOT_CERTIFICATE?: string
+  TLS_ISSUED_CERTIFICATE?: string
   version?: string
 }
 

@@ -80,6 +80,11 @@ export class Validator implements IValidator {
         this.logger.info(`Device ${payload.uuid} has TLS enforced - enabling TLS tunnel mode`)
       }
     }
+    // Extract secure activation flag from payload
+    if (msg.payload.secure === true) {
+      clientObj.secureActivation = true
+      this.logger.info(`Device ${payload.uuid} requested secure activation`)
+    }
     // Check for client requested action and profile activation
     const profile: AMTConfiguration | null = await this.configurator.profileManager.getAmtProfile(
       payload.profile,

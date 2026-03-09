@@ -27,7 +27,8 @@ jest.unstable_mockModule('./common.js', () => ({
   invokeEnterpriseAssistantCall: invokeEnterpriseAssistantCallSpy,
   HttpResponseError,
   isDigestRealmValid,
-  coalesceMessage
+  coalesceMessage,
+  processTLSTunnelResponse: jest.fn()
 }))
 
 const { NetworkConfiguration } = await import('./networkConfiguration.js')

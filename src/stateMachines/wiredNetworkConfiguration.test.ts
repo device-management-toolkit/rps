@@ -28,7 +28,8 @@ jest.unstable_mockModule('./common.js', () => ({
   invokeEnterpriseAssistantCall: invokeEnterpriseAssistantCallSpy,
   coalesceMessage,
   isDigestRealmValid,
-  HttpResponseError
+  HttpResponseError,
+  processTLSTunnelResponse: jest.fn()
 }))
 const { WiredConfiguration } = await import('./wiredNetworkConfiguration.js')
 

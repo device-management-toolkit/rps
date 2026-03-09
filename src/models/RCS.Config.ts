@@ -126,6 +126,7 @@ export interface ClientObject {
   resolve: (value: unknown) => void
   reject: (value: unknown) => void
   tlsEnforced?: boolean
+  secureActivation?: boolean
   tlsTunnelManager?: TLSTunnelManager
   tlsTunnelNeedsReset?: boolean
   tlsTunnelSessionId?: string // Current TLS session ID for filtering stale data
@@ -200,6 +201,9 @@ export interface TLSConfigFlow {
   commitLocalTLS?: boolean
   getTimeSynch?: boolean
   setTimeSynch?: boolean
+  rootCertPEM?: string
+  rootCertKey?: any
+  issuedCertPEM?: string
 }
 
 export interface mpsServer {
@@ -240,6 +244,7 @@ export interface Payload {
   client: string
   profile?: any
   tlsEnforced?: boolean
+  secure?: boolean
 }
 
 export interface ConnectionObject {
@@ -271,7 +276,9 @@ export enum ClientMethods {
   HEARTBEAT = 'heartbeat_response',
   MAINTENANCE = 'maintenance',
   TLS_DATA = 'tls_data',
-  CONNECTION_RESET = 'connection_reset'
+  CONNECTION_RESET = 'connection_reset',
+  PORT_SWITCH = 'port_switch',
+  PORT_SWITCH_ACK = 'port_switch_ack'
 }
 
 export interface apiResponse {

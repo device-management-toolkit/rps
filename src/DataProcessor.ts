@@ -81,6 +81,10 @@ export class DataProcessor {
           await this.handleConnectionReset(clientMsg, clientId)
           break
         }
+        case ClientMethods.PORT_SWITCH_ACK: {
+          await this.handlePortSwitchAck(clientMsg, clientId)
+          break
+        }
         default: {
           const uuid = clientMsg.payload.uuid ? clientMsg.payload.uuid : devices[clientId].ClientData.payload.uuid
           throw new RPSError(`Device ${uuid} Not a supported method received from AMT device`)
@@ -251,6 +255,15 @@ export class DataProcessor {
     if (clientObj?.tlsTunnelManager != null && clientMsg.payload != null) {
       const data = Buffer.from(clientMsg.payload, 'base64')
       clientObj.tlsTunnelManager.injectData(data)
+    }
+  }
+
+  async handlePortSwitchAck(clientMsg: ClientMsg, clientId: string): Promise<void> {
+    const clientObj = devices[clientId]
+    tlsLogger.info(`PORT_SWITCH_ACK received from rpc-go for device ${clientObj?.uuid}`)
+
+    if (clientObj?.pendingPromise != null && clientObj.resolve != null) {
+      clientObj.resolve('port_switch_ack')
     }
   }
 
