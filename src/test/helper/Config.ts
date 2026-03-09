@@ -33,6 +33,7 @@ export const config: RPSConfig = {
   cors_origin: '*',
   mps_server: 'https://localhost:3000',
   delay_timer: 1,
+  delay_tls_timer: 20,
   delay_activation_sync: 1,
   delay_setup_and_config_sync: 1,
   delay_tls_put_data_sync: 1,

@@ -13,6 +13,7 @@ import { Configurator } from '../Configurator.js'
 import { DbCreatorFactory } from '../factories/DbCreatorFactory.js'
 import { type CommonContext, invokeWsmanCall } from './common.js'
 import { UNEXPECTED_PARSE_ERROR } from '../utils/constants.js'
+import { Environment } from '../utils/Environment.js'
 import {
   getCertFromEnterpriseAssistant,
   initiateCertRequest,
@@ -141,7 +142,11 @@ export class WiredConfiguration {
     input.ieee8021xProfile.Enabled = 2
     input.ieee8021xProfile.AvailableInS0 = true
     input.xmlMessage = input.ips?.IEEE8021xSettings.Put(input.ieee8021xProfile)
-    return await invokeWsmanCall(input, 2)
+    // Use longer timeout for TLS-enforced devices as Put may trigger AMT reconfiguration
+    const clientObj = devices[input.clientId]
+    const tlsTimeoutMs = (Environment.Config.delay_tls_timer ?? 30) * 1000 + 15000 // delay_tls_timer + 15s buffer
+    const timeoutMs = clientObj?.tlsEnforced === true ? tlsTimeoutMs : undefined
+    return await invokeWsmanCall(input, 2, timeoutMs)
   }
 
   setCertificates = async ({ input }: { input: WiredConfigContext }): Promise<any> => {
@@ -237,7 +242,11 @@ export class WiredConfiguration {
       },
       is8021xProfilesExists: ({ context }) => context.amtProfile?.ieee8021xProfileName != null,
       shouldRetry: ({ context, event }) => context.retryCount < 3 && event.output instanceof UNEXPECTED_PARSE_ERROR,
-      isMSCHAPv2: ({ context }) => context.amtProfile?.ieee8021xProfileObject?.authenticationProtocol === 2
+      isMSCHAPv2: ({ context }) => context.amtProfile?.ieee8021xProfileObject?.authenticationProtocol === 2,
+      isTLSEnforced: ({ context }) => devices[context.clientId]?.tlsEnforced === true
+    },
+    delays: {
+      DELAY_AFTER_ETHERNET_PUT: () => (Environment.Config.delay_tls_timer ?? 30) * 1000
     },
     actions: {
       'Reset Unauth Count': ({ context }) => {
@@ -268,35 +277,110 @@ export class WiredConfiguration {
     states: {
       ACTIVATION: {
         on: {
-          WIREDCONFIG: {
-            actions: [
-              assign({
-                statusMessage: () => '',
-                authProtocol: ({ context }) =>
-                  context.amtProfile?.ieee8021xProfileObject != null
-                    ? context.amtProfile?.ieee8021xProfileObject?.authenticationProtocol
-                    : 0
-              }),
-              'Reset Unauth Count',
-              'Reset Retry Count'
-            ],
-            target: 'PUT_ETHERNET_PORT_SETTINGS'
-          }
+          WIREDCONFIG: [
+            {
+              // For TLS-enforced devices, skip Put on AMT_EthernetPortSettings - it causes AMT 19.x
+              // to become unresponsive for an extended period. Since TLS is already working,
+              // the network config is already acceptable.
+              guard: 'isTLSEnforced',
+              actions: [
+                assign({
+                  statusMessage: () => '',
+                  authProtocol: ({ context }) =>
+                    context.amtProfile?.ieee8021xProfileObject != null
+                      ? context.amtProfile?.ieee8021xProfileObject?.authenticationProtocol
+                      : 0
+                }),
+                'Reset Unauth Count',
+                'Reset Retry Count',
+                ({ context }) => {
+                  this.logger.info(`Skipping Put on AMT_EthernetPortSettings for TLS-enforced device ${devices[context.clientId]?.uuid} - network already configured`)
+                }
+              ],
+              target: 'CHECK_8021X_OR_SUCCESS'
+            },
+            {
+              actions: [
+                assign({
+                  statusMessage: () => '',
+                  authProtocol: ({ context }) =>
+                    context.amtProfile?.ieee8021xProfileObject != null
+                      ? context.amtProfile?.ieee8021xProfileObject?.authenticationProtocol
+                      : 0
+                }),
+                'Reset Unauth Count',
+                'Reset Retry Count'
+              ],
+              target: 'PUT_ETHERNET_PORT_SETTINGS'
+            }
+          ]
         }
+      },
+      CHECK_8021X_OR_SUCCESS: {
+        // For TLS-enforced devices that skipped ethernet port settings
+        always: [
+          {
+            guard: 'is8021xProfilesExists',
+            target: 'GET_8021X_PROFILE'
+          },
+          {
+            target: 'SUCCESS'
+          }
+        ]
       },
       PUT_ETHERNET_PORT_SETTINGS: {
         invoke: {
           src: 'putEthernetPortSettings',
           input: ({ context }) => context,
           id: 'put-ethernet-port-settings',
-          onDone: {
-            actions: assign({ message: ({ event }) => event.output }),
-            target: 'CHECK_ETHERNET_PORT_SETTINGS_PUT_RESPONSE'
-          },
-          onError: {
-            actions: assign({ errorMessage: ({ event }) => (event.error as any).message }),
-            target: 'FAILED'
+          onDone: [
+            {
+              guard: 'isTLSEnforced',
+              actions: assign({ message: ({ event }) => event.output }),
+              target: 'WAIT_AFTER_ETHERNET_PUT'
+            },
+            {
+              actions: assign({ message: ({ event }) => event.output }),
+              target: 'CHECK_ETHERNET_PORT_SETTINGS_PUT_RESPONSE'
+            }
+          ],
+          onError: [
+            {
+              // For TLS-enforced devices, timeout may be expected - wait and retry
+              guard: 'isTLSEnforced',
+              target: 'WAIT_AFTER_ETHERNET_PUT'
+            },
+            {
+              actions: assign({ errorMessage: ({ event }) => (event.error as any).message }),
+              target: 'FAILED'
+            }
+          ]
+        }
+      },
+      WAIT_AFTER_ETHERNET_PUT: {
+        entry: ({ context }) => {
+          const clientObj = devices[context.clientId]
+          const delaySeconds = Environment.Config.delay_tls_timer ?? 30
+          this.logger.info(`Waiting ${delaySeconds}s after Put on AMT_EthernetPortSettings for TLS-enforced device ${clientObj?.uuid}`)
+          // Mark tunnel for reset after wait
+          if (clientObj != null) {
+            clientObj.tlsTunnelNeedsReset = true
+            if (clientObj.tlsTunnelManager != null) {
+              clientObj.tlsTunnelManager.close()
+              clientObj.tlsTunnelManager = undefined
+              clientObj.tlsTunnelSessionId = undefined
+            }
           }
+        },
+        exit: ({ context }) => {
+          // Clear amtReconfiguring flag after XState delay completes - prevents double delay in invokeWsmanCall
+          const clientObj = devices[context.clientId]
+          if (clientObj != null) {
+            clientObj.amtReconfiguring = false
+          }
+        },
+        after: {
+          DELAY_AFTER_ETHERNET_PUT: { target: 'SUCCESS' }
         }
       },
       CHECK_ETHERNET_PORT_SETTINGS_PUT_RESPONSE: {
