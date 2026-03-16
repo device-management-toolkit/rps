@@ -103,6 +103,7 @@ export interface RPSConfig {
   cors_methods: string
   mps_server: string
   delay_timer: number
+  delay_tls_timer: number
   delay_activation_sync: number
   delay_setup_and_config_sync: number
   delay_tls_put_data_sync: number

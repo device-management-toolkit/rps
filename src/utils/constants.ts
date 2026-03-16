@@ -165,3 +165,23 @@ export class EATimeoutError extends Error {
   }
 }
 export const EA_TIMEOUT_ERROR = EATimeoutError
+export class ConnectionResetError extends Error {
+  statusCode: number
+  constructor(message = 'Connection Reset - TLS tunnel needs re-establishment', statusCode = 503) {
+    super(message)
+    this.name = this.constructor.name
+    this.statusCode = statusCode
+    Error.captureStackTrace(this, this.constructor)
+  }
+}
+export const CONNECTION_RESET_ERROR = ConnectionResetError
+export class TLSTunnelError extends Error {
+  statusCode: number
+  constructor(message = 'TLS tunnel connection failed', statusCode = 503) {
+    super(message)
+    this.name = this.constructor.name
+    this.statusCode = statusCode
+    Error.captureStackTrace(this, this.constructor)
+  }
+}
+export const TLS_TUNNEL_ERROR = TLSTunnelError
