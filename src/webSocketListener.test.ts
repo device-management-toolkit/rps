@@ -117,7 +117,7 @@ describe('Websocket Listener', () => {
     const message: Data = 'X'.repeat(1024 * 10 * 10 + 1)
     await server.onMessageReceived(message as any, clientid)
     expect(loggerSpy).toHaveBeenCalled()
-    expect(loggerSpy).toHaveBeenCalledWith('Incoming message exceeds allowed length')
+    expect(loggerSpy).toHaveBeenCalledWith('Incoming message exceeds allowed length (102401 > 102400)')
   })
 
   it('Should generate error when not a string', async () => {
@@ -125,7 +125,7 @@ describe('Websocket Listener', () => {
     const message: Data = Buffer.from('break the code')
     await server.onMessageReceived(message, clientid)
     expect(loggerSpy).toHaveBeenCalled()
-    expect(loggerSpy).toHaveBeenCalledWith('Incoming message exceeds allowed length')
+    expect(loggerSpy).toHaveBeenCalledWith('Incoming message exceeds allowed length (102401 > 102400)')
   })
   it('Should process client message and not respond when no response to send', async () => {
     const sendMessage = spyOn(server, 'sendMessage')

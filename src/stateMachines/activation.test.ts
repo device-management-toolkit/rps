@@ -32,6 +32,7 @@ const invokeWsmanCallSpy = jest.fn<any>()
 jest.unstable_mockModule('./common.js', () => ({
   invokeWsmanCall: invokeWsmanCallSpy,
   invokeEnterpriseAssistantCall: jest.fn(),
+  processTLSTunnelResponse: jest.fn(),
   HttpResponseError,
   isDigestRealmValid,
   coalesceMessage
@@ -256,7 +257,8 @@ describe('Activation State Machine', () => {
         featuresConfiguration: fromPromise(async ({ input }) => await Promise.resolve({ clientId })),
         tls: fromPromise(async ({ input }) => await Promise.resolve({ clientId })),
         cira: fromPromise(async ({ input }) => await Promise.resolve({ clientId })),
-        setMEBxPassword: fromPromise(async ({ input }) => await Promise.resolve({ clientId }))
+        setMEBxPassword: fromPromise(async ({ input }) => await Promise.resolve({ clientId })),
+        initializeTLSTunnel: fromPromise(async () => await Promise.resolve(true))
       },
       actions: {
         'Read General Settings': () => {},
@@ -731,6 +733,7 @@ describe('Activation State Machine', () => {
       const flowStates = [
         'UNPROVISIONED',
         'GET_AMT_PROFILE',
+        'INIT_TLS_TUNNEL',
         'GET_GENERAL_SETTINGS',
         'SETUP',
         'DELAYED_TRANSITION',
@@ -777,6 +780,7 @@ describe('Activation State Machine', () => {
         'UNPROVISIONED',
         'GET_AMT_PROFILE',
         'GET_AMT_DOMAIN_CERT',
+        'INIT_TLS_TUNNEL',
         'GET_GENERAL_SETTINGS',
         'IPS_HOST_BASED_SETUP_SERVICE',
         'ADD_NEXT_CERT_IN_CHAIN',
@@ -833,6 +837,7 @@ describe('Activation State Machine', () => {
         'UNPROVISIONED',
         'GET_AMT_PROFILE',
         'GET_AMT_DOMAIN_CERT',
+        'INIT_TLS_TUNNEL',
         'GET_GENERAL_SETTINGS',
         'IPS_HOST_BASED_SETUP_SERVICE',
         'ADD_NEXT_CERT_IN_CHAIN',
@@ -931,6 +936,7 @@ describe('Activation State Machine', () => {
         'UNPROVISIONED',
         'GET_AMT_PROFILE',
         'CHECK_TENANT_ACCESS',
+        'INIT_TLS_TUNNEL',
         'GET_GENERAL_SETTINGS',
         'ERROR'
       ]
@@ -977,6 +983,7 @@ describe('Activation State Machine', () => {
         'UNPROVISIONED',
         'GET_AMT_PROFILE',
         'GET_AMT_DOMAIN_CERT',
+        'INIT_TLS_TUNNEL',
         'GET_GENERAL_SETTINGS',
         'IPS_HOST_BASED_SETUP_SERVICE',
         'ADD_NEXT_CERT_IN_CHAIN',
@@ -1025,6 +1032,7 @@ describe('Activation State Machine', () => {
         'UNPROVISIONED',
         'GET_AMT_PROFILE',
         'GET_AMT_DOMAIN_CERT',
+        'INIT_TLS_TUNNEL',
         'GET_GENERAL_SETTINGS',
         'IPS_HOST_BASED_SETUP_SERVICE',
         'ADD_NEXT_CERT_IN_CHAIN',
@@ -1076,6 +1084,7 @@ describe('Activation State Machine', () => {
         'UNPROVISIONED',
         'GET_AMT_PROFILE',
         'GET_AMT_DOMAIN_CERT',
+        'INIT_TLS_TUNNEL',
         'GET_GENERAL_SETTINGS',
         'ERROR'
       ]
@@ -1124,6 +1133,7 @@ describe('Activation State Machine', () => {
         'UNPROVISIONED',
         'GET_AMT_PROFILE',
         'GET_AMT_DOMAIN_CERT',
+        'INIT_TLS_TUNNEL',
         'GET_GENERAL_SETTINGS',
         'IPS_HOST_BASED_SETUP_SERVICE',
         'ADD_NEXT_CERT_IN_CHAIN',
@@ -1174,6 +1184,7 @@ describe('Activation State Machine', () => {
         'UNPROVISIONED',
         'GET_AMT_PROFILE',
         'GET_AMT_DOMAIN_CERT',
+        'INIT_TLS_TUNNEL',
         'GET_GENERAL_SETTINGS',
         'IPS_HOST_BASED_SETUP_SERVICE',
         'ADD_NEXT_CERT_IN_CHAIN',
@@ -1220,6 +1231,7 @@ describe('Activation State Machine', () => {
         'UNPROVISIONED',
         'GET_AMT_PROFILE',
         'GET_AMT_DOMAIN_CERT',
+        'INIT_TLS_TUNNEL',
         'GET_GENERAL_SETTINGS',
         'IPS_HOST_BASED_SETUP_SERVICE',
         'ADD_NEXT_CERT_IN_CHAIN',
@@ -1275,6 +1287,7 @@ describe('Activation State Machine', () => {
         'UNPROVISIONED',
         'GET_AMT_PROFILE',
         'GET_AMT_DOMAIN_CERT',
+        'INIT_TLS_TUNNEL',
         'GET_GENERAL_SETTINGS',
         'IPS_HOST_BASED_SETUP_SERVICE',
         'ADD_NEXT_CERT_IN_CHAIN',
@@ -1374,6 +1387,7 @@ describe('Activation State Machine', () => {
         'UNPROVISIONED',
         'GET_AMT_PROFILE',
         'GET_AMT_DOMAIN_CERT',
+        'INIT_TLS_TUNNEL',
         'GET_GENERAL_SETTINGS',
         'IPS_HOST_BASED_SETUP_SERVICE',
         'ADD_NEXT_CERT_IN_CHAIN',
@@ -1475,6 +1489,7 @@ describe('Activation State Machine', () => {
         'UNPROVISIONED',
         'GET_AMT_PROFILE',
         'GET_AMT_DOMAIN_CERT',
+        'INIT_TLS_TUNNEL',
         'GET_GENERAL_SETTINGS',
         'IPS_HOST_BASED_SETUP_SERVICE',
         'ADD_NEXT_CERT_IN_CHAIN',
@@ -1662,11 +1677,13 @@ describe('Activation State Machine', () => {
       const flowStates = [
         'UNPROVISIONED',
         'GET_AMT_PROFILE',
+        'INIT_TLS_TUNNEL',
         'GET_GENERAL_SETTINGS',
         'SETUP',
         'COMMIT_CHANGES',
         'DELAYED_TRANSITION',
         'GET_AMT_DOMAIN_CERT',
+        'INIT_TLS_TUNNEL',
         'GET_GENERAL_SETTINGS',
         'IPS_HOST_BASED_SETUP_SERVICE',
         'ADD_NEXT_CERT_IN_CHAIN',
@@ -1730,6 +1747,7 @@ describe('Activation State Machine', () => {
         'UNPROVISIONED',
         'GET_AMT_PROFILE',
         'GET_AMT_DOMAIN_CERT',
+        'INIT_TLS_TUNNEL',
         'GET_GENERAL_SETTINGS',
         'IPS_HOST_BASED_SETUP_SERVICE',
         'ADD_NEXT_CERT_IN_CHAIN',
@@ -1854,6 +1872,7 @@ describe('Activation State Machine', () => {
         'UNPROVISIONED',
         'GET_AMT_PROFILE',
         'GET_AMT_DOMAIN_CERT',
+        'INIT_TLS_TUNNEL',
         'GET_GENERAL_SETTINGS',
         'IPS_HOST_BASED_SETUP_SERVICE',
         'ADD_NEXT_CERT_IN_CHAIN',
@@ -1893,6 +1912,183 @@ describe('Activation State Machine', () => {
         JSON.stringify(devices[clientId].status)
       )
       expect(sendSpy).toHaveBeenCalled()
+    })
+  })
+
+  describe('TLS-enforced device flows', () => {
+    afterEach(() => {
+      jest.useRealTimers()
+    })
+
+    it('should reach PROVISIONED for TLS-enforced CCM and skip TLS configuration', (done) => {
+      jest.useFakeTimers()
+
+      context.shbcCCMComplete = false
+      context.shbcACMComplete = false
+      context.profile.activation = 'ccmactivate'
+      devices[clientId].ClientData.payload.ver = '19.0.0'
+      devices[clientId].ClientData.payload.action = ClientAction.CLIENTCTLMODE
+      devices[clientId].tlsEnforced = true
+
+      config.guards = {
+        isAdminMode: () => false,
+        isSHBC: () => false,
+        isDeviceClientModeActivated: () => true,
+        hasCIRAProfile: () => false,
+        isDigestRealmInvalid: () => false,
+        canActivate: () => true,
+        isActivated: () => false,
+        isTLSEnforced: () => true
+      }
+
+      config.actors!.getAMTProfile = fromPromise(
+        async () =>
+          await Promise.resolve({
+            clientId,
+            profile: {
+              profileName: 'ccm-tls',
+              activation: 'ccmactivate',
+              amtPassword: 'Intel123!'
+            }
+          })
+      )
+
+      const mockActivationMachine = activation.machine.provide(config)
+      const flowStates = [
+        'UNPROVISIONED',
+        'GET_AMT_PROFILE',
+        'INIT_TLS_TUNNEL',
+        'GET_GENERAL_SETTINGS',
+        'SETUP',
+        'DELAYED_TRANSITION',
+        'SAVE_DEVICE_TO_SECRET_PROVIDER',
+        'SAVE_DEVICE_TO_MPS',
+        'COMMIT_CHANGES_FOR_TLS',
+        'WAIT_AFTER_TLS_COMMIT',
+        'UNCONFIGURATION',
+        'NETWORK_CONFIGURATION',
+        'FEATURES_CONFIGURATION',
+        'PROVISIONED'
+      ]
+      const ccmActivationService = createActor(mockActivationMachine, { input: context })
+      ccmActivationService.subscribe((state) => {
+        const expectedState: any = flowStates[currentStateIndex++]
+        expect(state.matches(expectedState)).toBe(true)
+        if (state.matches('DELAYED_TRANSITION') || state.matches('WAIT_AFTER_TLS_COMMIT')) {
+          jest.advanceTimersByTime(60000)
+        } else if (state.matches('PROVISIONED') && currentStateIndex === flowStates.length) {
+          done()
+        }
+      })
+
+      ccmActivationService.start()
+      ccmActivationService.send({ type: 'ACTIVATION', clientId, tenantId: '', friendlyName: null as any })
+      jest.runAllTicks()
+    })
+
+    it('should reach PROVISIONED for TLS-enforced Admin mode and skip TLS config', (done) => {
+      jest.useFakeTimers()
+      context.certChainPfx = { provisioningCertificateObj: { certChain: ['leaf', 'inter1', 'root'], privateKey: null }, fingerprint: { sha256: '82f2ed575db4abe462499cf550dbff9584980d70a0272894639c3653b9ad932c', sha1: '47d7b7db23f3e300189f54802482b1bd18b945ef' }, hashAlgorithm: 'sha256' }
+      devices[context.clientId].certObj = context.certChainPfx.provisioningCertificateObj
+      devices[clientId].tlsEnforced = true
+
+      config.guards = {
+        isAdminMode: () => true,
+        maxCertLength: () => false,
+        hasCIRAProfile: () => false,
+        isTLSEnforced: () => true
+      }
+
+      const mockActivationMachine = activation.machine.provide(config)
+      const flowStates = [
+        'UNPROVISIONED',
+        'GET_AMT_PROFILE',
+        'GET_AMT_DOMAIN_CERT',
+        'INIT_TLS_TUNNEL',
+        'GET_GENERAL_SETTINGS',
+        'IPS_HOST_BASED_SETUP_SERVICE',
+        'ADD_NEXT_CERT_IN_CHAIN',
+        'ADMIN_SETUP',
+        'DELAYED_TRANSITION',
+        'SET_MEBX_PASSWORD',
+        'SAVE_DEVICE_TO_SECRET_PROVIDER',
+        'SAVE_DEVICE_TO_MPS',
+        'COMMIT_CHANGES_FOR_TLS',
+        'WAIT_AFTER_TLS_COMMIT',
+        'UNCONFIGURATION',
+        'NETWORK_CONFIGURATION',
+        'FEATURES_CONFIGURATION',
+        'PROVISIONED'
+      ]
+      const acmActivationService = createActor(mockActivationMachine, { input: context })
+      acmActivationService.subscribe((state) => {
+        const expectedState: any = flowStates[currentStateIndex++]
+        expect(state.matches(expectedState)).toBe(true)
+        if (state.matches('DELAYED_TRANSITION') || state.matches('WAIT_AFTER_TLS_COMMIT')) {
+          jest.advanceTimersByTime(60000)
+        } else if (state.matches('PROVISIONED') && currentStateIndex === flowStates.length) {
+          done()
+        }
+      })
+
+      acmActivationService.start()
+      acmActivationService.send({ type: 'ACTIVATION', clientId, tenantId: '', friendlyName: null as any })
+      jest.runAllTicks()
+    })
+
+    it('should reach FAILED when TLS tunnel initialization fails', (done) => {
+      jest.useFakeTimers()
+
+      context.shbcCCMComplete = false
+      context.shbcACMComplete = false
+      context.profile.activation = 'ccmactivate'
+      devices[clientId].tlsEnforced = true
+
+      config.guards = {
+        isAdminMode: () => false,
+        isSHBC: () => false,
+        isActivated: () => false
+      }
+
+      config.actors!.initializeTLSTunnel = fromPromise(
+        async () => await Promise.reject(new Error('TLS handshake failed'))
+      )
+
+      const mockActivationMachine = activation.machine.provide(config)
+      const flowStates = [
+        'UNPROVISIONED',
+        'GET_AMT_PROFILE',
+        'INIT_TLS_TUNNEL',
+        'FINAL'
+      ]
+      const service = createActor(mockActivationMachine, { input: context })
+      service.subscribe((state) => {
+        const expectedState: any = flowStates[currentStateIndex++]
+        expect(state.matches(expectedState)).toBe(true)
+        if (state.matches('FINAL') && currentStateIndex === flowStates.length) {
+          done()
+        }
+      })
+
+      service.start()
+      service.send({ type: 'ACTIVATION', clientId, tenantId: '', friendlyName: null as any })
+      jest.runAllTicks()
+    })
+
+    it('initializeTLSTunnel should skip tunnel setup when tlsEnforced is false', async () => {
+      devices[clientId].tlsEnforced = false
+      devices[clientId].uuid = 'test-uuid'
+      const result = await activation.initializeTLSTunnel({ input: context } as any)
+      expect(result).toBe(true)
+      expect(devices[clientId].tlsTunnelManager).toBeUndefined()
+    })
+
+    it('initializeTLSTunnel should skip tunnel setup when tlsEnforced is undefined', async () => {
+      delete (devices[clientId] as any).tlsEnforced
+      devices[clientId].uuid = 'test-uuid'
+      const result = await activation.initializeTLSTunnel({ input: context } as any)
+      expect(result).toBe(true)
+      expect(devices[clientId].tlsTunnelManager).toBeUndefined()
     })
   })
 })

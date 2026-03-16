@@ -27,6 +27,7 @@ const invokeWsmanCallSpy = jest.fn()
 jest.unstable_mockModule('./common.js', () => ({
   invokeWsmanCall: invokeWsmanCallSpy,
   invokeEnterpriseAssistantCall: jest.fn(),
+  processTLSTunnelResponse: jest.fn(),
   HttpResponseError,
   isDigestRealmValid,
   coalesceMessage
