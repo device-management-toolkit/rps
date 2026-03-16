@@ -9,6 +9,8 @@ import { devices } from '../devices.js'
 import { type HttpZResponseModel } from 'http-z'
 import Logger from '../Logger.js'
 
+const errorLogger = new Logger('ErrorHandler')
+
 const httpHandler = new HttpHandler()
 export interface ErrorContext {
   message: HttpZResponseModel | null
@@ -36,12 +38,24 @@ export class Error {
         clientObj.connectionParams.digestChallenge = httpHandler.parseAuthenticateResponseHeader(found.value)
       }
     }
+
+    // Check for Connection: close header - indicates TCP connection will close after response
+    // For TLS enforced mode, we need to close the old tunnel so a new one is created for the retry
+    const connectionHeader = message?.headers?.find((item) => item.name.toLowerCase() === 'connection')
+    if (connectionHeader?.value?.toLowerCase() === 'close' && clientObj.tlsEnforced === true) {
+      errorLogger.debug(`Connection: close detected for ${clientId}, closing TLS tunnel for re-establishment`)
+      // Close the existing TLS tunnel - a new one will be created when the retry happens
+      if (clientObj.tlsTunnelManager != null) {
+        clientObj.tlsTunnelManager.close()
+        clientObj.tlsTunnelManager = undefined
+      }
+      clientObj.tlsTunnelNeedsReset = true
+    }
   }
 
   resetAuthCount = ({ context }: { context: ErrorContext }): void => {
     if (devices[context.clientId] != null) {
       devices[context.clientId].unauthCount = 0
-      this.logger.silly(`Reset unauthCount of ${context.clientId} to 0`)
     }
   }
 
@@ -74,10 +88,7 @@ export class Error {
       resetAuthCount: this.resetAuthCount
     }
   }).createMachine({
-    context: ({ input }) => {
-      this.logger.silly(`${JSON.stringify(input.message)}`)
-      return { message: input.message, clientId: input.clientId }
-    },
+    context: ({ input }) => ({ message: input.message, clientId: input.clientId }),
     id: 'error-machine',
     initial: 'ERRORED',
     states: {

@@ -188,18 +188,21 @@ export class TLS {
     input.tlsSettingData[0].MutualAuthentication = input.amtProfile?.tlsMode === 3 || input.amtProfile?.tlsMode === 4
 
     input.xmlMessage = input.amt.TLSSettingData.Put(input.tlsSettingData[0])
-    return await invokeWsmanCall(input, 2)
+    // Use longer timeout for TLS Put - AMT may take 30+ seconds to reconfigure
+    return await invokeWsmanCall(input, 2, Environment.Config.delay_tls_timer * 1000)
   }
 
   putLocalTLSData = async ({ input }: { input: TLSContext }): Promise<any> => {
     input.tlsSettingData[1].Enabled = true
     input.xmlMessage = input.amt.TLSSettingData.Put(input.tlsSettingData[1])
-    return await invokeWsmanCall(input, 2)
+    // Use longer timeout for TLS Put - AMT may take 30+ seconds to reconfigure
+    return await invokeWsmanCall(input, 2, Environment.Config.delay_tls_timer * 1000)
   }
 
   commitChanges = async ({ input }: { input: TLSContext }): Promise<any> => {
     input.xmlMessage = input.amt.SetupAndConfigurationService.CommitChanges()
-    return await invokeWsmanCall(input)
+    // Use longer timeout - AMT may still be reconfiguring after TLS Put
+    return await invokeWsmanCall(input, 0, Environment.Config.delay_tls_timer * 1000)
   }
 
   machine = setup({
