@@ -74,7 +74,8 @@ describe('processTLSTunnelResponse', () => {
   })
 
   it('should resolve on complete Content-Length response with valid XML', () => {
-    const xmlBody = '<?xml version="1.0" encoding="UTF-8"?><a:Envelope xmlns:a="http://www.w3.org/2003/05/soap-envelope"><a:Header><a:Action>http://schemas.xmlsoap.org/ws/2004/09/transfer/GetResponse</a:Action></a:Header><a:Body><AMT_GeneralSettings><DigestRealm>Digest:realm</DigestRealm></AMT_GeneralSettings></a:Body></a:Envelope>'
+    const xmlBody =
+      '<?xml version="1.0" encoding="UTF-8"?><a:Envelope xmlns:a="http://www.w3.org/2003/05/soap-envelope"><a:Header><a:Action>http://schemas.xmlsoap.org/ws/2004/09/transfer/GetResponse</a:Action></a:Header><a:Body><AMT_GeneralSettings><DigestRealm>Digest:realm</DigestRealm></AMT_GeneralSettings></a:Body></a:Envelope>'
     const httpResponse = `HTTP/1.1 200 OK\r\nContent-Type: application/soap+xml; charset=UTF-8\r\nContent-Length: ${xmlBody.length}\r\n\r\n${xmlBody}`
     const parseXMLSpy = spyOn(httpHandler, 'parseXML').mockReturnValue({ parsed: true } as any)
 
@@ -85,9 +86,10 @@ describe('processTLSTunnelResponse', () => {
   })
 
   it('should resolve on complete chunked response', () => {
-    const xmlBody = '<?xml version="1.0" encoding="UTF-8"?><a:Envelope xmlns:a="http://www.w3.org/2003/05/soap-envelope"><a:Header><a:Action>http://schemas.xmlsoap.org/ws/2004/09/transfer/GetResponse</a:Action></a:Header><a:Body><Test>data</Test></a:Body></a:Envelope>'
-    const chunk = Buffer.from(xmlBody).toString('hex')
-    const chunkedBody = `${chunk.length.toString(16)}\r\n${xmlBody}\r\n0\r\n\r\n`
+    const xmlBody =
+      '<?xml version="1.0" encoding="UTF-8"?><a:Envelope xmlns:a="http://www.w3.org/2003/05/soap-envelope"><a:Header><a:Action>http://schemas.xmlsoap.org/ws/2004/09/transfer/GetResponse</a:Action></a:Header><a:Body><Test>data</Test></a:Body></a:Envelope>'
+    const chunkSize = Buffer.byteLength(xmlBody)
+    const chunkedBody = `${chunkSize.toString(16)}\r\n${xmlBody}\r\n0\r\n\r\n`
     const httpResponse = `HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n${chunkedBody}`
     const parseXMLSpy = spyOn(httpHandler, 'parseXML').mockReturnValue({ parsed: true } as any)
 
@@ -97,7 +99,8 @@ describe('processTLSTunnelResponse', () => {
   })
 
   it('should reject on non-200 status code', () => {
-    const httpResponse = 'HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nWww-Authenticate: Digest realm="Digest:realm"\r\n\r\n'
+    const httpResponse =
+      'HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nWww-Authenticate: Digest realm="Digest:realm"\r\n\r\n'
     processTLSTunnelResponse(clientId, Buffer.from(httpResponse), httpHandler)
     expect(rejectSpy).toHaveBeenCalled()
     const rejectedValue = rejectSpy.mock.calls[0][0] as any
@@ -115,7 +118,7 @@ describe('processTLSTunnelResponse', () => {
   })
 
   it('should reject with UNEXPECTED_PARSE_ERROR on malformed HTTP response', () => {
-    const malformedResponse = 'this is not an HTTP response at all 0\r\n\r\n'
+    const malformedResponse = 'this is not an HTTP response\r\nContent-Length: 0\r\n\r\n'
     processTLSTunnelResponse(clientId, Buffer.from(malformedResponse), httpHandler)
     expect(rejectSpy).toHaveBeenCalled()
     expect(rejectSpy.mock.calls[0][0]).toBeInstanceOf(UNEXPECTED_PARSE_ERROR)

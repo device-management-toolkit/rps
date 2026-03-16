@@ -11,7 +11,12 @@ import {
   enterpriseAssistantSocket,
   promises
 } from '../WSEnterpriseAssistantListener.js'
-import { GATEWAY_TIMEOUT_ERROR, UNEXPECTED_PARSE_ERROR, EA_TIMEOUT_ERROR, CONNECTION_RESET_ERROR, TLS_TUNNEL_ERROR } from '../utils/constants.js'
+import {
+  GATEWAY_TIMEOUT_ERROR,
+  UNEXPECTED_PARSE_ERROR,
+  EA_TIMEOUT_ERROR,
+  TLS_TUNNEL_ERROR
+} from '../utils/constants.js'
 import Logger from '../Logger.js'
 import { type HttpHandler } from '../HttpHandler.js'
 import pkg, { type HttpZResponseModel } from 'http-z'
@@ -19,6 +24,18 @@ import { parseChunkedMessage } from '../utils/parseChunkedMessage.js'
 import { TLSTunnelManager } from '../TLSTunnelManager.js'
 
 const invokeWsmanLogger = new Logger('invokeWsmanCall')
+
+/**
+ * Returns an extended timeout for TLS-enforced devices (delay_tls_timer + 15s buffer),
+ * or undefined for non-TLS devices (which uses the default timeout).
+ */
+export const getTLSTimeoutMs = (clientId: string): number | undefined => {
+  const clientObj = devices[clientId]
+  if (clientObj?.tlsEnforced !== true) {
+    return undefined
+  }
+  return (Environment.Config.delay_tls_timer ?? 30) * 1000 + 15000
+}
 
 /**
  * If retries is more than 0, will resend the message
@@ -48,7 +65,7 @@ const invokeWsmanCallInternal = async <T>(context: any): Promise<T> => {
   const resourceMatch = xmlMessage?.match(/<w:ResourceURI>([^<]+)<\/w:ResourceURI>/)
   const action = actionMatch ? actionMatch[1].split('/').pop() : 'unknown'
   const resource = resourceMatch ? resourceMatch[1].split('/').pop() : 'unknown'
-  invokeWsmanLogger.info(`WSMAN REQUEST: ${action} on ${resource}`)
+  invokeWsmanLogger.debug(`WSMAN REQUEST: ${action} on ${resource}`)
   invokeWsmanLogger.debug(`WSMAN REQUEST XML:\n${xmlMessage}`)
 
   if (clientObj.tlsEnforced === true) {
@@ -154,7 +171,8 @@ export const processTLSTunnelResponse = (clientId: string, data: Buffer, httpHan
 
   // Check if we have a complete HTTP response
   const bufferStr = clientObj.tlsResponseBuffer.toString()
-  const hasCompleteChunkedResponse = bufferStr.includes('0\r\n\r\n')
+  const isChunked = /Transfer-Encoding:\s*chunked/i.test(bufferStr)
+  const hasCompleteChunkedResponse = isChunked && bufferStr.endsWith('0\r\n\r\n')
 
   let hasCompleteContentLengthResponse = false
   const contentLengthMatch = bufferStr.match(/Content-Length:\s*(\d+)/i)
@@ -181,12 +199,13 @@ export const processTLSTunnelResponse = (clientId: string, data: Buffer, httpHan
     const statusCode = httpRsp.statusCode
 
     if (statusCode === 200) {
-      const xmlBody = parseChunkedMessage(httpRsp.body.text)
-      const resolveValue = httpHandler.parseXML(xmlBody)
-      if (xmlBody != null && resolveValue != null) {
+      const isChunkedResponse = /Transfer-Encoding:\s*chunked/i.test(responseData.toString())
+      const xmlBody = isChunkedResponse ? parseChunkedMessage(httpRsp.body.text) : httpRsp.body.text
+      const resolveValue = xmlBody ? httpHandler.parseXML(xmlBody) : null
+      if (xmlBody != null && xmlBody !== '' && resolveValue != null) {
         const actionMatch = xmlBody.match(/<a:Action>([^<]+)<\/a:Action>/)
         const action = actionMatch ? actionMatch[1].split('/').pop() : 'unknown'
-        invokeWsmanLogger.info(`WSMAN RESPONSE: ${action}`)
+        invokeWsmanLogger.debug(`WSMAN RESPONSE: ${action}`)
         invokeWsmanLogger.debug(`WSMAN RESPONSE XML:\n${xmlBody}`)
         clientObj.resolve(resolveValue)
       } else {

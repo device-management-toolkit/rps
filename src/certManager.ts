@@ -58,7 +58,9 @@ export class CertManager {
     const fingerprint: RootCertFingerprint = {} as RootCertFingerprint
     let hashAlgorithm: string | null = null
 
-    this.logger.debug(`Processing PFX with ${pfxobj.certs?.length ?? 0} certificates and ${pfxobj.keys?.length ?? 0} keys`)
+    this.logger.debug(
+      `Processing PFX with ${pfxobj.certs?.length ?? 0} certificates and ${pfxobj.keys?.length ?? 0} keys`
+    )
 
     if (pfxobj.certs?.length > 0) {
       for (let i = 0; i < pfxobj.certs.length; i++) {
@@ -79,7 +81,9 @@ export class CertManager {
           leaf.subject = cert.subject.hash
           leaf.issuer = cert.issuer.hash
           hashAlgorithm = cert.md.algorithm
-          this.logger.debug(`  Certificate[${i}]: LEAF (subject=${cert.subject.hash}, issuer=${cert.issuer.hash}, algo=${hashAlgorithm})`)
+          this.logger.debug(
+            `  Certificate[${i}]: LEAF (subject=${cert.subject.hash}, issuer=${cert.issuer.hash}, algo=${hashAlgorithm})`
+          )
         } else if (cert.subject.hash === cert.issuer.hash) {
           root.pem = pem
           root.subject = cert.subject.hash
@@ -92,7 +96,9 @@ export class CertManager {
           // Generate SHA1 fingerprint of root certificate
           fingerprint.sha1 = this.nodeForge.sha1Create().update(der).digest().toHex()
           this.logger.debug(`  Certificate[${i}]: ROOT (subject=${cert.subject.hash}, self-signed)`)
-          this.logger.debug(`    Fingerprints: SHA256=${fingerprint.sha256.substring(0, 16)}..., SHA1=${fingerprint.sha1.substring(0, 16)}...`)
+          this.logger.debug(
+            `    Fingerprints: SHA256=${fingerprint.sha256.substring(0, 16)}..., SHA1=${fingerprint.sha1.substring(0, 16)}...`
+          )
         } else {
           const inter: CertificateObject = {
             pem,
@@ -100,7 +106,9 @@ export class CertManager {
             subject: cert.subject.hash
           }
           interObj.push(inter)
-          this.logger.debug(`  Certificate[${i}]: INTERMEDIATE (subject=${cert.subject.hash}, issuer=${cert.issuer.hash})`)
+          this.logger.debug(
+            `  Certificate[${i}]: INTERMEDIATE (subject=${cert.subject.hash}, issuer=${cert.issuer.hash})`
+          )
         }
       }
     }
@@ -131,7 +139,9 @@ export class CertManager {
       }
     }
 
-    this.logger.debug(`Certificate chain built: ${provisioningCertificateObj.certChain.length} certificates (leaf -> intermediate -> root)`)
+    this.logger.debug(
+      `Certificate chain built: ${provisioningCertificateObj.certChain.length} certificates (leaf -> intermediate -> root)`
+    )
 
     return { provisioningCertificateObj, fingerprint, hashAlgorithm }
   }

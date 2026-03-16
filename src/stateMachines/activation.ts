@@ -177,6 +177,11 @@ export class Activation {
     this.logger.info(`Initializing TLS tunnel for device ${clientObj.uuid}`)
 
     try {
+      // Close existing tunnel if present to avoid leaking connections
+      if (clientObj.tlsTunnelManager != null) {
+        clientObj.tlsTunnelManager.close()
+      }
+
       // Create TLS tunnel manager
       clientObj.tlsTunnelManager = new TLSTunnelManager(clientObj.ClientSocket, input.clientId)
 
@@ -194,7 +199,7 @@ export class Activation {
       const errMsg = err instanceof globalThis.Error ? err.message : String(err)
       this.logger.error(`Failed to establish TLS tunnel for device ${clientObj.uuid}: ${errMsg}`)
       clientObj.tlsTunnelManager = undefined
-      return false
+      throw err
     }
   }
 
@@ -579,7 +584,9 @@ export class Activation {
       isTLSEnforced: ({ context }) => {
         const isTlsEnforced = devices[context.clientId]?.tlsEnforced === true
         if (isTlsEnforced) {
-          this.logger.info(`Skipping TLS configuration for TLS-enforced device ${devices[context.clientId]?.uuid} - TLS already enabled`)
+          this.logger.info(
+            `Skipping TLS configuration for TLS-enforced device ${devices[context.clientId]?.uuid} - TLS already enabled`
+          )
         }
         return isTlsEnforced
       }
@@ -1251,14 +1258,18 @@ export class Activation {
             actions: [
               assign({ message: ({ event }) => event.output }),
               ({ context }) => {
-                this.logger.info(`CommitChanges completed for TLS-enforced device ${devices[context.clientId]?.uuid}, waiting for AMT to stabilize...`)
+                this.logger.info(
+                  `CommitChanges completed for TLS-enforced device ${devices[context.clientId]?.uuid}, waiting for AMT to stabilize...`
+                )
               }
             ],
             target: 'WAIT_AFTER_TLS_COMMIT'
           },
           onError: {
             actions: ({ context }) => {
-              this.logger.warn(`CommitChanges failed for TLS-enforced device ${devices[context.clientId]?.uuid}, waiting before continuing...`)
+              this.logger.warn(
+                `CommitChanges failed for TLS-enforced device ${devices[context.clientId]?.uuid}, waiting before continuing...`
+              )
             },
             target: 'WAIT_AFTER_TLS_COMMIT'
           }
@@ -1267,7 +1278,9 @@ export class Activation {
       WAIT_AFTER_TLS_COMMIT: {
         entry: ({ context }) => {
           const delaySeconds = Environment.Config.delay_tls_timer ?? 30
-          this.logger.info(`Waiting ${delaySeconds}s after CommitChanges for TLS-enforced device ${devices[context.clientId]?.uuid}`)
+          this.logger.info(
+            `Waiting ${delaySeconds}s after CommitChanges for TLS-enforced device ${devices[context.clientId]?.uuid}`
+          )
         },
         after: {
           DELAY_AFTER_TLS_COMMIT: {

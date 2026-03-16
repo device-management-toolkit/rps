@@ -24,6 +24,8 @@ config.delay_setup_and_config_sync = 5000
 config.delay_tls_put_data_sync = 5000
 // TLS operations may take longer due to AMT reconfiguration (30+ seconds)
 config.delay_tls_timer = config.delay_tls_timer ?? 20
+// Set to true to validate AMT TLS certificates; defaults to false (self-signed certs)
+config.amt_tls_reject_unauthorized = config.amt_tls_reject_unauthorized ?? false
 log.silly(`config: ${JSON.stringify(config, null, 2)}`)
 
 const Environment = {

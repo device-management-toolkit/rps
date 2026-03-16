@@ -24,7 +24,8 @@ import { jest } from '@jest/globals'
 
 const invokeWsmanCallSpy = jest.fn<any>()
 jest.unstable_mockModule('./common.js', () => ({
-  invokeWsmanCall: invokeWsmanCallSpy
+  invokeWsmanCall: invokeWsmanCallSpy,
+  getTLSTimeoutMs: jest.fn()
 }))
 
 const { FeaturesConfiguration } = await import('./featuresConfiguration.js')

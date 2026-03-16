@@ -150,6 +150,13 @@ export class Validator implements IValidator {
         }
       }
     }
+    // Extract TLS enforcement flag from payload
+    if (msg.payload.tlsEnforced != null) {
+      clientObj.tlsEnforced = msg.payload.tlsEnforced === true
+      if (clientObj.tlsEnforced) {
+        this.logger.info(`Device ${payload.uuid} has TLS enforced - enabling TLS tunnel mode`)
+      }
+    }
     // Check version and build compatibility
     this.verifyAMTVersion(payload, 'deactivation')
     // Check for forced deactivation request
@@ -211,6 +218,13 @@ export class Validator implements IValidator {
       this.logger.debug(`Device ${payload.uuid} is in ${mode}.`)
     } else {
       throw new RPSError(`Device ${payload.uuid} is in pre-provisioning mode.`)
+    }
+    // Extract TLS enforcement flag from payload
+    if (msg.payload.tlsEnforced != null) {
+      clientObj.tlsEnforced = msg.payload.tlsEnforced === true
+      if (clientObj.tlsEnforced) {
+        this.logger.info(`Device ${payload.uuid} has TLS enforced - enabling TLS tunnel mode`)
+      }
     }
     if (msg.payload.force) {
       this.logger.debug('bypassing password check')

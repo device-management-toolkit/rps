@@ -23,9 +23,7 @@ import { SyncHostNameEventType } from './stateMachines/maintenance/syncHostName.
 import { SyncIPEventType } from './stateMachines/maintenance/syncIP.js'
 import { SyncDeviceInfoEventType } from './stateMachines/maintenance/syncDeviceInfo.js'
 import { devices } from './devices.js'
-import Logger from './Logger.js'
 
-const tlsLogger = new Logger('TLSDataHandler')
 export class DataProcessor {
   httpHandler: HttpHandler
   constructor(
@@ -155,7 +153,7 @@ export class DataProcessor {
         } else {
           const actionMatch = xmlBody.match(/<a:Action>([^<]+)<\/a:Action>/)
           const action = actionMatch ? actionMatch[1].split('/').pop() : 'unknown'
-          this.logger.info(`WSMAN RESPONSE: ${action}`)
+          this.logger.debug(`WSMAN RESPONSE: ${action}`)
           this.logger.debug(`WSMAN RESPONSE XML:\n${xmlBody}`)
         }
       } else {
@@ -169,8 +167,10 @@ export class DataProcessor {
     if (clientObj.pendingPromise != null) {
       if (clientObj.resolve && clientObj.reject) {
         if (resolveValue) {
+          this.logger.debug(`Device ${clientId} wsman response resolved`)
           clientObj.resolve(resolveValue)
         } else {
+          this.logger.debug(`Device ${clientId} wsman response rejected`)
           clientObj.reject(rejectValue)
         }
       }
@@ -233,7 +233,7 @@ export class DataProcessor {
   ): void {
     const clientObj = devices[clientId]
     clientObj.connectionParams = {
-      port: 16992,
+      port: clientObj.tlsEnforced === true ? 16993 : 16992,
       guid: uuid ?? clientObj.ClientData.payload.uuid,
       username: username ?? clientObj.ClientData.payload.username,
       password: password ?? clientObj.ClientData.payload.password
@@ -255,7 +255,7 @@ export class DataProcessor {
 
   async handleConnectionReset(clientMsg: ClientMsg, clientId: string): Promise<void> {
     const clientObj = devices[clientId]
-    tlsLogger.warn(`CONNECTION RESET from rpc-go`)
+    this.logger.warn(`CONNECTION RESET from rpc-go`)
 
     if (clientObj == null) {
       return

@@ -33,6 +33,7 @@ jest.unstable_mockModule('./common.js', () => ({
   invokeWsmanCall: invokeWsmanCallSpy,
   invokeEnterpriseAssistantCall: jest.fn(),
   processTLSTunnelResponse: jest.fn(),
+  getTLSTimeoutMs: jest.fn(),
   HttpResponseError,
   isDigestRealmValid,
   coalesceMessage
@@ -1988,7 +1989,12 @@ describe('Activation State Machine', () => {
 
     it('should reach PROVISIONED for TLS-enforced Admin mode and skip TLS config', (done) => {
       jest.useFakeTimers()
-      context.certChainPfx = { provisioningCertificateObj: { certChain: ['leaf', 'inter1', 'root'], privateKey: null }, fingerprint: { sha256: '82f2ed575db4abe462499cf550dbff9584980d70a0272894639c3653b9ad932c', sha1: '47d7b7db23f3e300189f54802482b1bd18b945ef' }, hashAlgorithm: 'sha256' }
+      context.certChainPfx = { provisioningCertificateObj: { certChain: [
+            'leaf',
+            'inter1',
+            'root'
+          ], privateKey:
+            null }, fingerprint: { sha256: '82f2ed575db4abe462499cf550dbff9584980d70a0272894639c3653b9ad932c', sha1: '47d7b7db23f3e300189f54802482b1bd18b945ef' }, hashAlgorithm: 'sha256' }
       devices[context.clientId].certObj = context.certChainPfx.provisioningCertificateObj
       devices[clientId].tlsEnforced = true
 

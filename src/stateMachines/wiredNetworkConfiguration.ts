@@ -142,11 +142,7 @@ export class WiredConfiguration {
     input.ieee8021xProfile.Enabled = 2
     input.ieee8021xProfile.AvailableInS0 = true
     input.xmlMessage = input.ips?.IEEE8021xSettings.Put(input.ieee8021xProfile)
-    // Use longer timeout for TLS-enforced devices as Put may trigger AMT reconfiguration
-    const clientObj = devices[input.clientId]
-    const tlsTimeoutMs = (Environment.Config.delay_tls_timer ?? 30) * 1000 + 15000 // delay_tls_timer + 15s buffer
-    const timeoutMs = clientObj?.tlsEnforced === true ? tlsTimeoutMs : undefined
-    return await invokeWsmanCall(input, 2, timeoutMs)
+    return await invokeWsmanCall(input, 2)
   }
 
   setCertificates = async ({ input }: { input: WiredConfigContext }): Promise<any> => {
@@ -294,7 +290,9 @@ export class WiredConfiguration {
                 'Reset Unauth Count',
                 'Reset Retry Count',
                 ({ context }) => {
-                  this.logger.info(`Skipping Put on AMT_EthernetPortSettings for TLS-enforced device ${devices[context.clientId]?.uuid} - network already configured`)
+                  this.logger.info(
+                    `Skipping Put on AMT_EthernetPortSettings for TLS-enforced device ${devices[context.clientId]?.uuid} - network already configured`
+                  )
                 }
               ],
               target: 'CHECK_8021X_OR_SUCCESS'
@@ -361,7 +359,9 @@ export class WiredConfiguration {
         entry: ({ context }) => {
           const clientObj = devices[context.clientId]
           const delaySeconds = Environment.Config.delay_tls_timer ?? 30
-          this.logger.info(`Waiting ${delaySeconds}s after Put on AMT_EthernetPortSettings for TLS-enforced device ${clientObj?.uuid}`)
+          this.logger.info(
+            `Waiting ${delaySeconds}s after Put on AMT_EthernetPortSettings for TLS-enforced device ${clientObj?.uuid}`
+          )
           // Mark tunnel for reset after wait
           if (clientObj != null) {
             clientObj.tlsTunnelNeedsReset = true

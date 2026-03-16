@@ -41,5 +41,6 @@ export const config: RPSConfig = {
   db_provider: 'postgres',
   connection_string: 'postgresql://postgresadmin:admin123@localhost:5432/rpsdb',
   jwt_tenant_property: '',
-  jwt_token_header: ''
+  jwt_token_header: '',
+  amt_tls_reject_unauthorized: false
 }

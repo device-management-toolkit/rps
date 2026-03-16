@@ -112,6 +112,7 @@ export interface RPSConfig {
   enterprise_assistant_url?: string
   jwt_token_header: string
   jwt_tenant_property: string
+  amt_tls_reject_unauthorized: boolean
 }
 export enum AMTRedirectionServiceEnabledStates {
   DISABLED = 32768,
