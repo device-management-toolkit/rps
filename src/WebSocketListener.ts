@@ -110,18 +110,9 @@ export class WebSocketListener {
       if (clientDevice?.ClientSocket != null) {
         clientDevice.ClientSocket.close()
       }
+      return
     }
     try {
-      // Parse to extract method for logging
-      if (typeof message === 'string') {
-        try {
-          const parsed = JSON.parse(message)
-          this.logger.debug(`  <- Method: ${parsed.method}, Status: ${parsed.status}`)
-        } catch {
-          // Not JSON, might be binary or other format
-        }
-      }
-
       let responseMsg: ClientMsg | null
       if (this.dataProcessor) {
         responseMsg = await this.dataProcessor.processData(message, clientId)

@@ -172,11 +172,7 @@ export class CIRAConfiguration {
         envSettings.DetectionStrings = [`${randomUUID()}.com`]
       }
       input.xmlMessage = input.amt.EnvironmentDetectionSettingData.Put(envSettings)
-      // Use longer timeout for TLS-enforced devices as Put may trigger AMT reconfiguration
-      const clientObj = devices[input.clientId]
-      const tlsTimeoutMs = (Environment.Config.delay_tls_timer ?? 30) * 1000 + 15000 // delay_tls_timer + 15s buffer
-      const timeoutMs = clientObj?.tlsEnforced === true ? tlsTimeoutMs : undefined
-      return await invokeWsmanCall(input, 2, timeoutMs)
+      return await invokeWsmanCall(input, 2)
     } else {
       this.logger.error('Null object in putEnvironmentDetectionSettings()')
     }
@@ -185,17 +181,11 @@ export class CIRAConfiguration {
   addTrustedRootCertificate = async ({ input }: { input: CIRAConfigContext }): Promise<any> => {
     if (input.amt != null) {
       const certBlob = input.ciraConfig?.mpsRootCertificate ?? ''
-      this.logger.info(`AddTrustedRootCertificate: cert length=${certBlob.length} chars`)
+      this.logger.debug(`AddTrustedRootCertificate: cert length=${certBlob.length} chars`)
       input.xmlMessage = input.amt.PublicKeyManagementService.AddTrustedRootCertificate({
         CertificateBlob: certBlob
       })
-      this.logger.info(`AddTrustedRootCertificate: XML message length=${input.xmlMessage?.length ?? 0} chars`)
-      // Use longer timeout for TLS-enforced devices as operation may trigger AMT reconfiguration
-      const clientObj = devices[input.clientId]
-      const tlsTimeoutMs = (Environment.Config.delay_tls_timer ?? 30) * 1000 + 15000 // delay_tls_timer + 15s buffer
-      const timeoutMs = clientObj?.tlsEnforced === true ? tlsTimeoutMs : undefined
-      this.logger.info(`AddTrustedRootCertificate: timeout=${timeoutMs ?? 'default'}ms, tlsEnforced=${clientObj?.tlsEnforced}`)
-      return await invokeWsmanCall(input, 2, timeoutMs)
+      return await invokeWsmanCall(input, 2)
     } else {
       this.logger.error('Null object in addTrustedRootCertificate()')
     }
@@ -215,11 +205,7 @@ export class CIRAConfiguration {
         server.CommonName = input.ciraConfig.commonName
       }
       input.xmlMessage = input.amt.RemoteAccessService.AddMPS(server)
-      // Use longer timeout for TLS-enforced devices as operation may trigger AMT reconfiguration
-      const clientObj = devices[input.clientId]
-      const tlsTimeoutMs = (Environment.Config.delay_tls_timer ?? 30) * 1000 + 15000 // delay_tls_timer + 15s buffer
-      const timeoutMs = clientObj?.tlsEnforced === true ? tlsTimeoutMs : undefined
-      return await invokeWsmanCall(input, 2, timeoutMs)
+      return await invokeWsmanCall(input, 2)
     } else {
       this.logger.error('Null object in addMPS()')
     }
@@ -265,11 +251,7 @@ export class CIRAConfiguration {
       const customSelector = `</w:OperationTimeout><wsman:SelectorSet xmlns:wsman="http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd"><wsman:Selector Name="ManagedElement"><EndpointReference xmlns="http://schemas.xmlsoap.org/ws/2004/08/addressing"><Address xmlns="http://schemas.xmlsoap.org/ws/2004/08/addressing">http://schemas.xmlsoap.org/ws/2004/08/addressing/role/anonymous</Address><ReferenceParameters xmlns="http://schemas.xmlsoap.org/ws/2004/08/addressing"><ResourceURI xmlns="http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd">http://intel.com/wbem/wscim/1/amt-schema/1/AMT_ManagementPresenceRemoteSAP</ResourceURI><SelectorSet xmlns="http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd"><Selector Name="CreationClassName">AMT_ManagementPresenceRemoteSAP</Selector><Selector Name="Name">Intel(r) AMT:Management Presence Server 0</Selector><Selector Name="SystemCreationClassName">CIM_ComputerSystem</Selector><Selector Name="SystemName">Intel(r) AMT</Selector></SelectorSet></ReferenceParameters></EndpointReference></wsman:Selector><wsman:Selector Name="PolicySet"><EndpointReference xmlns="http://schemas.xmlsoap.org/ws/2004/08/addressing"><Address xmlns="http://schemas.xmlsoap.org/ws/2004/08/addressing">http://schemas.xmlsoap.org/ws/2004/08/addressing/role/anonymous</Address><ReferenceParameters xmlns="http://schemas.xmlsoap.org/ws/2004/08/addressing"><ResourceURI xmlns="http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd">http://intel.com/wbem/wscim/1/amt-schema/1/AMT_RemoteAccessPolicyRule</ResourceURI><SelectorSet xmlns="http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd"><Selector Name="CreationClassName">AMT_RemoteAccessPolicyRule</Selector><Selector Name="PolicyRuleName">${policyName}</Selector><Selector Name="SystemCreationClassName">CIM_ComputerSystem</Selector><Selector Name="SystemName">Intel(r) AMT</Selector></SelectorSet></ReferenceParameters></EndpointReference></wsman:Selector></wsman:SelectorSet>`
       input.xmlMessage = baseXml.replace('</w:OperationTimeout>', customSelector.trim())
 
-      // Use longer timeout for TLS-enforced devices as Put may trigger AMT reconfiguration
-      const clientObj = devices[input.clientId]
-      const tlsTimeoutMs = (Environment.Config.delay_tls_timer ?? 30) * 1000 + 15000 // delay_tls_timer + 15s buffer
-      const timeoutMs = clientObj?.tlsEnforced === true ? tlsTimeoutMs : undefined
-      return await invokeWsmanCall(input, 2, timeoutMs)
+      return await invokeWsmanCall(input, 2)
     } else {
       this.logger.error('Null object in putRemoteAccessPolicyAppliesToMPS()')
     }
@@ -314,16 +296,10 @@ export class CIRAConfiguration {
         event.output.Envelope.Body?.RequestStateChange_OUTPUT?.ReturnValue === 0,
       shouldRetry: ({ context, event }) => context.retryCount < 3 && event.output instanceof UNEXPECTED_PARSE_ERROR,
       isRemoteAccessPolicyExists: ({ context }) => {
-        // Handle case where remoteAccessPolicies is not an array (single object or undefined)
         if (!Array.isArray(context.remoteAccessPolicies)) {
-          context.remoteAccessPolicies = []
           return false
         }
-        context.remoteAccessPolicies = context.remoteAccessPolicies.slice(1)
-        if (context.remoteAccessPolicies.length > 0) {
-          return true
-        }
-        return false
+        return context.remoteAccessPolicies.length > 1
       }
     },
     actions: {
@@ -334,7 +310,11 @@ export class CIRAConfiguration {
         devices[context.clientId].unauthCount = 0
       },
       'Reset Retry Count': assign({ retryCount: ({ context, event }) => 0 }),
-      'Increment Retry Count': assign({ retryCount: ({ context, event }) => context.retryCount + 1 })
+      'Increment Retry Count': assign({ retryCount: ({ context, event }) => context.retryCount + 1 }),
+      'Advance Remote Access Policies': assign({
+        remoteAccessPolicies: ({ context }) =>
+          Array.isArray(context.remoteAccessPolicies) ? context.remoteAccessPolicies.slice(1) : []
+      })
     }
   }).createMachine({
     context: ({ input }) => ({
@@ -739,6 +719,7 @@ export class CIRAConfiguration {
         always: [
           {
             guard: 'isRemoteAccessPolicyExists',
+            actions: 'Advance Remote Access Policies',
             target: 'PUT_REMOTE_ACCESS_POLICY_APPLIESTOMPS'
           },
           {

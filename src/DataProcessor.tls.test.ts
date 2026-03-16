@@ -17,7 +17,14 @@ describe('DataProcessor TLS methods', () => {
 
   beforeEach(() => {
     dataProcessor = new DataProcessor(
-      { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn(), verbose: jest.fn(), silly: jest.fn() } as any,
+      {
+        debug: jest.fn(),
+        info: jest.fn(),
+        warn: jest.fn(),
+        error: jest.fn(),
+        verbose: jest.fn(),
+        silly: jest.fn()
+      } as any,
       {} as any
     )
   })
@@ -34,7 +41,16 @@ describe('DataProcessor TLS methods', () => {
         tlsTunnelManager: { injectData: injectDataSpy } as any
       } as any
 
-      const clientMsg: ClientMsg = { method: 'tls_data', payload: 'dGVzdA==', apiKey: '', appVersion: '', protocolVersion: '', status: '', message: '', tenantId: '' }
+      const clientMsg: ClientMsg = {
+        method: 'tls_data',
+        payload: 'dGVzdA==',
+        apiKey: '',
+        appVersion: '',
+        protocolVersion: '',
+        status: '',
+        message: '',
+        tenantId: ''
+      }
       await dataProcessor.handleTLSData(clientMsg, clientId)
       expect(injectDataSpy).not.toHaveBeenCalled()
     })
@@ -47,7 +63,16 @@ describe('DataProcessor TLS methods', () => {
       } as any
 
       const testData = Buffer.from('hello TLS data')
-      const clientMsg: ClientMsg = { method: 'tls_data', payload: testData.toString('base64'), apiKey: '', appVersion: '', protocolVersion: '', status: '', message: '', tenantId: '' }
+      const clientMsg: ClientMsg = {
+        method: 'tls_data',
+        payload: testData.toString('base64'),
+        apiKey: '',
+        appVersion: '',
+        protocolVersion: '',
+        status: '',
+        message: '',
+        tenantId: ''
+      }
       await dataProcessor.handleTLSData(clientMsg, clientId)
       expect(injectDataSpy).toHaveBeenCalledTimes(1)
       expect(Buffer.compare(injectDataSpy.mock.calls[0][0] as Buffer, testData)).toBe(0)
@@ -59,7 +84,16 @@ describe('DataProcessor TLS methods', () => {
         tlsTunnelManager: undefined
       } as any
 
-      const clientMsg: ClientMsg = { method: 'tls_data', payload: 'dGVzdA==', apiKey: '', appVersion: '', protocolVersion: '', status: '', message: '', tenantId: '' }
+      const clientMsg: ClientMsg = {
+        method: 'tls_data',
+        payload: 'dGVzdA==',
+        apiKey: '',
+        appVersion: '',
+        protocolVersion: '',
+        status: '',
+        message: '',
+        tenantId: ''
+      }
       await dataProcessor.handleTLSData(clientMsg, clientId)
       // Should not throw
     })
@@ -71,7 +105,16 @@ describe('DataProcessor TLS methods', () => {
         tlsTunnelManager: { injectData: injectDataSpy } as any
       } as any
 
-      const clientMsg: ClientMsg = { method: 'tls_data', payload: null as any, apiKey: '', appVersion: '', protocolVersion: '', status: '', message: '', tenantId: '' }
+      const clientMsg: ClientMsg = {
+        method: 'tls_data',
+        payload: null as any,
+        apiKey: '',
+        appVersion: '',
+        protocolVersion: '',
+        status: '',
+        message: '',
+        tenantId: ''
+      }
       await dataProcessor.handleTLSData(clientMsg, clientId)
       expect(injectDataSpy).not.toHaveBeenCalled()
     })
@@ -88,7 +131,16 @@ describe('DataProcessor TLS methods', () => {
         reject: null
       } as any
 
-      const clientMsg: ClientMsg = { method: 'connection_reset', payload: '', apiKey: '', appVersion: '', protocolVersion: '', status: '', message: '', tenantId: '' }
+      const clientMsg: ClientMsg = {
+        method: 'connection_reset',
+        payload: '',
+        apiKey: '',
+        appVersion: '',
+        protocolVersion: '',
+        status: '',
+        message: '',
+        tenantId: ''
+      }
       await dataProcessor.handleConnectionReset(clientMsg, clientId)
 
       expect(closeSpy).toHaveBeenCalled()
@@ -107,7 +159,16 @@ describe('DataProcessor TLS methods', () => {
         reject: rejectSpy
       } as any
 
-      const clientMsg: ClientMsg = { method: 'connection_reset', payload: '', apiKey: '', appVersion: '', protocolVersion: '', status: '', message: '', tenantId: '' }
+      const clientMsg: ClientMsg = {
+        method: 'connection_reset',
+        payload: '',
+        apiKey: '',
+        appVersion: '',
+        protocolVersion: '',
+        status: '',
+        message: '',
+        tenantId: ''
+      }
       await dataProcessor.handleConnectionReset(clientMsg, clientId)
 
       expect(rejectSpy).toHaveBeenCalledTimes(1)
@@ -116,7 +177,16 @@ describe('DataProcessor TLS methods', () => {
 
     it('should return early when client object does not exist', async () => {
       // clientId not in devices
-      const clientMsg: ClientMsg = { method: 'connection_reset', payload: '', apiKey: '', appVersion: '', protocolVersion: '', status: '', message: '', tenantId: '' }
+      const clientMsg: ClientMsg = {
+        method: 'connection_reset',
+        payload: '',
+        apiKey: '',
+        appVersion: '',
+        protocolVersion: '',
+        status: '',
+        message: '',
+        tenantId: ''
+      }
       await dataProcessor.handleConnectionReset(clientMsg, clientId)
       // Should not throw
     })
@@ -128,7 +198,16 @@ describe('DataProcessor TLS methods', () => {
         reject: null
       } as any
 
-      const clientMsg: ClientMsg = { method: 'connection_reset', payload: '', apiKey: '', appVersion: '', protocolVersion: '', status: '', message: '', tenantId: '' }
+      const clientMsg: ClientMsg = {
+        method: 'connection_reset',
+        payload: '',
+        apiKey: '',
+        appVersion: '',
+        protocolVersion: '',
+        status: '',
+        message: '',
+        tenantId: ''
+      }
       await dataProcessor.handleConnectionReset(clientMsg, clientId)
 
       expect(devices[clientId].tlsTunnelNeedsReset).toBe(true)

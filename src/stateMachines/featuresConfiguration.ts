@@ -13,8 +13,6 @@ import {
   AMTUserConsent
 } from '../models/index.js'
 import { type CommonContext, invokeWsmanCall } from './common.js'
-import { devices } from '../devices.js'
-import { Environment } from '../utils/Environment.js'
 
 export interface FeatureContext extends CommonContext {
   isRedirectionChanged: boolean
@@ -69,11 +67,7 @@ export class FeaturesConfiguration {
     delete (redirectionService as any).AccessLog
 
     input.xmlMessage = input.amt != null ? input.amt.RedirectionService.Put(redirectionService) : ''
-    // Use longer timeout for TLS-enforced devices as Put may trigger AMT reconfiguration
-    const clientObj = devices[input.clientId]
-    const tlsTimeoutMs = (Environment.Config.delay_tls_timer ?? 30) * 1000 + 15000 // delay_tls_timer + 15s buffer
-    const timeoutMs = clientObj?.tlsEnforced === true ? tlsTimeoutMs : undefined
-    return await invokeWsmanCall(input, 2, timeoutMs)
+    return await invokeWsmanCall(input, 2)
   }
 
   putIpsOptInService = async ({ input }: { input: FeatureContext }): Promise<any> => {
@@ -82,11 +76,7 @@ export class FeaturesConfiguration {
       IPS_OptInService: JSON.parse(JSON.stringify(ipsOptInService))
     }
     input.xmlMessage = input.ips != null ? input.ips.OptInService.Put(ipsOptInSvcResponse) : ''
-    // Use longer timeout for TLS-enforced devices as Put may trigger AMT reconfiguration
-    const clientObj = devices[input.clientId]
-    const tlsTimeoutMs = (Environment.Config.delay_tls_timer ?? 30) * 1000 + 15000 // delay_tls_timer + 15s buffer
-    const timeoutMs = clientObj?.tlsEnforced === true ? tlsTimeoutMs : undefined
-    return await invokeWsmanCall(input, 2, timeoutMs)
+    return await invokeWsmanCall(input, 2)
   }
 
   machine = setup({

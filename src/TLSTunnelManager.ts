@@ -9,6 +9,7 @@ import type Server from 'ws'
 import ClientResponseMsg from './utils/ClientResponseMsg.js'
 import { AMT_ODCA_ROOT_CERTS, AMT_ALLOWED_ISSUERS } from './certs/amt-odca.js'
 import Logger from './Logger.js'
+import { Environment } from './utils/Environment.js'
 
 const logger = new Logger('TLSTunnelManager')
 
@@ -44,7 +45,9 @@ export class TLSTunnelManager {
       write: (chunk: Buffer, encoding: BufferEncoding, callback: (error?: Error | null) => void): void => {
         // Buffer the chunk - will be flushed after TLS write completes
         this.writeBuffer.push(Buffer.from(chunk))
-        logger.debug(`Duplex buffered ${chunk.length} bytes (total buffered: ${this.writeBuffer.reduce((sum, b) => sum + b.length, 0)} bytes)`)
+        logger.debug(
+          `Duplex buffered ${chunk.length} bytes (total buffered: ${this.writeBuffer.reduce((sum, b) => sum + b.length, 0)} bytes)`
+        )
 
         // Schedule flush on next tick to collect all TLS record fragments
         if (!this.flushPending) {
@@ -118,7 +121,7 @@ export class TLSTunnelManager {
         {
           socket: this.duplexStream as any,
           ca: AMT_ODCA_ROOT_CERTS,
-          rejectUnauthorized: false,
+          rejectUnauthorized: Environment.Config.amt_tls_reject_unauthorized === true,
           checkServerIdentity: (hostname: string, cert: tls.PeerCertificate): Error | undefined => {
             return this.validateAMTCertificate(cert)
           }
@@ -146,19 +149,22 @@ export class TLSTunnelManager {
   }
 
   private validateAMTCertificate(cert: tls.PeerCertificate): Error | undefined {
+    if (Environment.Config.amt_tls_reject_unauthorized === false) {
+      return undefined
+    }
+
     const issuerCN = cert.issuer?.CN ?? ''
     const issuerO = cert.issuer?.O ?? ''
     const subjectCN = cert.subject?.CN ?? ''
 
     const isValidIssuer = AMT_ALLOWED_ISSUERS.some(
-      (allowed) =>
-        issuerCN.includes(allowed) ||
-        issuerO.includes(allowed) ||
-        subjectCN.includes(allowed)
+      (allowed) => issuerCN.includes(allowed) || issuerO.includes(allowed) || subjectCN.includes(allowed)
     )
 
     if (!isValidIssuer) {
-      logger.warn(`Cert not from known AMT issuer: ${subjectCN}`)
+      return new Error(
+        `Certificate not from known AMT issuer. Subject: ${subjectCN}, Issuer CN: ${issuerCN}, Issuer O: ${issuerO}`
+      )
     }
 
     return undefined

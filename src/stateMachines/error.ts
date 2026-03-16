@@ -9,8 +9,6 @@ import { devices } from '../devices.js'
 import { type HttpZResponseModel } from 'http-z'
 import Logger from '../Logger.js'
 
-const errorLogger = new Logger('ErrorHandler')
-
 const httpHandler = new HttpHandler()
 export interface ErrorContext {
   message: HttpZResponseModel | null
@@ -43,7 +41,7 @@ export class Error {
     // For TLS enforced mode, we need to close the old tunnel so a new one is created for the retry
     const connectionHeader = message?.headers?.find((item) => item.name.toLowerCase() === 'connection')
     if (connectionHeader?.value?.toLowerCase() === 'close' && clientObj.tlsEnforced === true) {
-      errorLogger.debug(`Connection: close detected for ${clientId}, closing TLS tunnel for re-establishment`)
+      this.logger.debug(`Connection: close detected for ${clientId}, closing TLS tunnel for re-establishment`)
       // Close the existing TLS tunnel - a new one will be created when the retry happens
       if (clientObj.tlsTunnelManager != null) {
         clientObj.tlsTunnelManager.close()

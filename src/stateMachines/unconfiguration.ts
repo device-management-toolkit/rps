@@ -979,7 +979,8 @@ export class Unconfiguration {
           { guard: 'isTLSEnforced', target: 'ENUMERATE_PUBLIC_KEY_CERTIFICATE' },
           { guard: 'tlsSettingDataEnabled', target: 'DISABLE_TLS_SETTING_DATA' },
           { guard: 'is8021xProfileDisabled', target: 'ENUMERATE_PUBLIC_PRIVATE_KEY_PAIR' },
-          { target: 'ENUMERATE_PUBLIC_KEY_CERTIFICATE' }]
+          { target: 'ENUMERATE_PUBLIC_KEY_CERTIFICATE' }
+        ]
       },
       DISABLE_TLS_SETTING_DATA: {
         invoke: {

@@ -16,8 +16,6 @@ import { UNEXPECTED_PARSE_ERROR } from '../utils/constants.js'
 import { WiredConfiguration } from './wiredNetworkConfiguration.js'
 import { WiFiConfiguration } from './wifiNetworkConfiguration.js'
 import { ProxyConfiguration } from './proxyConfiguration.js'
-import { Environment } from '../utils/Environment.js'
-
 export interface NetworkConfigContext extends CommonContext {
   amtProfile: AMTConfiguration | null
   retryCount: number
@@ -46,11 +44,7 @@ export class NetworkConfiguration {
 
   putGeneralSettings = async ({ input }: { input: NetworkConfigContext }): Promise<any> => {
     input.xmlMessage = input.amt.GeneralSettings.Put(input.generalSettings)
-    // Use longer timeout for TLS-enforced devices as Put may trigger AMT reconfiguration
-    const clientObj = devices[input.clientId]
-    const tlsTimeoutMs = (Environment.Config.delay_tls_timer ?? 30) * 1000 + 15000 // delay_tls_timer + 15s buffer
-    const timeoutMs = clientObj?.tlsEnforced === true ? tlsTimeoutMs : undefined
-    return await invokeWsmanCall(input, 0, timeoutMs)
+    return await invokeWsmanCall(input, 0)
   }
 
   isNotAMTNetworkEnabled = ({ context }: { context: NetworkConfigContext }): boolean => {
