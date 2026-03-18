@@ -49,6 +49,7 @@ export interface ActivationContext extends CommonContext {
   canActivate: boolean
   shbcCCMComplete: boolean
   shbcACMComplete: boolean
+  tlsTunnelCCMComplete: boolean
   friendlyName?: string | null
 }
 
@@ -174,14 +175,15 @@ export class Activation {
       return true
     }
 
+    // If tunnel already exists (e.g., from --tls-tunnel activation), skip re-creation
+    if (clientObj.tlsTunnelManager != null) {
+      this.logger.debug(`TLS tunnel already active for device ${clientObj.uuid}, skipping`)
+      return true
+    }
+
     this.logger.info(`Initializing TLS tunnel for device ${clientObj.uuid}`)
 
     try {
-      // Close existing tunnel if present to avoid leaking connections
-      if (clientObj.tlsTunnelManager != null) {
-        clientObj.tlsTunnelManager.close()
-      }
-
       // Create TLS tunnel manager
       clientObj.tlsTunnelManager = new TLSTunnelManager(clientObj.ClientSocket, input.clientId)
 
@@ -405,9 +407,16 @@ export class Activation {
   saveDeviceInfoToSecretProvider = async ({ input }: { input: ActivationContext }): Promise<boolean> => {
     const clientObj = devices[input.clientId]
     if (clientObj.amtPassword != null && (clientObj.mebxPassword != null || clientObj.action === 'ccmactivate')) {
+      const isACMProfile = input.profile?.activation === ClientAction.ADMINCTLMODE
       const data: DeviceCredentials = {
         AMT_PASSWORD: clientObj.amtPassword,
-        MEBX_PASSWORD: clientObj.action === ClientAction.ADMINCTLMODE ? clientObj.mebxPassword : null
+        MEBX_PASSWORD: isACMProfile ? clientObj.mebxPassword : null
+      }
+
+      // Include TLS leaf cert if --tls-tunnel activation was used (already saved earlier,
+      // but include here too to ensure it persists alongside passwords)
+      if (clientObj.tlsTunnelActivation && clientObj.tls?.issuedCertPEM) {
+        data.TLS_ISSUED_CERTIFICATE = clientObj.tls.issuedCertPEM
       }
 
       await this.configurator.secretsManager.writeSecretWithObject(`devices/${clientObj.uuid}`, data)
@@ -466,6 +475,155 @@ export class Activation {
     return await invokeWsmanCall(input)
   }
 
+  fetchMPSRootKey = async ({ input }: { input: ActivationContext }): Promise<boolean> => {
+    const clientObj = devices[input.clientId]
+
+    this.logger.info(`Fetching MPS root key from vault for device ${clientObj.uuid}`)
+
+    const mpsCerts: any = await this.configurator.secretsManager.getSecretAtPath('MPSCerts')
+    if (!mpsCerts?.root_key) {
+      throw new globalThis.Error('MPS root key not found in vault at MPSCerts')
+    }
+
+    if (!clientObj.tls) {
+      clientObj.tls = {} as any
+    }
+
+    // Parse MPS root private key and store for leaf cert signing
+    clientObj.tls.rootCertKey = this.nodeForge.privateKeyFromPem(mpsCerts.root_key)
+
+    // Store MPS root CA cert PEM for extracting issuer attributes in addCertificate
+    if (mpsCerts.web_tls_config?.ca) {
+      clientObj.tls.mpsRootCertPEM = mpsCerts.web_tls_config.ca
+    }
+
+    this.logger.info(`MPS root key loaded for device ${clientObj.uuid}`)
+    return true
+  }
+
+  private enumerateAndPull = async (input: ActivationContext, resource: { Enumerate: () => string; Pull: (context: string) => string }): Promise<any> => {
+    input.xmlMessage = resource.Enumerate()
+    const enumResult: any = await invokeWsmanCall(input)
+    input.xmlMessage = resource.Pull(enumResult.Envelope.Body?.EnumerateResponse?.EnumerationContext)
+    const pullResult: any = await invokeWsmanCall(input)
+    return pullResult
+  }
+
+  checkAmtTlsState = async ({ input }: { input: ActivationContext }): Promise<{ tlsEnabled: boolean; hasCredentialContext: boolean }> => {
+    const clientObj = devices[input.clientId]
+    this.logger.info(`Checking AMT TLS state for device ${clientObj.uuid}`)
+
+    try {
+      const tlsResult = await this.enumerateAndPull(input, input.amt.TLSSettingData)
+      const tlsSettings = tlsResult?.Envelope?.Body?.PullResponse?.Items?.AMT_TLSSettingData
+      const remoteTls = Array.isArray(tlsSettings) ? tlsSettings[0] : tlsSettings
+      const tlsEnabled = remoteTls?.Enabled === true || remoteTls?.Enabled === 'true'
+
+      if (!tlsEnabled) {
+        this.logger.info(`TLS not enabled on device ${clientObj.uuid}`)
+        return { tlsEnabled: false, hasCredentialContext: false }
+      }
+
+      const credResult = await this.enumerateAndPull(input, input.amt.TLSCredentialContext)
+      const hasCredentialContext = credResult?.Envelope?.Body?.PullResponse?.Items?.AMT_TLSCredentialContext != null
+
+      this.logger.info(`Device ${clientObj.uuid} TLS state: enabled=${tlsEnabled}, credentialContext=${hasCredentialContext}`)
+      return { tlsEnabled, hasCredentialContext }
+    } catch (err: unknown) {
+      const errMsg = err instanceof globalThis.Error ? err.message : String(err)
+      this.logger.error(`Failed to check TLS state for device ${clientObj.uuid}: ${errMsg}`)
+      return { tlsEnabled: false, hasCredentialContext: false }
+    }
+  }
+
+  saveTlsTunnelCerts = async ({ input }: { input: ActivationContext }): Promise<boolean> => {
+    const clientObj = devices[input.clientId]
+    const isACMProfile = input.profile?.activation === ClientAction.ADMINCTLMODE
+    if (clientObj.amtPassword != null && (clientObj.mebxPassword != null || clientObj.action === 'ccmactivate')) {
+      const data: DeviceCredentials = {
+        AMT_PASSWORD: clientObj.amtPassword,
+        MEBX_PASSWORD: isACMProfile ? clientObj.mebxPassword : null,
+        TLS_ISSUED_CERTIFICATE: clientObj.tls?.issuedCertPEM
+      }
+      await this.configurator.secretsManager.writeSecretWithObject(`devices/${clientObj.uuid}`, data)
+      this.logger.info(`Stored TLS leaf cert in vault for device ${clientObj.uuid}`)
+      return true
+    }
+    this.logger.error('Null object in saveTlsTunnelCerts()')
+    throw new globalThis.Error('Missing prerequisites for saving TLS tunnel certs')
+  }
+
+  signalPortSwitch = async ({ input }: { input: ActivationContext }): Promise<boolean> => {
+    const clientObj = devices[input.clientId]
+    const delaySeconds = Environment.Config.delay_tls_timer
+
+    const portSwitchPayload = JSON.stringify({
+      port: '16993',
+      delay: delaySeconds
+    })
+
+    this.logger.info(`Sending port_switch to rpc-go for device ${clientObj.uuid} (delay: ${delaySeconds}s)`)
+
+    const responseMessage = ClientResponseMsg.get(input.clientId, portSwitchPayload, 'port_switch', 'ok')
+    clientObj.ClientSocket?.send(JSON.stringify(responseMessage))
+
+    // Wait for PORT_SWITCH_ACK from rpc-go
+    const ackTimeout = (delaySeconds + 60) * 1000 // delay + 60s for connection retries
+    await new Promise<void>((resolve, reject) => {
+      clientObj.resolve = resolve
+      clientObj.reject = reject
+      clientObj.pendingPromise = new Promise(() => {})
+
+      const timer = setTimeout(() => {
+        reject(new globalThis.Error('PORT_SWITCH_ACK timeout'))
+      }, ackTimeout)
+
+      const origResolve = resolve
+      clientObj.resolve = (value: unknown) => {
+        clearTimeout(timer)
+        origResolve(value as void)
+      }
+      const origReject = reject
+      clientObj.reject = (value: unknown) => {
+        clearTimeout(timer)
+        origReject(value)
+      }
+    })
+
+    this.logger.info(`PORT_SWITCH_ACK received for device ${clientObj.uuid}`)
+    return true
+  }
+
+  initializeTlsTunnelConnection = async ({ input }: { input: ActivationContext }): Promise<boolean> => {
+    const clientObj = devices[input.clientId]
+
+    this.logger.info(`Initializing TLS tunnel connection for device ${clientObj.uuid}`)
+
+    try {
+      // Create TLS tunnel manager
+      clientObj.tlsTunnelManager = new TLSTunnelManager(clientObj.ClientSocket, input.clientId)
+
+      // Connect (initiates TLS handshake)
+      await clientObj.tlsTunnelManager.connect()
+
+      // Set up data handler to process responses
+      clientObj.tlsTunnelManager.onData((data: Buffer) => {
+        processTLSTunnelResponse(input.clientId, data, input.httpHandler)
+      })
+
+      // Flip to TLS mode so all subsequent WSMAN calls route through the tunnel
+      clientObj.tlsEnforced = true
+
+      this.logger.info(`TLS tunnel established for device ${clientObj.uuid} - switching to TLS mode`)
+      return true
+    } catch (err: unknown) {
+      const errMsg = err instanceof globalThis.Error ? err.message : String(err)
+      this.logger.error(`Failed to establish TLS tunnel for device ${clientObj.uuid}: ${errMsg}`)
+      clientObj.tlsTunnelManager = undefined
+      throw err
+    }
+  }
+
   machine = setup({
     types: {} as {
       context: ActivationContext
@@ -490,6 +648,12 @@ export class Activation {
       saveDeviceInfoToMPS: fromPromise(this.saveDeviceInfoToMPS.bind(this)),
       changeAMTPassword: fromPromise(this.changeAMTPassword.bind(this)),
       invokeUnprovision: fromPromise(this.invokeUnprovision),
+      checkAmtTlsState: fromPromise(this.checkAmtTlsState.bind(this)),
+      fetchMPSRootKey: fromPromise(this.fetchMPSRootKey.bind(this)),
+      saveTlsTunnelCerts: fromPromise(this.saveTlsTunnelCerts.bind(this)),
+      signalPortSwitch: fromPromise(this.signalPortSwitch.bind(this)),
+      initializeTlsTunnelConnection: fromPromise(this.initializeTlsTunnelConnection.bind(this)),
+      tlsTunnelProvisioning: this.tls.machine,
       unconfiguration: this.unconfiguration.machine,
       networkConfiguration: this.networkConfiguration.machine,
       featuresConfiguration: this.featuresConfiguration.machine,
@@ -498,10 +662,13 @@ export class Activation {
       error: this.error.machine
     },
     delays: {
-      DELAY_TIME_ACTIVATION_SYNC: () => Environment.Config.delay_activation_sync,
-      DELAY_AFTER_TLS_COMMIT: () => (Environment.Config.delay_tls_timer ?? 30) * 1000
+      DELAY_TIME_ACTIVATION_SYNC: () => Environment.Config.delay_activation_sync
     },
     guards: {
+      isTlsTunnelActivation: ({ context }) => {
+        const clientObj = devices[context.clientId]
+        return clientObj?.tlsTunnelActivation === true && clientObj?.tlsEnforced !== true
+      },
       isAdminMode: ({ context }) =>
         context.profile != null ? context.profile.activation === ClientAction.ADMINCTLMODE : false,
       isSHBC: ({ context }) => {
@@ -567,7 +734,9 @@ export class Activation {
       canUpgrade: ({ context }) => {
         if (context.profile != null && context.isActivated != null) {
           return (
-            (devices[context.clientId].ClientData.payload.currentMode === 1 || context.shbcCCMComplete === true) &&
+            (devices[context.clientId].ClientData.payload.currentMode === 1 ||
+              context.shbcCCMComplete === true ||
+              context.tlsTunnelCCMComplete === true) &&
             context.profile.activation === ClientAction.ADMINCTLMODE
           )
         }
@@ -617,6 +786,7 @@ export class Activation {
       hasToUpgrade: input.hasToUpgrade,
       shbcCCMComplete: input.shbcCCMComplete,
       shbcACMComplete: input.shbcACMComplete,
+      tlsTunnelCCMComplete: input.tlsTunnelCCMComplete,
       generalSettings: input.generalSettings,
       targetAfterError: input.targetAfterError,
       httpHandler: new HttpHandler(),
@@ -675,6 +845,11 @@ export class Activation {
           },
           {
             guard: 'isSHBC',
+            target: 'INIT_TLS_TUNNEL'
+          },
+          {
+            // For --tls-tunnel activation: skip domain cert fetch, do CCM first, then ACM upgrade after tunnel
+            guard: 'isTlsTunnelActivation',
             target: 'INIT_TLS_TUNNEL'
           },
           {
@@ -822,11 +997,24 @@ export class Activation {
             target: 'IPS_HOST_BASED_SETUP_SERVICE'
           },
           {
+            // Already activated with --tls-tunnel — check if TLS is configured before continuing
+            guard: ({ context }) =>
+              context.isActivated === true &&
+              devices[context.clientId]?.tlsTunnelActivation === true &&
+              devices[context.clientId]?.tlsEnforced !== true,
+            target: 'CHECK_AMT_TLS_STATE'
+          },
+          {
             guard: 'isActivated',
             target: 'CHANGE_AMT_PASSWORD'
           },
           {
             guard: 'isSHBC',
+            target: 'SETUP'
+          },
+          {
+            // For --tls-tunnel activation: force CCM path first, ACM upgrade happens after tunnel
+            guard: 'isTlsTunnelActivation',
             target: 'SETUP'
           },
           {
@@ -1180,6 +1368,11 @@ export class Activation {
             target: 'GET_AMT_DOMAIN_CERT'
           },
           {
+            // For --tls-tunnel: skip MEBx password now, it will be set after port switch during ACM upgrade
+            guard: 'isTlsTunnelActivation',
+            target: 'SAVE_DEVICE_TO_SECRET_PROVIDER'
+          },
+          {
             guard: 'isAdminMode',
             target: 'SET_MEBX_PASSWORD'
           },
@@ -1240,66 +1433,17 @@ export class Activation {
           id: 'save-device-to-mps',
           onDone: [
             {
-              // For TLS-enforced devices, commit changes after activation before further configuration
-              guard: 'isTLSEnforced',
-              target: 'COMMIT_CHANGES_FOR_TLS'
+              // For --tls-tunnel first-time activation (AMT 11-18): fetch MPS root key, provision TLS, switch port, then continue over tunnel
+              // Skip if already activated or TLS tunnel CCM phase already completed (ACM upgrade path)
+              guard: ({ context }) =>
+                devices[context.clientId]?.tlsTunnelActivation === true &&
+                !context.isActivated &&
+                !context.tlsTunnelCCMComplete,
+              target: 'FETCH_MPS_ROOT_KEY'
             },
             { target: 'UNCONFIGURATION' }
           ],
           onError: 'SAVE_DEVICE_TO_MPS_FAILURE'
-        }
-      },
-      COMMIT_CHANGES_FOR_TLS: {
-        invoke: {
-          src: 'commitChanges',
-          input: ({ context }) => context,
-          id: 'commit-changes-for-tls',
-          onDone: {
-            actions: [
-              assign({ message: ({ event }) => event.output }),
-              ({ context }) => {
-                this.logger.info(
-                  `CommitChanges completed for TLS-enforced device ${devices[context.clientId]?.uuid}, waiting for AMT to stabilize...`
-                )
-              }
-            ],
-            target: 'WAIT_AFTER_TLS_COMMIT'
-          },
-          onError: {
-            actions: ({ context }) => {
-              this.logger.warn(
-                `CommitChanges failed for TLS-enforced device ${devices[context.clientId]?.uuid}, waiting before continuing...`
-              )
-            },
-            target: 'WAIT_AFTER_TLS_COMMIT'
-          }
-        }
-      },
-      WAIT_AFTER_TLS_COMMIT: {
-        entry: ({ context }) => {
-          const delaySeconds = Environment.Config.delay_tls_timer ?? 30
-          this.logger.info(
-            `Waiting ${delaySeconds}s after CommitChanges for TLS-enforced device ${devices[context.clientId]?.uuid}`
-          )
-        },
-        after: {
-          DELAY_AFTER_TLS_COMMIT: {
-            actions: ({ context }) => {
-              // Mark tunnel for reset - it will be stale after the long wait
-              const clientObj = devices[context.clientId]
-              if (clientObj != null) {
-                clientObj.tlsTunnelNeedsReset = true
-                clientObj.amtReconfiguring = false // Clear to prevent double delay in invokeWsmanCall
-                if (clientObj.tlsTunnelManager != null) {
-                  clientObj.tlsTunnelManager.close()
-                  clientObj.tlsTunnelManager = undefined
-                  clientObj.tlsTunnelSessionId = undefined
-                }
-                this.logger.info(`TLS tunnel marked for reset after delay for device ${clientObj.uuid}`)
-              }
-            },
-            target: 'UNCONFIGURATION'
-          }
         }
       },
       SAVE_DEVICE_TO_SECRET_PROVIDER_FAILURE: {
@@ -1309,6 +1453,164 @@ export class Activation {
       SAVE_DEVICE_TO_MPS_FAILURE: {
         entry: assign({ errorMessage: 'Failed to save device information to MPS' }),
         always: 'FAILED'
+      },
+      CHECK_AMT_TLS_STATE: {
+        invoke: {
+          src: 'checkAmtTlsState',
+          input: ({ context }) => context,
+          id: 'check-amt-tls-state',
+          onDone: [
+            {
+              // TLS is configured on AMT — switch to 16993
+              guard: ({ event }) => {
+                const result = (event as any).output
+                return result?.tlsEnabled === true && result?.hasCredentialContext === true
+              },
+              target: 'SIGNAL_ACTIVATED_PORT_SWITCH'
+            },
+            {
+              // TLS not configured — proceed normally over 16992
+              target: 'CHANGE_AMT_PASSWORD'
+            }
+          ],
+          onError: {
+            // Can't determine TLS state — proceed without TLS (best effort)
+            target: 'CHANGE_AMT_PASSWORD'
+          }
+        }
+      },
+      SIGNAL_ACTIVATED_PORT_SWITCH: {
+        invoke: {
+          src: 'signalPortSwitch',
+          input: ({ context }) => context,
+          id: 'signal-activated-port-switch',
+          onDone: 'INIT_ACTIVATED_TLS_TUNNEL',
+          onError: {
+            // Port switch failed — fall back to unencrypted
+            target: 'CHANGE_AMT_PASSWORD'
+          }
+        }
+      },
+      INIT_ACTIVATED_TLS_TUNNEL: {
+        invoke: {
+          src: 'initializeTlsTunnelConnection',
+          input: ({ context }) => context,
+          id: 'init-activated-tls-tunnel',
+          onDone: {
+            actions: ({ context }) => {
+              const clientObj = devices[context.clientId]
+              if (clientObj.connectionParams) {
+                clientObj.connectionParams.port = 16993
+              }
+            },
+            target: 'CHANGE_AMT_PASSWORD'
+          },
+          onError: {
+            // TLS tunnel failed — fall back to unencrypted
+            target: 'CHANGE_AMT_PASSWORD'
+          }
+        }
+      },
+      FETCH_MPS_ROOT_KEY: {
+        invoke: {
+          src: 'fetchMPSRootKey',
+          input: ({ context }) => context,
+          id: 'fetch-mps-root-key',
+          onDone: 'TLS_TUNNEL_PROVISIONING',
+          onError: {
+            actions: assign({ errorMessage: 'Failed to fetch MPS root key from vault' }),
+            target: 'FAILED'
+          }
+        }
+      },
+      TLS_TUNNEL_PROVISIONING: {
+        entry: sendTo('tls-tunnel-machine', { type: 'CONFIGURE_TLS' }),
+        invoke: {
+          src: 'tlsTunnelProvisioning',
+          id: 'tls-tunnel-machine',
+          input: ({ context }) => ({
+            clientId: context.clientId,
+            amtProfile: context.profile,
+            httpHandler: context.httpHandler,
+            message: context.message,
+            xmlMessage: '',
+            errorMessage: '',
+            status: '',
+            statusMessage: '',
+            retryCount: 0,
+            amt: context.amt,
+            tlsSettingData: []
+          }),
+          onDone: {
+            target: 'CHECK_TLS_TUNNEL_RESULT'
+          },
+          onError: {
+            actions: assign({ errorMessage: 'Failed to provision TLS certificates for TLS tunnel activation' }),
+            target: 'FAILED'
+          }
+        }
+      },
+      CHECK_TLS_TUNNEL_RESULT: {
+        always: [
+          {
+            guard: ({ context }) => {
+              const clientObj = devices[context.clientId]
+              return clientObj?.tls?.issuedCertPEM != null
+            },
+            target: 'SAVE_TLS_TUNNEL_CERTS'
+          },
+          {
+            actions: assign({ errorMessage: 'TLS provisioning failed - no certificates were generated' }),
+            target: 'FAILED'
+          }
+        ]
+      },
+      SAVE_TLS_TUNNEL_CERTS: {
+        invoke: {
+          src: 'saveTlsTunnelCerts',
+          input: ({ context }) => context,
+          id: 'save-tls-tunnel-certs',
+          onDone: 'SIGNAL_PORT_SWITCH',
+          onError: {
+            actions: assign({ errorMessage: 'Failed to save TLS certificates to vault' }),
+            target: 'FAILED'
+          }
+        }
+      },
+      SIGNAL_PORT_SWITCH: {
+        invoke: {
+          src: 'signalPortSwitch',
+          input: ({ context }) => context,
+          id: 'signal-port-switch',
+          onDone: 'INIT_TLS_TUNNEL_CONNECTION',
+          onError: {
+            actions: assign({ errorMessage: 'Failed to complete port switch to TLS' }),
+            target: 'FAILED'
+          }
+        }
+      },
+      INIT_TLS_TUNNEL_CONNECTION: {
+        invoke: {
+          src: 'initializeTlsTunnelConnection',
+          input: ({ context }) => context,
+          id: 'init-tls-tunnel-connection',
+          onDone: [
+            {
+              // For ACM profiles: tunnel is up, now do ACM upgrade over the encrypted channel
+              guard: 'isAdminMode',
+              actions: assign({ tlsTunnelCCMComplete: () => true, hasToUpgrade: () => true }),
+              target: 'GET_AMT_DOMAIN_CERT'
+            },
+            {
+              // For CCM profiles: tunnel is up, continue to configuration
+              target: 'UNCONFIGURATION'
+            }
+          ],
+          onError: {
+            actions: assign({ errorMessage: 'Failed to establish TLS tunnel connection' }),
+            target: 'FAILED'
+          }
+        }
       },
       CHANGE_AMT_PASSWORD: {
         invoke: {

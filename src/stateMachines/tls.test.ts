@@ -217,10 +217,25 @@ describe('TLS State Machine', () => {
     await tls.generateKeyPair({ input: context })
     expect(invokeWsmanCallSpy).toHaveBeenCalled()
   })
-  it('should addTrustedRootCertificate', async () => {
-    devices[clientId].ClientData = { payload: { profile: { tlsCerts: { ROOT_CERTIFICATE: { certbin: '' } } } } }
+  it('should addTrustedRootCertificate with pre-configured cert', async () => {
+    devices[clientId].ClientData = { payload: { profile: { tlsCerts: { ROOT_CERTIFICATE: { certbin: 'dGVzdA==' } } } } }
     await tls.addTrustedRootCertificate({ input: context })
     expect(invokeWsmanCallSpy).toHaveBeenCalled()
+  })
+  it('should addTrustedRootCertificate with MPS root cert', async () => {
+    devices[clientId].ClientData = {
+      payload: { profile: { ciraConfigObject: { mpsRootCertificate: 'dGVzdA==' } } }
+    }
+    devices[clientId].tls = { rootCertKey: forge.pki.rsa.generateKeyPair(2048).privateKey } as any
+    await tls.addTrustedRootCertificate({ input: context })
+    expect(invokeWsmanCallSpy).toHaveBeenCalled()
+  })
+  it('should throw if no root certificate available', async () => {
+    devices[clientId].ClientData = { payload: { profile: {} } }
+    devices[clientId].tls = {} as any
+    await expect(tls.addTrustedRootCertificate({ input: context })).rejects.toThrow(
+      'No root certificate available for TLS activation'
+    )
   })
 
   it('should createTLSCredentialContext', async () => {

@@ -9,6 +9,8 @@ import { devices } from '../devices.js'
 import { type HttpZResponseModel } from 'http-z'
 import Logger from '../Logger.js'
 
+const errorLogger = new Logger('ErrorHandler')
+
 const httpHandler = new HttpHandler()
 export interface ErrorContext {
   message: HttpZResponseModel | null

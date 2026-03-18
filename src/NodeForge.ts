@@ -67,4 +67,12 @@ export class NodeForge {
   createCert(): forge.pki.Certificate {
     return forge.pki.createCertificate()
   }
+
+  privateKeyFromPem(pem: string): forge.pki.PrivateKey {
+    return forge.pki.privateKeyFromPem(pem)
+  }
+
+  certificateFromPem(pem: string): forge.pki.Certificate {
+    return forge.pki.certificateFromPem(pem)
+  }
 }

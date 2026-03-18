@@ -15,6 +15,7 @@ import {
   GATEWAY_TIMEOUT_ERROR,
   UNEXPECTED_PARSE_ERROR,
   EA_TIMEOUT_ERROR,
+  CONNECTION_RESET_ERROR,
   TLS_TUNNEL_ERROR
 } from '../utils/constants.js'
 import Logger from '../Logger.js'
@@ -24,18 +25,6 @@ import { parseChunkedMessage } from '../utils/parseChunkedMessage.js'
 import { TLSTunnelManager } from '../TLSTunnelManager.js'
 
 const invokeWsmanLogger = new Logger('invokeWsmanCall')
-
-/**
- * Returns an extended timeout for TLS-enforced devices (delay_tls_timer + 15s buffer),
- * or undefined for non-TLS devices (which uses the default timeout).
- */
-export const getTLSTimeoutMs = (clientId: string): number | undefined => {
-  const clientObj = devices[clientId]
-  if (clientObj?.tlsEnforced !== true) {
-    return undefined
-  }
-  return (Environment.Config.delay_tls_timer ?? 30) * 1000 + 15000
-}
 
 /**
  * If retries is more than 0, will resend the message
@@ -203,9 +192,6 @@ export const processTLSTunnelResponse = (clientId: string, data: Buffer, httpHan
       const xmlBody = isChunkedResponse ? parseChunkedMessage(httpRsp.body.text) : httpRsp.body.text
       const resolveValue = xmlBody ? httpHandler.parseXML(xmlBody) : null
       if (xmlBody != null && xmlBody !== '' && resolveValue != null) {
-        const actionMatch = xmlBody.match(/<a:Action>([^<]+)<\/a:Action>/)
-        const action = actionMatch ? actionMatch[1].split('/').pop() : 'unknown'
-        invokeWsmanLogger.debug(`WSMAN RESPONSE: ${action}`)
         invokeWsmanLogger.debug(`WSMAN RESPONSE XML:\n${xmlBody}`)
         clientObj.resolve(resolveValue)
       } else {
@@ -244,6 +230,7 @@ const invokeWsmanCall = async <T>(context: any, maxRetries = 0, timeoutMs?: numb
   }
 
   let retries = 0
+  let connectionResetRetried = false
   const timeoutValue = timeoutMs ?? Environment.Config.delay_timer * 1000
   while (retries <= maxRetries) {
     try {
@@ -267,6 +254,17 @@ const invokeWsmanCall = async <T>(context: any, maxRetries = 0, timeoutMs?: numb
         if (error instanceof GATEWAY_TIMEOUT_ERROR) {
           clientObj.amtReconfiguring = true
         }
+      }
+
+      // CONNECTION_RESET_ERROR means AMT restarted (e.g., after CommitChanges).
+      // Wait for AMT to stabilize and retry the operation once.
+      if (error instanceof CONNECTION_RESET_ERROR && !connectionResetRetried) {
+        connectionResetRetried = true
+        const delaySeconds = Environment.Config.delay_tls_timer ?? 30
+        invokeWsmanLogger.info(`Connection reset during TLS operation, waiting ${delaySeconds}s before retry...`)
+        await new Promise((resolve) => setTimeout(resolve, delaySeconds * 1000))
+        clientObj.amtReconfiguring = false
+        continue
       }
 
       if (error instanceof UNEXPECTED_PARSE_ERROR && retries < maxRetries) {

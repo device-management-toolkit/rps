@@ -18,6 +18,7 @@ import { PasswordHelper } from '../utils/PasswordHelper.js'
 import { SignatureHelper } from '../utils/SignatureHelper.js'
 import { Validator } from '../Validator.js'
 import { devices } from '../devices.js'
+import { type DeviceCredentials } from '../interfaces/ISecretManagerService.js'
 import { type AMTConfiguration } from '../models/index.js'
 import { randomUUID } from 'node:crypto'
 import { Error } from './error.js'
@@ -60,15 +61,19 @@ export class CIRAConfiguration {
   db: any
   error: Error = new Error()
   saveMPSPasswordToSecretProvider = async ({ input }: { input: CIRAConfigContext }): Promise<any> => {
-    const data = await this.configurator.secretsManager.writeSecretWithObject(
-      `devices/${devices[input.clientId].uuid}`,
-      {
-        MPS_PASSWORD: input.ciraConfig?.password,
-        AMT_PASSWORD: devices[input.clientId].amtPassword,
-        MEBX_PASSWORD:
-          devices[input.clientId].action === ClientAction.ADMINCTLMODE ? devices[input.clientId].mebxPassword : null
-      }
-    )
+    const clientObj = devices[input.clientId]
+    const secretData: DeviceCredentials = {
+      MPS_PASSWORD: input.ciraConfig?.password,
+      AMT_PASSWORD: clientObj.amtPassword,
+      MEBX_PASSWORD: input.profile?.activation === ClientAction.ADMINCTLMODE ? clientObj.mebxPassword : null
+    }
+
+    // Preserve TLS leaf cert from --tls-tunnel activation so it isn't overwritten
+    if (clientObj.tls?.issuedCertPEM) {
+      secretData.TLS_ISSUED_CERTIFICATE = clientObj.tls.issuedCertPEM
+    }
+
+    const data = await this.configurator.secretsManager.writeSecretWithObject(`devices/${clientObj.uuid}`, secretData)
     return data
   }
 

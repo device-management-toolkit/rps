@@ -78,8 +78,21 @@ export class TLS {
         (x) => x.InstanceID === input.context.keyPairHandle
       )[0]
       const DERKey = PublicPrivateKeyPair?.DERKey
-      const certAttributes: CertAttributes = { CN: 'AMT', O: 'None', ST: 'None', C: 'None' }
-      const issuerAttributes: CertAttributes = { CN: clientObj.uuid ?? 'Untrusted Root Certificate' }
+      const certAttributes: CertAttributes = { CN: `AMT-${clientObj.hostname ?? clientObj.uuid}`, O: 'None', ST: 'None', C: 'None' }
+
+      // For MPS root cert flow, extract issuer attributes from the MPS root cert
+      let issuerAttributes: CertAttributes
+      if (clientObj.tls?.mpsRootCertPEM) {
+        const mpsRootCert = this.nodeForge.certificateFromPem(clientObj.tls.mpsRootCertPEM)
+        const subject = mpsRootCert.subject
+        issuerAttributes = {
+          CN: subject.getField('CN')?.value ?? 'MPSRoot',
+          O: subject.getField('O')?.value,
+          C: subject.getField('C')?.value
+        }
+      } else {
+        issuerAttributes = { CN: clientObj.uuid ?? 'Untrusted Root Certificate' }
+      }
 
       const keyUsages: AMTKeyUsage = {
         name: 'extKeyUsage',
@@ -92,14 +105,30 @@ export class TLS {
         codeSigning: false,
         timeStamping: false
       }
+      // Use the MPS root key or pre-stored root key if available,
+      // otherwise create a new root cert (backwards compatibility)
+      let rootKey: any
+      if (clientObj.tls?.rootCertKey) {
+        rootKey = clientObj.tls.rootCertKey
+      } else {
+        const rootCert = this.certManager.createCertificate(issuerAttributes)
+        rootKey = rootCert.key
+      }
+
       const certResult = this.certManager.amtCertSignWithCAKey(
         DERKey,
-        null,
+        rootKey,
         certAttributes,
         issuerAttributes,
         keyUsages
       )
       cert = certResult.pem.substring(27, certResult.pem.length - 25)
+
+      // Store issued cert PEM on client object for --tls-tunnel activation
+      if (!clientObj.tls) {
+        clientObj.tls = {} as any
+      }
+      clientObj.tls.issuedCertPEM = certResult.pem
     } else {
       cert = input.event.output.response.certificate
     }
@@ -115,9 +144,27 @@ export class TLS {
   }
 
   addTrustedRootCertificate = async ({ input }): Promise<any> => {
-    const tlsCerts = devices[input.clientId].ClientData.payload.profile.tlsCerts
+    const clientObj = devices[input.clientId]
+    const tlsCerts = clientObj.ClientData.payload.profile.tlsCerts
+    let certbin: string
+
+    if (tlsCerts?.ROOT_CERTIFICATE?.certbin) {
+      // Normal flow: use pre-configured root cert from profile/vault
+      certbin = tlsCerts.ROOT_CERTIFICATE.certbin
+    } else if (clientObj.tls?.rootCertKey) {
+      // --tls-tunnel flow: use MPS root cert (key was pre-fetched by activation machine)
+      const mpsRootCert = clientObj.ClientData?.payload?.profile?.ciraConfigObject?.mpsRootCertificate
+      if (!mpsRootCert) {
+        throw new globalThis.Error('MPS root certificate not found on CIRA config for TLS tunnel activation')
+      }
+      certbin = mpsRootCert
+      this.logger.info(`Using MPS root cert for TLS tunnel activation on device ${clientObj.uuid}`)
+    } else {
+      throw new globalThis.Error('No root certificate available for TLS activation')
+    }
+
     input.xmlMessage = input.amt.PublicKeyManagementService.AddTrustedRootCertificate({
-      CertificateBlob: tlsCerts.ROOT_CERTIFICATE.certbin
+      CertificateBlob: certbin
     })
     return await invokeWsmanCall(input, 2)
   }
@@ -128,6 +175,14 @@ export class TLS {
       input.event.output.Envelope.Body?.AddCertificate_OUTPUT?.CreatedCertificate?.ReferenceParameters?.SelectorSet
         ?.Selector?._ ?? 'Intel(r) AMT Certificate: Handle: 1'
     input.context.xmlMessage = input.context.amt.TLSCredentialContext.Create(certHandle)
+    return await invokeWsmanCall(input.context, 2)
+  }
+
+  putTLSCredentialContext = async ({ input }: { input: { context: TLSContext; event: TLSEvent } }): Promise<any> => {
+    const certHandle =
+      input.event.output.Envelope.Body?.AddCertificate_OUTPUT?.CreatedCertificate?.ReferenceParameters?.SelectorSet
+        ?.Selector?._ ?? 'Intel(r) AMT Certificate: Handle: 1'
+    input.context.xmlMessage = input.context.amt.TLSCredentialContext.Put(certHandle)
     return await invokeWsmanCall(input.context, 2)
   }
 
@@ -224,6 +279,7 @@ export class TLS {
       pullPublicPrivateKeyPair: fromPromise(this.pullPublicPrivateKeyPair),
       addCertificate: fromPromise(this.addCertificate),
       createTLSCredentialContext: fromPromise(this.createTLSCredentialContext),
+      putTLSCredentialContext: fromPromise(this.putTLSCredentialContext),
       enumerateTLSData: fromPromise(this.enumerateTLSData),
       pullTLSData: fromPromise(this.pullTLSData),
       putRemoteTLSData: fromPromise(this.putRemoteTLSData),
@@ -240,11 +296,12 @@ export class TLS {
       hasPublicPrivateKeyPairs: ({ context }) => context.message.Envelope.Body.PullResponse.Items !== '',
       useTLSEnterpriseAssistantCert: ({ context }) =>
         context.amtProfile?.tlsSigningAuthority === TlsSigningAuthority.MICROSOFT_CA,
+      isTlsTunnelActivation: ({ context }) => devices[context.clientId]?.tlsTunnelActivation === true,
       shouldRetry: ({ context, event }) => context.retryCount < 3 && event.error instanceof UNEXPECTED_PARSE_ERROR,
       alreadyExists: ({ context, event }) => {
         let exists = false
         try {
-          const xmlBody = parseChunkedMessage(event.output.body.text)
+          const xmlBody = parseChunkedMessage(event.error.body.text)
           const parsed = context.httpHandler.parseXML(xmlBody)
           if (parsed.Envelope?.Body?.Fault?.Code?.Subcode?.Value?.includes('AlreadyExists')) {
             this.logger.info(parsed.envelope?.Body?.Fault?.Reason?.Text)
@@ -297,12 +354,20 @@ export class TLS {
             ],
             target: 'PULL_PUBLIC_KEY_CERTIFICATE'
           },
-          onError: {
-            actions: assign({
-              errorMessage: 'Failed to enumerate public key certificates'
-            }),
-            target: 'FAILED'
-          }
+          onError: [
+            {
+              // Handle 401 auth errors (stale nonce) through ERROR machine for retry
+              guard: ({ event }) => (event.error as any)?.statusCode === 401,
+              actions: assign({ message: ({ event }) => event.error }),
+              target: 'ERROR'
+            },
+            {
+              actions: assign({
+                errorMessage: 'Failed to enumerate public key certificates'
+              }),
+              target: 'FAILED'
+            }
+          ]
         }
       },
       PULL_PUBLIC_KEY_CERTIFICATE: {
@@ -520,18 +585,50 @@ export class TLS {
           src: 'addCertificate',
           input: ({ context, event }) => ({ context, event }),
           id: 'add-certificate',
-          onDone: {
-            actions: [
-              assign({ message: ({ event }) => event.output })
-            ],
-            target: 'CREATE_TLS_CREDENTIAL_CONTEXT'
-          },
+          onDone: [
+            {
+              guard: 'isTlsTunnelActivation',
+              actions: [
+                assign({ message: ({ event }) => event.output })
+              ],
+              target: 'PUT_TLS_CREDENTIAL_CONTEXT'
+            },
+            {
+              actions: [
+                assign({ message: ({ event }) => event.output })
+              ],
+              target: 'CREATE_TLS_CREDENTIAL_CONTEXT'
+            }
+          ],
           onError: {
             actions: assign({
               errorMessage: 'Failed to add certificate'
             }),
             target: 'FAILED'
           }
+        }
+      },
+      PUT_TLS_CREDENTIAL_CONTEXT: {
+        invoke: {
+          src: 'putTLSCredentialContext',
+          input: ({ context, event }) => ({ context, event }),
+          id: 'put-tls-credential-context',
+          onDone: {
+            actions: [
+              assign({ message: ({ event }) => event.output })
+            ],
+            target: 'SYNC_TIME'
+          },
+          onError: [
+            {
+              guard: 'alreadyExists',
+              target: 'SYNC_TIME'
+            },
+            {
+              actions: assign({ errorMessage: 'Failed to put TLS credential context' }),
+              target: 'FAILED'
+            }
+          ]
         }
       },
       CREATE_TLS_CREDENTIAL_CONTEXT: {
@@ -685,11 +782,11 @@ export class TLS {
         invoke: {
           src: 'errorMachine',
           id: 'error-machine',
-          input: ({ context, event }) => ({
-            message: event.output,
+          input: ({ context }) => ({
+            message: context.message,
             clientId: context.clientId
           }),
-          onDone: 'ENUMERATE_PUBLIC_KEY_CERTIFICATE' // To do: Need to test as it might not require anymore.
+          onDone: 'ENUMERATE_PUBLIC_KEY_CERTIFICATE'
         },
         on: {
           ONFAILED: 'FAILED'
