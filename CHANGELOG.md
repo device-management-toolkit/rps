@@ -1,3 +1,10 @@
+## [2.32.1](https://github.com/device-management-toolkit/rps/compare/v2.32.0...v2.32.1) (2026-03-23)
+
+
+### Bug Fixes
+
+* derive sharedStaticIP from DHCPEnabled in profile export ([#2618](https://github.com/device-management-toolkit/rps/issues/2618)) ([e86a250](https://github.com/device-management-toolkit/rps/commit/e86a250cb1e42243a047bc4549a987ade60ecba5))
+
 # [2.32.0](https://github.com/device-management-toolkit/rps/compare/v2.31.4...v2.32.0) (2026-03-18)
 
 
