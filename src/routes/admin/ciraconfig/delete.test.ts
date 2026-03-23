@@ -45,4 +45,13 @@ describe('CIRA Config - delete', () => {
     expect(deleteSpy).toHaveBeenCalledWith('ciraConfig', req.tenantId)
     expect(resSpy.status).toHaveBeenCalledWith(500)
   })
+  it('should encode configName with special characters in secret path', async () => {
+    const deleteSecretSpy = jest.fn<any>().mockResolvedValue(true)
+    req.secretsManager = { deleteSecretAtPath: deleteSecretSpy }
+    req.params.ciraConfigName = '%fGLW#z_wqOD^LtX5vK1AXl'
+    spyOn(req.db.ciraConfigs, 'delete').mockResolvedValue(true)
+    await deleteCiraConfig(req, resSpy)
+    expect(deleteSecretSpy).toHaveBeenCalledWith('CIRAConfigs/%25fGLW%23z_wqOD^LtX5vK1AXl')
+    expect(resSpy.status).toHaveBeenCalledWith(204)
+  })
 })

@@ -17,7 +17,9 @@ export async function deleteCiraConfig(req: Request, res: Response): Promise<voi
     const result: boolean = await req.db.ciraConfigs.delete(ciraConfigName, req.tenantId)
     if (result) {
       if (req.secretsManager) {
-        await req.secretsManager.deleteSecretAtPath(`CIRAConfigs/${ciraConfigName}`)
+        await req.secretsManager.deleteSecretAtPath(
+          `CIRAConfigs/${ciraConfigName.replace(/%/g, '%25').replace(/#/g, '%23')}`
+        )
       }
       MqttProvider.publishEvent('success', ['deleteCiraConfig'], `Deleted CIRA config : ${ciraConfigName}`)
       log.verbose(`Deleted CIRA config profile : ${ciraConfigName}`)

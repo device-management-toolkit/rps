@@ -73,7 +73,13 @@ export class CIRAConfiguration {
   }
 
   getMPSPassword = async ({ input }: { input: CIRAConfigContext }): Promise<any> => {
-    const data = await this.configurator.secretsManager.getSecretAtPath(`CIRAConfigs/${input.ciraConfig?.configName}`)
+    const configName = input.ciraConfig?.configName
+    if (!configName) {
+      throw new globalThis.Error('CIRA configuration name is required to retrieve MPS password from secret provider')
+    }
+    const data = await this.configurator.secretsManager.getSecretAtPath(
+      `CIRAConfigs/${configName.replace(/%/g, '%25').replace(/#/g, '%23')}`
+    )
     return data
   }
 

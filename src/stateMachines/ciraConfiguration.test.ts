@@ -347,4 +347,41 @@ describe('CIRA Configuration State Machine', () => {
       expect(loggerSpy).toHaveBeenCalled()
     })
   })
+
+  describe('getMPSPassword', () => {
+    beforeEach(() => {
+      machineContext.ciraConfig = ciraConfig
+    })
+
+    it('should escape % and # in configName when constructing secret path', async () => {
+      const getSecretAtPathSpy = jest.fn<any>().mockResolvedValue({ MPS_PASSWORD: 'secret' })
+      ciraStateMachineImpl.configurator = {
+        secretsManager: { getSecretAtPath: getSecretAtPathSpy }
+      } as any
+      machineContext.ciraConfig = { ...ciraConfig, configName: '%fGLW#z_wqOD^LtX5vK1AXl' }
+
+      await ciraStateMachineImpl.getMPSPassword({ input: machineContext })
+
+      expect(getSecretAtPathSpy).toHaveBeenCalledWith('CIRAConfigs/%25fGLW%23z_wqOD^LtX5vK1AXl')
+    })
+
+    it('should use configName as-is when no % present', async () => {
+      const getSecretAtPathSpy = jest.fn<any>().mockResolvedValue({ MPS_PASSWORD: 'secret' })
+      ciraStateMachineImpl.configurator = {
+        secretsManager: { getSecretAtPath: getSecretAtPathSpy }
+      } as any
+
+      await ciraStateMachineImpl.getMPSPassword({ input: machineContext })
+
+      expect(getSecretAtPathSpy).toHaveBeenCalledWith('CIRAConfigs/config1')
+    })
+
+    it('should throw error when configName is missing', async () => {
+      machineContext.ciraConfig = null
+
+      await expect(ciraStateMachineImpl.getMPSPassword({ input: machineContext })).rejects.toThrow(
+        'CIRA configuration name is required to retrieve MPS password from secret provider'
+      )
+    })
+  })
 })

@@ -21,7 +21,10 @@ export async function createCiraConfig(req: Request, res: Response): Promise<voi
       const secrets: CiraConfigSecrets = {
         MPS_PASSWORD: ciraConfig.password
       }
-      const secretRsp = await req.secretsManager.writeSecretWithObject(`CIRAConfigs/${ciraConfig.configName}`, secrets)
+      const secretRsp = await req.secretsManager.writeSecretWithObject(
+        `CIRAConfigs/${ciraConfig.configName.replace(/%/g, '%25').replace(/#/g, '%23')}`,
+        secrets
+      )
       if (secretRsp == null) {
         throw new Error('Error saving cira configuration secrets to secret provider')
       }
