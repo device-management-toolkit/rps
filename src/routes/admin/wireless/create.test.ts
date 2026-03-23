@@ -6,13 +6,13 @@
 import { createSpyObj } from '../../../test/helper/jest.js'
 import { createWirelessProfile } from './create.js'
 import { jest } from '@jest/globals'
-import { type SpyInstance, spyOn } from 'jest-mock'
+import { type Spied, spyOn } from 'jest-mock'
 
 describe('Wireless - Create', () => {
   let resSpy
   let req
-  let insertSpy: SpyInstance<any>
-  let writeSpy: SpyInstance<any>
+  let insertSpy: Spied<any>
+  let writeSpy: Spied<any>
 
   beforeEach(() => {
     resSpy = createSpyObj('Response', [

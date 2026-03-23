@@ -10,13 +10,13 @@ import { ClientAction, TlsMode, TlsSigningAuthority } from '../../../models/RCS.
 import { AMTUserConsent } from '../../../models/index.js'
 import { adjustRedirectionConfiguration } from './common.js'
 import { jest } from '@jest/globals'
-import { type SpyInstance, spyOn } from 'jest-mock'
+import { type Spied, spyOn } from 'jest-mock'
 
 describe('Profiles - Create', () => {
   let resSpy
   let req
-  let insertSpy: SpyInstance<any>
-  let writeSecretSpy: SpyInstance<any>
+  let insertSpy: Spied<any>
+  let writeSecretSpy: Spied<any>
   let defaultRedirectionCfgACM
   let sparseAcmCfg
 

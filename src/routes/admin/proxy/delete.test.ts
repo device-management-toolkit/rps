@@ -6,13 +6,13 @@
 import { createSpyObj } from '../../../test/helper/jest.js'
 import { deleteProxyProfile } from './delete.js'
 import { jest } from '@jest/globals'
-import { type SpyInstance, spyOn } from 'jest-mock'
+import { type Spied, spyOn } from 'jest-mock'
 
 describe('Proxy - Delete', () => {
   let resSpy
   let req
-  let deleteSpy: SpyInstance<any>
-  let checkSpy: SpyInstance<any>
+  let deleteSpy: Spied<any>
+  let checkSpy: Spied<any>
 
   beforeEach(() => {
     resSpy = createSpyObj('Response', [
