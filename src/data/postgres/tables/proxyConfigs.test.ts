@@ -17,12 +17,12 @@ import {
 import { ProxyConfigsTable } from './proxyConfigs.js'
 import { RPSError } from '../../../utils/RPSError.js'
 import { jest } from '@jest/globals'
-import { type SpyInstance, spyOn } from 'jest-mock'
+import { type Spied, spyOn } from 'jest-mock'
 
 describe('proxy configs tests', () => {
   let db: PostgresDb
   let proxyConfigsTable: ProxyConfigsTable
-  let querySpy: SpyInstance<any>
+  let querySpy: Spied<any>
   let proxyConfig: ProxyConfig
   const profileName = 'name'
   beforeEach(() => {
@@ -93,8 +93,8 @@ describe('proxy configs tests', () => {
       querySpy.mockResolvedValueOnce({ rows: [{}], rowCount: 1 })
       const result = await proxyConfigsTable.get()
       expect(result).toStrictEqual([{}])
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
     SELECT
       proxy_config_name as "name",
@@ -119,8 +119,8 @@ describe('proxy configs tests', () => {
       querySpy.mockResolvedValueOnce({ rows: [{}], rowCount: rows.length })
       const result = await proxyConfigsTable.getByName(profileName)
       expect(result).toStrictEqual(rows[0])
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
     SELECT
       proxy_config_name as "name",
@@ -142,8 +142,8 @@ describe('proxy configs tests', () => {
     test('should check profile exist', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 0 })
       const result = await proxyConfigsTable.checkProfileExits(profileName)
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
     SELECT 1
     FROM proxyconfigs 
@@ -159,7 +159,7 @@ describe('proxy configs tests', () => {
       querySpy.mockImplementation(() => ({ rows: [], rowCount: count++ }))
       const result = await proxyConfigsTable.delete(profileName)
       expect(result).toBeTruthy()
-      expect(querySpy).toBeCalledTimes(2)
+      expect(querySpy).toHaveBeenCalledTimes(2)
       expect(querySpy).toHaveBeenNthCalledWith(
         1,
         `
@@ -182,8 +182,8 @@ describe('proxy configs tests', () => {
       await expect(proxyConfigsTable.delete(profileName)).rejects.toThrow(
         NETWORK_CONFIG_DELETION_FAILED_CONSTRAINT('Proxy', profileName)
       )
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
     SELECT 1
     FROM profiles_proxyconfigs
@@ -227,8 +227,8 @@ describe('proxy configs tests', () => {
 
       expect(result).toBe(proxyConfig)
       expect(getByNameSpy).toHaveBeenCalledWith(proxyConfig.name, proxyConfig.tenantId)
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
         INSERT INTO proxyconfigs
         (proxy_config_name, address, info_format, port, network_dns_suffix, creation_date, tenant_id)
@@ -274,8 +274,8 @@ describe('proxy configs tests', () => {
       const result = await proxyConfigsTable.update(proxyConfig)
       expect(result).toBe(proxyConfig)
       expect(getByNameSpy).toHaveBeenCalledWith(proxyConfig.name, proxyConfig.tenantId)
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
       UPDATE proxyconfigs 
       SET address=$2, info_format=$3, port=$4, network_dns_suffix=$5 
@@ -317,8 +317,8 @@ describe('proxy configs tests', () => {
       getByNameSpy.mockResolvedValue(proxyConfig)
       await expect(proxyConfigsTable.update(proxyConfig)).rejects.toThrow(CONCURRENCY_MESSAGE)
       expect(getByNameSpy).toHaveBeenCalledWith(proxyConfig.name, proxyConfig.tenantId)
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
       UPDATE proxyconfigs 
       SET address=$2, info_format=$3, port=$4, network_dns_suffix=$5 

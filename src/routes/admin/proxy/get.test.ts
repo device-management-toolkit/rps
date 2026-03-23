@@ -5,7 +5,7 @@
 
 import { createSpyObj } from '../../../test/helper/jest.js'
 import { jest } from '@jest/globals'
-import { type SpyInstance, spyOn } from 'jest-mock'
+import { type Spied, spyOn } from 'jest-mock'
 import { getProxyProfile } from './get.js'
 import { ProxyConfig } from 'models/RCS.Config.js'
 
@@ -13,7 +13,7 @@ describe('Proxy - Get', () => {
   let resSpy
   let req
   let proxyConfig: ProxyConfig
-  let getSpy: SpyInstance<any>
+  let getSpy: Spied<any>
 
   beforeEach(() => {
     resSpy = createSpyObj('Response', [

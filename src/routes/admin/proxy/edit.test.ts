@@ -5,14 +5,14 @@
 
 import { createSpyObj } from '../../../test/helper/jest.js'
 import { jest } from '@jest/globals'
-import { type SpyInstance, spyOn } from 'jest-mock'
+import { type Spied, spyOn } from 'jest-mock'
 import { editProxyProfile } from './edit.js'
 
 describe('Proxy - Edit', () => {
   let resSpy
   let req
-  let updateSpy: SpyInstance<any>
-  let getSpy: SpyInstance<any>
+  let updateSpy: Spied<any>
+  let getSpy: Spied<any>
 
   beforeEach(() => {
     resSpy = createSpyObj('Response', [

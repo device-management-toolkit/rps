@@ -8,12 +8,12 @@ import { API_UNEXPECTED_EXCEPTION } from '../../../utils/constants.js'
 import { type ProfileProxyConfigs } from '../../../models/RCS.Config.js'
 import { ProfileProxyConfigsTable } from './profileProxyConfigs.js'
 import { jest } from '@jest/globals'
-import { type SpyInstance, spyOn } from 'jest-mock'
+import { type Spied, spyOn } from 'jest-mock'
 
 describe('profileproxyconfig tests', () => {
   let db: PostgresDb
   let profilesProxyConfigsTable: ProfileProxyConfigsTable
-  let querySpy: SpyInstance<any>
+  let querySpy: Spied<any>
   const proxyConfigs: ProfileProxyConfigs[] = [
     { name: 'proxyConfig', priority: 1 } as any
   ]
@@ -33,8 +33,8 @@ describe('profileproxyconfig tests', () => {
       querySpy.mockResolvedValueOnce({ rows: [{}], rowCount: 1 })
       const result = await profilesProxyConfigsTable.getProfileProxyConfigs(profileName)
       expect(result).toStrictEqual([{}])
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
     SELECT 
       priority as "priority",
@@ -51,8 +51,8 @@ describe('profileproxyconfig tests', () => {
       querySpy.mockResolvedValueOnce({ rows: [{}], rowCount: 1 })
       const result = await profilesProxyConfigsTable.deleteProfileProxyConfigs(profileName)
       expect(result).toBe(true)
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
     DELETE
     FROM profiles_proxyconfigs
@@ -64,8 +64,8 @@ describe('profileproxyconfig tests', () => {
       querySpy.mockResolvedValueOnce({ rows: [{}], rowCount: 1 })
       const result = await profilesProxyConfigsTable.deleteProfileProxyConfigs(profileName, tenantId)
       expect(result).toBe(true)
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(
         `
     DELETE
     FROM profiles_proxyconfigs
@@ -79,8 +79,8 @@ describe('profileproxyconfig tests', () => {
       querySpy.mockResolvedValueOnce({ rows: [{}], rowCount: 1 })
       const result = await profilesProxyConfigsTable.createProfileProxyConfigs(proxyConfigs, profileName)
       expect(result).toBe(true)
-      expect(querySpy).toBeCalledTimes(1)
-      expect(querySpy).toBeCalledWith(`
+      expect(querySpy).toHaveBeenCalledTimes(1)
+      expect(querySpy).toHaveBeenCalledWith(`
       INSERT INTO
       profiles_proxyconfigs (proxy_config_name, profile_name, priority, tenant_id)
       VALUES ('proxyConfig', 'profileName', '1', '')`)

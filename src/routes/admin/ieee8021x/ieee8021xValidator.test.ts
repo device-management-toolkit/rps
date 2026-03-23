@@ -16,19 +16,19 @@ describe('ieee802.1x validator', () => {
       const pxeTimeout = '123'
       expect(() => {
         validatePxeTimeout(pxeTimeout, null as any)
-      }).toThrowError('PXE Timeout must be number')
+      }).toThrow('PXE Timeout must be number')
     })
     it('should fail if pxe timeout is below range', () => {
       const pxeTimeout = -1
       expect(() => {
         validatePxeTimeout(pxeTimeout, null as any)
-      }).toThrowError('PXE Timeout value should be 0 - 86400')
+      }).toThrow('PXE Timeout value should be 0 - 86400')
     })
     it('should fail if pxe timeout is above range', () => {
       const pxeTimeout: number = 60 * 60 * 24 + 1
       expect(() => {
         validatePxeTimeout(pxeTimeout, null as any)
-      }).toThrowError('PXE Timeout value should be 0 - 86400')
+      }).toThrow('PXE Timeout value should be 0 - 86400')
     })
   })
 
@@ -57,7 +57,7 @@ describe('ieee802.1x validator', () => {
         metaReq.req.body.authenticationProtocol = 100
         expect(() => {
           validateAuthProtocol(metaReq.req.body.authenticationProtocol, metaReq)
-        }).toThrowError(
+        }).toThrow(
           'Authentication protocol must be one of 0:EAP-TLS, 3:PEAPv1/EAP-GTC, 5:EAP-FAST/GTC, 10:EAP-FAST/TLS'
         )
       })
@@ -71,7 +71,7 @@ describe('ieee802.1x validator', () => {
         metaReq.req.body.authenticationProtocol = 100
         expect(() => {
           validateAuthProtocol(metaReq.req.body.authenticationProtocol, metaReq)
-        }).toThrowError('Authentication protocol must be one of 0:EAP-TLS, 2:PEAPv0/EAP-MSCHAPv2')
+        }).toThrow('Authentication protocol must be one of 0:EAP-TLS, 2:PEAPv0/EAP-MSCHAPv2')
       })
     })
   })
