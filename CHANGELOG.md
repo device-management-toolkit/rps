@@ -1,3 +1,10 @@
+## [2.32.2](https://github.com/device-management-toolkit/rps/compare/v2.32.1...v2.32.2) (2026-03-24)
+
+
+### Bug Fixes
+
+* ACM activation fails when device FQDN has more segments than stored domain suffix ([#2622](https://github.com/device-management-toolkit/rps/issues/2622)) ([e360876](https://github.com/device-management-toolkit/rps/commit/e360876bc9db288cb9288ab632029350cc09ffb2))
+
 ## [2.32.1](https://github.com/device-management-toolkit/rps/compare/v2.32.0...v2.32.1) (2026-03-23)
 
 
