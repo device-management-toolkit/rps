@@ -285,7 +285,7 @@ export class Validator implements IValidator {
     }
 
     if (
-      !(await this.configurator.domainCredentialManager.doesDomainExist(msg.payload.fqdn, msg.tenantId)) &&
+      (await this.configurator.domainCredentialManager.doesDomainExist(msg.payload.fqdn, msg.tenantId)) == null &&
       msg.payload.currentMode !== 2
     ) {
       throw new RPSError(
