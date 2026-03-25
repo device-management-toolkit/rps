@@ -27,7 +27,7 @@ export class DomainCredentialManager implements IDomainCredentialManager {
    * @returns {AMTDomain} returns domain object
    */
   async getProvisioningCert(domainSuffix: string, tenantId: string): Promise<AMTDomain | null> {
-    const domain = await this.amtDomains.getDomainByDomainSuffix(domainSuffix, tenantId)
+    const domain = await this.doesDomainExist(domainSuffix, tenantId)
     this.logger.debug(`domain : ${JSON.stringify(domain)}`)
 
     if (domain?.provisioningCert) {
@@ -47,13 +47,17 @@ export class DomainCredentialManager implements IDomainCredentialManager {
    * @description Checks if the AMT domain exists or not
    * @param {string} domainSuffix
    * @param {string} tenantId
-   * @returns {boolean} returns true if domain exists otherwise false.
+   * @returns {AMTDomain | null} returns domain object if found, otherwise null.
    */
-  public async doesDomainExist(domainSuffix: string, tenantId: string): Promise<boolean> {
-    if (await this.amtDomains.getDomainByDomainSuffix(domainSuffix, tenantId)) {
-      return true
-    } else {
-      return false
+  public async doesDomainExist(domainSuffix: string, tenantId: string): Promise<AMTDomain | null> {
+    const segments = domainSuffix.split('.')
+    for (let i = 0; i <= segments.length - 2; i++) {
+      const suffix = segments.slice(i).join('.')
+      const domain = await this.amtDomains.getDomainByDomainSuffix(suffix, tenantId)
+      if (domain) {
+        return domain
+      }
     }
+    return null
   }
 }
