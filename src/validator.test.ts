@@ -440,7 +440,7 @@ describe('validator', () => {
       expect(rpsError.message).toEqual(`Device ${msg.payload.uuid} activation failed. Missing DNS Suffix.`)
     })
     test('should throw an exception if no fqdn (with doesDomainExist mock)', async () => {
-      spyOn(validator.configurator.domainCredentialManager, 'doesDomainExist').mockImplementation(async () => false)
+      spyOn(validator.configurator.domainCredentialManager, 'doesDomainExist').mockImplementation(async () => null)
       let rpsError: any = null
       try {
         msg.payload.fqdn = 'abcd'
@@ -465,7 +465,7 @@ describe('validator', () => {
       expect(rpsError).toBe(null)
     })
     test('should not throw an exception if no fqdn (with doesDomainExist mock)', async () => {
-      spyOn(validator.configurator.domainCredentialManager, 'doesDomainExist').mockImplementation(async () => false)
+      spyOn(validator.configurator.domainCredentialManager, 'doesDomainExist').mockImplementation(async () => null)
       let rpsError = null
       try {
         msg.payload.fqdn = 'abcd'

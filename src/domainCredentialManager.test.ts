@@ -17,20 +17,25 @@ describe('Domain Credential Manager Tests', () => {
   let domainCredentialManager: DomainCredentialManager
   beforeEach(() => {
     creator = {
-      query: (query) => {
+      query: (query, params) => {
         if (query.indexOf('SELECT') >= 0) {
-          return {
-            rowCount: 1,
-            rows: [
-              {
-                name: '',
-                domainSuffix: 'd2.com',
-                provisioningCert: ' ',
-                provisioningCertStorageFormat: '',
-                provisioningCertPassword: ''
-              }
-            ]
+          // Simulate exact-match DB query; suffix stripping is handled by DomainCredentialManager
+          const input = params?.[0] as string
+          if (input === 'd2.com') {
+            return {
+              rowCount: 1,
+              rows: [
+                {
+                  name: '',
+                  domainSuffix: 'd2.com',
+                  provisioningCert: ' ',
+                  provisioningCertStorageFormat: '',
+                  provisioningCertPassword: ''
+                }
+              ]
+            }
           }
+          return { rowCount: 0, rows: [] }
         }
       }
     } as any
@@ -44,8 +49,38 @@ describe('Domain Credential Manager Tests', () => {
     expect(domain?.provisioningCert).toEqual(expectedProvisioningCert)
     expect(domain?.provisioningCertPassword).toEqual('password')
   })
-  test('does domain exist should return true', async () => {
+  test('does domain exist should return domain object', async () => {
     const result = await domainCredentialManager.doesDomainExist('d2.com', '')
-    expect(result).toBeTruthy()
+    expect(result).not.toBeNull()
+    expect(result?.domainSuffix).toEqual('d2.com')
+  })
+
+  describe('suffix matching', () => {
+    test('doesDomainExist should match when device FQDN has extra leading segments', async () => {
+      // Device reports foo.d2.com, DB has d2.com
+      const result = await domainCredentialManager.doesDomainExist('foo.d2.com', '')
+      expect(result).not.toBeNull()
+    })
+
+    test('doesDomainExist should match with multiple extra leading segments', async () => {
+      // Device reports bar.foo.d2.com, DB has d2.com
+      const result = await domainCredentialManager.doesDomainExist('bar.foo.d2.com', '')
+      expect(result).not.toBeNull()
+    })
+
+    test('doesDomainExist should return null when no suffix matches', async () => {
+      const noMatchCreator = {
+        query: () => ({ rowCount: 0, rows: [] })
+      } as any
+      const mgr = new DomainCredentialManager(logger, new DomainsTable(noMatchCreator))
+      const result = await mgr.doesDomainExist('other.com', '')
+      expect(result).toBeNull()
+    })
+
+    test('getProvisioningCert should match when device FQDN has extra leading segments', async () => {
+      // Device reports foo.d2.com, DB has d2.com
+      const domain = await domainCredentialManager.getProvisioningCert('foo.d2.com', '')
+      expect(domain?.provisioningCert).toEqual('d2.pfx')
+    })
   })
 })
