@@ -2005,6 +2005,15 @@ describe('Activation State Machine', () => {
             }
           })
       )
+      config.actors!.commitChanges = fromPromise(
+        async ({ input }) =>
+          await Promise.resolve({
+            Envelope: {
+              Header: {},
+              Body: { CommitChanges_OUTPUT: { ReturnValue: 0 } }
+            }
+          })
+      )
 
       const mockActivationMachine = activation.machine.provide(config)
       const flowStates = [
@@ -2013,6 +2022,8 @@ describe('Activation State Machine', () => {
         'INIT_TLS_TUNNEL',
         'GET_GENERAL_SETTINGS',
         'SETUP',
+        'COMMIT_CHANGES',
+        'WAIT_AFTER_COMMIT',
         'DELAYED_TRANSITION',
         'SAVE_DEVICE_TO_SECRET_PROVIDER',
         'SAVE_DEVICE_TO_MPS',
@@ -2025,7 +2036,7 @@ describe('Activation State Machine', () => {
       ccmActivationService.subscribe((state) => {
         const expectedState: any = flowStates[currentStateIndex++]
         expect(state.matches(expectedState)).toBe(true)
-        if (state.matches('DELAYED_TRANSITION')) {
+        if (state.matches('WAIT_AFTER_COMMIT') || state.matches('DELAYED_TRANSITION')) {
           jest.advanceTimersByTime(60000)
         } else if (state.matches('PROVISIONED') && currentStateIndex === flowStates.length) {
           done()

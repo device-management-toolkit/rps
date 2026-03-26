@@ -33,6 +33,7 @@ export interface TLSContext extends CommonContext {
   amt: AMT.Messages
   keyPairHandle?: string
   authProtocol?: number
+  certHandle?: string
 }
 
 export interface TLSEvent {
@@ -170,20 +171,27 @@ export class TLS {
   }
 
   createTLSCredentialContext = async ({ input }: { input: { context: TLSContext; event: TLSEvent } }): Promise<any> => {
-    // TODO: 802.1x shoudl be set here right?
-    const certHandle =
-      input.event.output.Envelope.Body?.AddCertificate_OUTPUT?.CreatedCertificate?.ReferenceParameters?.SelectorSet
-        ?.Selector?._ ?? 'Intel(r) AMT Certificate: Handle: 1'
+    const certHandle = input.context.certHandle ?? 'Intel(r) AMT Certificate: Handle: 1'
     input.context.xmlMessage = input.context.amt.TLSCredentialContext.Create(certHandle)
     return await invokeWsmanCall(input.context, 2)
   }
 
   putTLSCredentialContext = async ({ input }: { input: { context: TLSContext; event: TLSEvent } }): Promise<any> => {
-    const certHandle =
-      input.event.output.Envelope.Body?.AddCertificate_OUTPUT?.CreatedCertificate?.ReferenceParameters?.SelectorSet
-        ?.Selector?._ ?? 'Intel(r) AMT Certificate: Handle: 1'
+    const certHandle = input.context.certHandle ?? 'Intel(r) AMT Certificate: Handle: 1'
     input.context.xmlMessage = input.context.amt.TLSCredentialContext.Put(certHandle)
     return await invokeWsmanCall(input.context, 2)
+  }
+
+  enumerateTLSCredentialContext = async ({ input }: { input: TLSContext }): Promise<any> => {
+    input.xmlMessage = input.amt.TLSCredentialContext.Enumerate()
+    return await invokeWsmanCall(input, 2)
+  }
+
+  pullTLSCredentialContext = async ({ input }: { input: TLSContext }): Promise<any> => {
+    input.xmlMessage = input.amt.TLSCredentialContext.Pull(
+      input.message.Envelope.Body.EnumerateResponse.EnumerationContext
+    )
+    return await invokeWsmanCall(input)
   }
 
   enumeratePublicKeyCertificate = async ({ input }: { input: TLSContext }): Promise<any> => {
@@ -278,6 +286,8 @@ export class TLS {
       enumeratePublicPrivateKeyPair: fromPromise(this.enumeratePublicPrivateKeyPair),
       pullPublicPrivateKeyPair: fromPromise(this.pullPublicPrivateKeyPair),
       addCertificate: fromPromise(this.addCertificate),
+      enumerateTLSCredentialContext: fromPromise(this.enumerateTLSCredentialContext),
+      pullTLSCredentialContext: fromPromise(this.pullTLSCredentialContext),
       createTLSCredentialContext: fromPromise(this.createTLSCredentialContext),
       putTLSCredentialContext: fromPromise(this.putTLSCredentialContext),
       enumerateTLSData: fromPromise(this.enumerateTLSData),
@@ -296,7 +306,8 @@ export class TLS {
       hasPublicPrivateKeyPairs: ({ context }) => context.message.Envelope.Body.PullResponse.Items !== '',
       useTLSEnterpriseAssistantCert: ({ context }) =>
         context.amtProfile?.tlsSigningAuthority === TlsSigningAuthority.MICROSOFT_CA,
-      isTlsTunnelActivation: ({ context }) => devices[context.clientId]?.tlsTunnelActivation === true,
+      hasTLSCredentialContext: ({ context }) =>
+        context.message.Envelope.Body.PullResponse.Items?.AMT_TLSCredentialContext != null,
       shouldRetry: ({ context, event }) => context.retryCount < 3 && event.error instanceof UNEXPECTED_PARSE_ERROR,
       alreadyExists: ({ context, event }) => {
         let exists = false
@@ -334,6 +345,7 @@ export class TLS {
       amt: input.amt,
       tlsSettingData: input.tlsSettingData
     }),
+    output: ({ context }) => ({ status: context.status, errorMessage: context.errorMessage }),
     states: {
       PROVISIONED: {
         on: {
@@ -585,21 +597,17 @@ export class TLS {
           src: 'addCertificate',
           input: ({ context, event }) => ({ context, event }),
           id: 'add-certificate',
-          onDone: [
-            {
-              guard: 'isTlsTunnelActivation',
-              actions: [
-                assign({ message: ({ event }) => event.output })
-              ],
-              target: 'PUT_TLS_CREDENTIAL_CONTEXT'
-            },
-            {
-              actions: [
-                assign({ message: ({ event }) => event.output })
-              ],
-              target: 'CREATE_TLS_CREDENTIAL_CONTEXT'
-            }
-          ],
+          onDone: {
+            actions: [
+              assign({ message: ({ event }) => event.output }),
+              assign({
+                certHandle: ({ event }) =>
+                  event.output?.Envelope?.Body?.AddCertificate_OUTPUT?.CreatedCertificate?.ReferenceParameters
+                    ?.SelectorSet?.Selector?._ ?? 'Intel(r) AMT Certificate: Handle: 1'
+              })
+            ],
+            target: 'ENUMERATE_TLS_CREDENTIAL_CONTEXT'
+          },
           onError: {
             actions: assign({
               errorMessage: 'Failed to add certificate'
@@ -607,6 +615,57 @@ export class TLS {
             target: 'FAILED'
           }
         }
+      },
+      ENUMERATE_TLS_CREDENTIAL_CONTEXT: {
+        invoke: {
+          src: 'enumerateTLSCredentialContext',
+          input: ({ context }) => context,
+          id: 'enumerate-tls-credential-context',
+          onDone: {
+            actions: [assign({ message: ({ event }) => event.output })],
+            target: 'PULL_TLS_CREDENTIAL_CONTEXT'
+          },
+          onError: {
+            actions: assign({ errorMessage: 'Failed to enumerate TLS credential context' }),
+            target: 'FAILED'
+          }
+        }
+      },
+      PULL_TLS_CREDENTIAL_CONTEXT: {
+        invoke: {
+          src: 'pullTLSCredentialContext',
+          input: ({ context }) => context,
+          id: 'pull-tls-credential-context',
+          onDone: {
+            actions: [
+              assign({ message: ({ event }) => event.output }),
+              'Reset Retry Count'
+            ],
+            target: 'CHECK_TLS_CREDENTIAL_CONTEXT'
+          },
+          onError: [
+            {
+              guard: 'shouldRetry',
+              actions: 'Increment Retry Count',
+              target: 'ENUMERATE_TLS_CREDENTIAL_CONTEXT'
+            },
+            {
+              actions: assign({ errorMessage: 'Failed to pull TLS credential context' }),
+              target: 'FAILED'
+            }
+          ]
+        }
+      },
+      CHECK_TLS_CREDENTIAL_CONTEXT: {
+        always: [
+          {
+            guard: 'hasTLSCredentialContext',
+            target: 'PUT_TLS_CREDENTIAL_CONTEXT'
+          },
+          {
+            target: 'CREATE_TLS_CREDENTIAL_CONTEXT'
+          }
+        ]
       },
       PUT_TLS_CREDENTIAL_CONTEXT: {
         invoke: {

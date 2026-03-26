@@ -76,7 +76,14 @@ describe('TLS State Machine', () => {
             await Promise.resolve({ Envelope: { Body: { PullResponse: { Items: { AMT_PublicPrivateKeyPair: {} } } } } })
         ),
         addCertificate: fromPromise(async ({ input }) => await Promise.resolve({})),
+        enumerateTLSCredentialContext: fromPromise(async ({ input }) => await Promise.resolve({
+          Envelope: { Body: { EnumerateResponse: { EnumerationContext: 'ctx' } } }
+        })),
+        pullTLSCredentialContext: fromPromise(async ({ input }) => await Promise.resolve({
+          Envelope: { Body: { PullResponse: { Items: {} } } }
+        })),
         createTLSCredentialContext: fromPromise(async ({ input }) => await Promise.resolve({})),
+        putTLSCredentialContext: fromPromise(async ({ input }) => await Promise.resolve({})),
         enumerateTLSData: fromPromise(async ({ input }) => await Promise.resolve({})),
         pullTLSData: fromPromise(
           async ({ input }) =>
@@ -118,7 +125,68 @@ describe('TLS State Machine', () => {
       'ENUMERATE_PUBLIC_PRIVATE_KEY_PAIR',
       'PULL_PUBLIC_PRIVATE_KEY_PAIR',
       'ADD_CERTIFICATE',
+      'ENUMERATE_TLS_CREDENTIAL_CONTEXT',
+      'PULL_TLS_CREDENTIAL_CONTEXT',
       'CREATE_TLS_CREDENTIAL_CONTEXT',
+      'SYNC_TIME',
+      'ENUMERATE_TLS_DATA',
+      'PULL_TLS_DATA',
+      'PUT_REMOTE_TLS_DATA',
+      'WAIT_A_BIT',
+      'PUT_LOCAL_TLS_DATA',
+      'COMMIT_CHANGES',
+      'SUCCESS'
+    ]
+
+    const tlsService = createActor(tlsStateMachine, { input: context })
+    tlsService.subscribe((state) => {
+      const expectedState: any = flowStates[currentStateIndex++]
+      expect(state.matches(expectedState)).toBe(true)
+      if (state.matches('WAIT_A_BIT')) {
+        jest.advanceTimersByTime(5000)
+      } else if (state.matches('SUCCESS') && currentStateIndex === flowStates.length) {
+        done()
+      }
+    })
+
+    tlsService.start()
+    tlsService.send({ type: 'CONFIGURE_TLS', clientId })
+    jest.runAllTicks()
+  })
+
+  it('should PUT TLS credential context when one already exists', (done) => {
+    jest.useFakeTimers()
+    currentStateIndex = 0
+    context.amtProfile = { tlsMode: 3, tlsSigningAuthoritys: 'SelfSigned' } as any
+
+    config.actors.pullTLSCredentialContext = fromPromise(
+      async ({ input }) =>
+        await Promise.resolve({
+          Envelope: {
+            Body: {
+              PullResponse: {
+                Items: {
+                  AMT_TLSCredentialContext: {}
+                }
+              }
+            }
+          }
+        })
+    )
+
+    const tlsStateMachine = tls.machine.provide(config)
+    const flowStates = [
+      'PROVISIONED',
+      'ENUMERATE_PUBLIC_KEY_CERTIFICATE',
+      'PULL_PUBLIC_KEY_CERTIFICATE',
+      'ADD_TRUSTED_ROOT_CERTIFICATE',
+      'GENERATE_KEY_PAIR',
+      'ENUMERATE_PUBLIC_PRIVATE_KEY_PAIR',
+      'PULL_PUBLIC_PRIVATE_KEY_PAIR',
+      'ADD_CERTIFICATE',
+      'ENUMERATE_TLS_CREDENTIAL_CONTEXT',
+      'PULL_TLS_CREDENTIAL_CONTEXT',
+      'PUT_TLS_CREDENTIAL_CONTEXT',
       'SYNC_TIME',
       'ENUMERATE_TLS_DATA',
       'PULL_TLS_DATA',
@@ -239,18 +307,27 @@ describe('TLS State Machine', () => {
   })
 
   it('should createTLSCredentialContext', async () => {
-    const event: any = {
-      output: {
-        Envelope: {
-          Body: {
-            AddCertificate_OUTPUT: {
-              CreatedCertificate: { ReferenceParameters: { SelectorSet: { Selector: { _: '' } } } }
-            }
-          }
-        }
-      }
-    }
+    context.certHandle = 'Intel(r) AMT Certificate: Handle: 1'
+    const event: any = { output: {} }
     await tls.createTLSCredentialContext({ input: { context, event } })
+    expect(invokeWsmanCallSpy).toHaveBeenCalled()
+  })
+
+  it('should putTLSCredentialContext', async () => {
+    context.certHandle = 'Intel(r) AMT Certificate: Handle: 1'
+    const event: any = { output: {} }
+    await tls.putTLSCredentialContext({ input: { context, event } })
+    expect(invokeWsmanCallSpy).toHaveBeenCalled()
+  })
+
+  it('should enumerateTLSCredentialContext', async () => {
+    await tls.enumerateTLSCredentialContext({ input: context })
+    expect(invokeWsmanCallSpy).toHaveBeenCalled()
+  })
+
+  it('should pullTLSCredentialContext', async () => {
+    context.message = { Envelope: { Body: { EnumerateResponse: { EnumerationContext: 'ctx' } } } }
+    await tls.pullTLSCredentialContext({ input: context })
     expect(invokeWsmanCallSpy).toHaveBeenCalled()
   })
 

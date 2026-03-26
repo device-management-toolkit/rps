@@ -230,7 +230,7 @@ const invokeWsmanCall = async <T>(context: any, maxRetries = 0, timeoutMs?: numb
   }
 
   let retries = 0
-  let connectionResetRetried = false
+  let connectionResetRetries = 0
   const timeoutValue = timeoutMs ?? Environment.Config.delay_timer * 1000
   while (retries <= maxRetries) {
     try {
@@ -257,11 +257,11 @@ const invokeWsmanCall = async <T>(context: any, maxRetries = 0, timeoutMs?: numb
       }
 
       // CONNECTION_RESET_ERROR means AMT restarted (e.g., after CommitChanges).
-      // Wait for AMT to stabilize and retry the operation once.
-      if (error instanceof CONNECTION_RESET_ERROR && !connectionResetRetried) {
-        connectionResetRetried = true
+      // Wait for AMT to stabilize and retry the operation (up to 2 times).
+      if (error instanceof CONNECTION_RESET_ERROR && connectionResetRetries < 2) {
+        connectionResetRetries++
         const delaySeconds = Environment.Config.delay_tls_timer ?? 30
-        invokeWsmanLogger.info(`Connection reset during TLS operation, waiting ${delaySeconds}s before retry...`)
+        invokeWsmanLogger.info(`Connection reset during TLS operation (attempt ${connectionResetRetries}/2), waiting ${delaySeconds}s before retry...`)
         await new Promise((resolve) => setTimeout(resolve, delaySeconds * 1000))
         clientObj.amtReconfiguring = false
         continue

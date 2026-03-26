@@ -662,7 +662,8 @@ export class Activation {
       error: this.error.machine
     },
     delays: {
-      DELAY_TIME_ACTIVATION_SYNC: () => Environment.Config.delay_activation_sync
+      DELAY_TIME_ACTIVATION_SYNC: () => Environment.Config.delay_activation_sync,
+      DELAY_TIME_COMMIT_SYNC: () => (Environment.Config.delay_tls_timer ?? 15) * 1000
     },
     guards: {
       isTlsTunnelActivation: ({ context }) => {
@@ -682,6 +683,10 @@ export class Activation {
           )
         }
         return false
+      },
+      isAMT19OrNewer: ({ context }) => {
+        const device = devices[context.clientId]
+        return parseFloat(device.ClientData?.payload?.ver) >= 19
       },
       isSHBCACMPhase: ({ context }) => {
         const device = devices[context.clientId]
@@ -722,6 +727,8 @@ export class Activation {
           !context.shbcACMComplete
         )
       },
+      isDeviceCommittedInCCMMode: ({ context }) =>
+        context.message.Envelope.Body?.CommitChanges_OUTPUT?.ReturnValue === 0,
       isCertNotAdded: ({ context }) => context.message.Envelope.Body.AddNextCertInChain_OUTPUT.ReturnValue !== 0,
       isGeneralSettings: ({ context }) => context.targetAfterError === 'GET_GENERAL_SETTINGS',
       isMebxPassword: ({ context }) => context.targetAfterError === 'SET_MEBX_PASSWORD',
@@ -1235,6 +1242,11 @@ export class Activation {
               target: 'COMMIT_CHANGES'
             },
             {
+              guard: 'isAMT19OrNewer',
+              actions: ['Update AMT Credentials'],
+              target: 'COMMIT_CHANGES'
+            },
+            {
               actions: assign({ message: ({ event }) => event.output }),
               target: 'CHECK_SETUP'
             }
@@ -1257,16 +1269,19 @@ export class Activation {
           id: 'commit-changes',
           onDone: [
             {
-              guard: 'isSHBC',
-              actions: [
-                assign({ message: ({ event }) => event.output })
-              ],
-              target: 'CHECK_SETUP'
-            },
-            {
               guard: 'isSHBCCMComplete',
               actions: [assign({ message: ({ event }) => event.output })],
               target: 'SET_MEBX_PASSWORD'
+            },
+            {
+              guard: 'isSHBC',
+              actions: [assign({ message: ({ event }) => event.output })],
+              target: 'CHECK_SETUP'
+            },
+            {
+              // CCM on AMT 19+: wait for AMT to apply commit, then verify activation
+              actions: [assign({ message: ({ event }) => event.output })],
+              target: 'WAIT_AFTER_COMMIT'
             }
           ],
           onError: [
@@ -1280,6 +1295,11 @@ export class Activation {
           ]
         }
       },
+      WAIT_AFTER_COMMIT: {
+        after: {
+          DELAY_TIME_COMMIT_SYNC: { target: 'CHECK_SETUP' }
+        }
+      },
       CHECK_SETUP: {
         always: [
           {
@@ -1289,6 +1309,18 @@ export class Activation {
               ({ context }) => {
                 devices[context.clientId].status.Status = 'Client control mode (SHBC Phase 1).'
                 context.shbcCCMComplete = true
+                context.isActivated = true
+              },
+              'Set activation status'
+            ],
+            target: 'DELAYED_TRANSITION'
+          },
+          {
+            // For CCM on AMT 19+ after CommitChanges
+            guard: 'isDeviceCommittedInCCMMode',
+            actions: [
+              ({ context }) => {
+                devices[context.clientId].status.Status = 'Client control mode.'
                 context.isActivated = true
               },
               'Set activation status'
@@ -1541,9 +1573,16 @@ export class Activation {
             amt: context.amt,
             tlsSettingData: []
           }),
-          onDone: {
-            target: 'CHECK_TLS_TUNNEL_RESULT'
-          },
+          onDone: [
+            {
+              guard: ({ event }) => (event.output as any)?.status === 'success',
+              target: 'CHECK_TLS_TUNNEL_RESULT'
+            },
+            {
+              actions: assign({ errorMessage: ({ event }) => `TLS provisioning failed: ${(event.output as any)?.errorMessage ?? 'unknown error'}` }),
+              target: 'FAILED'
+            }
+          ],
           onError: {
             actions: assign({ errorMessage: 'Failed to provision TLS certificates for TLS tunnel activation' }),
             target: 'FAILED'
