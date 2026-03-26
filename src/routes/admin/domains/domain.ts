@@ -32,7 +32,8 @@ export const domainInsertValidator = (): any => [
     .not()
     .isEmpty()
     .withMessage('Provisioning certificate is required')
-    .custom(expirationValidator()),
+    .custom(expirationValidator())
+    .custom(rootCertValidator()),
   check('provisioningCertStorageFormat')
     .not()
     .isEmpty()
@@ -83,6 +84,15 @@ function expirationValidator(): CustomValidator {
   }
 }
 
+function rootCertValidator(): CustomValidator {
+  return (value, { req }) => {
+    if (pfxobj != null) {
+      rootCertChecker(pfxobj)
+    }
+    return true
+  }
+}
+
 export function passwordChecker(certManager: CertManager, req: any): CertsAndKeys {
   try {
     const pfxobj = certManager.convertPfxToObject(req.body.provisioningCert, req.body.provisioningCertPassword)
@@ -120,5 +130,12 @@ export function expirationChecker(pfxobj: CertsAndKeys): void {
     if (cert.validity.notAfter < today) {
       throw new Error('Uploaded certificate has expired')
     }
+  }
+}
+
+export function rootCertChecker(pfxobj: CertsAndKeys): void {
+  const hasRoot = pfxobj.certs.some((cert) => cert.subject.hash === cert.issuer.hash)
+  if (!hasRoot) {
+    throw new Error('Provisioning certificate does not contain a root certificate')
   }
 }

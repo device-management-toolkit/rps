@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { passwordChecker, domainSuffixChecker, expirationChecker } from './domain.js'
+import { passwordChecker, domainSuffixChecker, expirationChecker, rootCertChecker } from './domain.js'
 import { NodeForge } from '../../../NodeForge.js'
 import { CertManager } from '../../../certManager.js'
 import Logger from '../../../Logger.js'
@@ -195,5 +195,25 @@ describe('Domain Profile Validation', () => {
     expect(() => {
       expirationChecker(pfxobj)
     }).toThrow(new Error('Uploaded certificate has expired'))
+  })
+
+  test('rootCertChecker - success', () => {
+    // pfxobj from passwordChecker contains a root cert (self-signed)
+    expect(() => {
+      rootCertChecker(pfxobj)
+    }).not.toThrow()
+  })
+
+  test('rootCertChecker - failure', () => {
+    const pfxobjNoRoot = {
+      certs: [
+        { subject: { hash: 'abc' }, issuer: { hash: 'xyz' } },
+        { subject: { hash: 'def' }, issuer: { hash: 'abc' } }
+      ],
+      keys: []
+    } as any
+    expect(() => {
+      rootCertChecker(pfxobjNoRoot)
+    }).toThrow(new Error('Provisioning certificate does not contain a root certificate'))
   })
 })
