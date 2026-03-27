@@ -129,6 +129,9 @@ export async function exportProfile(req: Request, res: Response): Promise<void> 
       }
     }
 
+    // Defaults to true (DHCP on) when not set in DB, so sharedStaticIP defaults to false.
+    const dhcpEnabled = result.dhcpEnabled ?? true
+
     // Create the new structured output
     const output: ExportConfiguration = {
       id: 0,
@@ -141,9 +144,9 @@ export async function exportProfile(req: Request, res: Response): Promise<void> 
         },
         network: {
           wired: {
-            dhcpEnabled: result.dhcpEnabled ?? true,
+            dhcpEnabled,
             ipSyncEnabled: result.ipSyncEnabled ?? false,
-            sharedStaticIP: false,
+            sharedStaticIP: !dhcpEnabled,
             ipAddress: '',
             subnetMask: '',
             defaultGateway: '',

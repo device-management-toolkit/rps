@@ -79,7 +79,12 @@ export class TLS {
         (x) => x.InstanceID === input.context.keyPairHandle
       )[0]
       const DERKey = PublicPrivateKeyPair?.DERKey
-      const certAttributes: CertAttributes = { CN: `AMT-${clientObj.hostname ?? clientObj.uuid}`, O: 'None', ST: 'None', C: 'None' }
+      const certAttributes: CertAttributes = {
+        CN: `AMT-${clientObj.hostname ?? clientObj.uuid}`,
+        O: 'None',
+        ST: 'None',
+        C: 'None'
+      }
 
       // For MPS root cert flow, extract issuer attributes from the MPS root cert
       let issuerAttributes: CertAttributes

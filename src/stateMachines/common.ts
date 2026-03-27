@@ -261,7 +261,9 @@ const invokeWsmanCall = async <T>(context: any, maxRetries = 0, timeoutMs?: numb
       if (error instanceof CONNECTION_RESET_ERROR && connectionResetRetries < 2) {
         connectionResetRetries++
         const delaySeconds = Environment.Config.delay_tls_timer ?? 30
-        invokeWsmanLogger.info(`Connection reset during TLS operation (attempt ${connectionResetRetries}/2), waiting ${delaySeconds}s before retry...`)
+        invokeWsmanLogger.info(
+          `Connection reset during TLS operation (attempt ${connectionResetRetries}/2), waiting ${delaySeconds}s before retry...`
+        )
         await new Promise((resolve) => setTimeout(resolve, delaySeconds * 1000))
         clientObj.amtReconfiguring = false
         continue

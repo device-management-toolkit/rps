@@ -6,12 +6,12 @@
 import { createSpyObj } from '../../../test/helper/jest.js'
 import { deleteProfile } from './delete.js'
 import { jest } from '@jest/globals'
-import { type SpyInstance, spyOn } from 'jest-mock'
+import { type Spied, spyOn } from 'jest-mock'
 
 describe('Profiles - Delete', () => {
   let resSpy
   let req
-  let deleteSpy: SpyInstance<any>
+  let deleteSpy: Spied<any>
 
   beforeEach(() => {
     resSpy = createSpyObj('Response', [

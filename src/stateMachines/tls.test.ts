@@ -76,12 +76,18 @@ describe('TLS State Machine', () => {
             await Promise.resolve({ Envelope: { Body: { PullResponse: { Items: { AMT_PublicPrivateKeyPair: {} } } } } })
         ),
         addCertificate: fromPromise(async ({ input }) => await Promise.resolve({})),
-        enumerateTLSCredentialContext: fromPromise(async ({ input }) => await Promise.resolve({
-          Envelope: { Body: { EnumerateResponse: { EnumerationContext: 'ctx' } } }
-        })),
-        pullTLSCredentialContext: fromPromise(async ({ input }) => await Promise.resolve({
-          Envelope: { Body: { PullResponse: { Items: {} } } }
-        })),
+        enumerateTLSCredentialContext: fromPromise(
+          async ({ input }) =>
+            await Promise.resolve({
+              Envelope: { Body: { EnumerateResponse: { EnumerationContext: 'ctx' } } }
+            })
+        ),
+        pullTLSCredentialContext: fromPromise(
+          async ({ input }) =>
+            await Promise.resolve({
+              Envelope: { Body: { PullResponse: { Items: {} } } }
+            })
+        ),
         createTLSCredentialContext: fromPromise(async ({ input }) => await Promise.resolve({})),
         putTLSCredentialContext: fromPromise(async ({ input }) => await Promise.resolve({})),
         enumerateTLSData: fromPromise(async ({ input }) => await Promise.resolve({})),

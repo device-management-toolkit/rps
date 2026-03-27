@@ -11,7 +11,7 @@ import { Environment } from '../utils/Environment.js'
 import ClientResponseMsg from '../utils/ClientResponseMsg.js'
 import { HttpHandler } from '../HttpHandler.js'
 import { jest } from '@jest/globals'
-import { type SpyInstance, spyOn } from 'jest-mock'
+import { type Spied, spyOn } from 'jest-mock'
 import {
   type Deactivation as DeactivationType,
   type DeactivationContext,
@@ -39,9 +39,9 @@ describe('Deactivation State Machine', () => {
   let deactivationContext: DeactivationContext
   let config: MachineImplementationsSimplified<DeactivationContext, DeactivationEvent>
   let currentStateIndex: number
-  let setupAndConfigurationServiceSpy: SpyInstance<any>
-  let sendSpy: SpyInstance<any>
-  let responseMessageSpy: SpyInstance<any>
+  let setupAndConfigurationServiceSpy: Spied<any>
+  let sendSpy: Spied<any>
+  let responseMessageSpy: Spied<any>
 
   beforeEach(() => {
     deactivation = new Deactivation()

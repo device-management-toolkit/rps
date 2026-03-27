@@ -6,12 +6,12 @@
 import { createSpyObj } from '../../../test/helper/jest.js'
 import { createProxyProfile } from './create.js'
 import { jest } from '@jest/globals'
-import { type SpyInstance, spyOn } from 'jest-mock'
+import { type Spied, spyOn } from 'jest-mock'
 
 describe('Proxy - Create', () => {
   let resSpy
   let req
-  let insertSpy: SpyInstance<any>
+  let insertSpy: Spied<any>
 
   beforeEach(() => {
     resSpy = createSpyObj('Response', [

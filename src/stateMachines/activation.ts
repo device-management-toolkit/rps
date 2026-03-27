@@ -501,7 +501,10 @@ export class Activation {
     return true
   }
 
-  private enumerateAndPull = async (input: ActivationContext, resource: { Enumerate: () => string; Pull: (context: string) => string }): Promise<any> => {
+  private enumerateAndPull = async (
+    input: ActivationContext,
+    resource: { Enumerate: () => string; Pull: (context: string) => string }
+  ): Promise<any> => {
     input.xmlMessage = resource.Enumerate()
     const enumResult: any = await invokeWsmanCall(input)
     input.xmlMessage = resource.Pull(enumResult.Envelope.Body?.EnumerateResponse?.EnumerationContext)
@@ -509,7 +512,11 @@ export class Activation {
     return pullResult
   }
 
-  checkAmtTlsState = async ({ input }: { input: ActivationContext }): Promise<{ tlsEnabled: boolean; hasCredentialContext: boolean }> => {
+  checkAmtTlsState = async ({
+    input
+  }: {
+    input: ActivationContext
+  }): Promise<{ tlsEnabled: boolean; hasCredentialContext: boolean }> => {
     const clientObj = devices[input.clientId]
     this.logger.info(`Checking AMT TLS state for device ${clientObj.uuid}`)
 
@@ -527,7 +534,9 @@ export class Activation {
       const credResult = await this.enumerateAndPull(input, input.amt.TLSCredentialContext)
       const hasCredentialContext = credResult?.Envelope?.Body?.PullResponse?.Items?.AMT_TLSCredentialContext != null
 
-      this.logger.info(`Device ${clientObj.uuid} TLS state: enabled=${tlsEnabled}, credentialContext=${hasCredentialContext}`)
+      this.logger.info(
+        `Device ${clientObj.uuid} TLS state: enabled=${tlsEnabled}, credentialContext=${hasCredentialContext}`
+      )
       return { tlsEnabled, hasCredentialContext }
     } catch (err: unknown) {
       const errMsg = err instanceof globalThis.Error ? err.message : String(err)
@@ -1579,7 +1588,10 @@ export class Activation {
               target: 'CHECK_TLS_TUNNEL_RESULT'
             },
             {
-              actions: assign({ errorMessage: ({ event }) => `TLS provisioning failed: ${(event.output as any)?.errorMessage ?? 'unknown error'}` }),
+              actions: assign({
+                errorMessage: ({ event }) =>
+                  `TLS provisioning failed: ${(event.output as any)?.errorMessage ?? 'unknown error'}`
+              }),
               target: 'FAILED'
             }
           ],
