@@ -1,3 +1,10 @@
+# [2.33.0](https://github.com/device-management-toolkit/rps/compare/v2.32.2...v2.33.0) (2026-03-30)
+
+
+### Features
+
+* validate root certificate exists in provisioning cert ([#2627](https://github.com/device-management-toolkit/rps/issues/2627)) ([62315a7](https://github.com/device-management-toolkit/rps/commit/62315a76ac3d8a15e8fbc37ea06a6616c5bc8573))
+
 ## [2.32.2](https://github.com/device-management-toolkit/rps/compare/v2.32.1...v2.32.2) (2026-03-24)
 
 
