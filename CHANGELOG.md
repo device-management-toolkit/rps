@@ -1,3 +1,10 @@
+## [2.33.1](https://github.com/device-management-toolkit/rps/compare/v2.33.0...v2.33.1) (2026-03-30)
+
+
+### Bug Fixes
+
+* tighten CIRA config name validation to prevent 500 errors ([#2635](https://github.com/device-management-toolkit/rps/issues/2635)) ([3ebeae6](https://github.com/device-management-toolkit/rps/commit/3ebeae64f304a15e5c94788c7e221bd3132bc73d)), closes [#2599](https://github.com/device-management-toolkit/rps/issues/2599)
+
 # [2.33.0](https://github.com/device-management-toolkit/rps/compare/v2.32.2...v2.33.0) (2026-03-30)
 
 
