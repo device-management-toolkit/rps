@@ -36,6 +36,11 @@ export class ClientMsgJsonParser {
         message.payload = Buffer.from(message.payload, 'base64').toString('utf8')
         return message
       }
+      // PORT_SWITCH_ACK has simple text payload ("ok"), decode but don't parse as JSON
+      if (message.method === ClientMethods.PORT_SWITCH_ACK) {
+        message.payload = Buffer.from(message.payload, 'base64').toString('utf8')
+        return message
+      }
       const decodedPayload = Buffer.from(message.payload, 'base64').toString('utf8')
       if (message.method !== ClientMethods.RESPONSE) {
         message.payload = this.parsePayload(decodedPayload)

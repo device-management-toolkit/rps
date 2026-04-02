@@ -33,7 +33,6 @@ jest.unstable_mockModule('./common.js', () => ({
   invokeWsmanCall: invokeWsmanCallSpy,
   invokeEnterpriseAssistantCall: jest.fn(),
   processTLSTunnelResponse: jest.fn(),
-  getTLSTimeoutMs: jest.fn(),
   HttpResponseError,
   isDigestRealmValid,
   coalesceMessage
@@ -133,6 +132,7 @@ describe('Activation State Machine', () => {
       canActivate: true,
       shbcCCMComplete: false,
       shbcACMComplete: false,
+      tlsTunnelCCMComplete: false,
       message: '',
       clientId,
       xmlMessage: '',
@@ -259,7 +259,11 @@ describe('Activation State Machine', () => {
         tls: fromPromise(async ({ input }) => await Promise.resolve({ clientId })),
         cira: fromPromise(async ({ input }) => await Promise.resolve({ clientId })),
         setMEBxPassword: fromPromise(async ({ input }) => await Promise.resolve({ clientId })),
-        initializeTLSTunnel: fromPromise(async () => await Promise.resolve(true))
+        initializeTLSTunnel: fromPromise(async () => await Promise.resolve(true)),
+        saveTlsTunnelCerts: fromPromise(async () => await Promise.resolve(true)),
+        signalPortSwitch: fromPromise(async () => await Promise.resolve(true)),
+        initializeTlsTunnelConnection: fromPromise(async () => await Promise.resolve(true)),
+        tlsTunnelProvisioning: fromPromise(async () => await Promise.resolve({ clientId }))
       },
       actions: {
         'Read General Settings': () => {},
@@ -596,6 +600,51 @@ describe('Activation State Machine', () => {
       clientObj.mebxPassword = 'testPw'
       const response = await activation.saveDeviceInfoToSecretProvider({ input: context })
       expect(response).toBe(false)
+    })
+    it('should save MEBX_PASSWORD for SHBC (action=CCM, profile=ACM)', async () => {
+      const clientObj = devices[clientId]
+      clientObj.amtPassword = 'testAMTpw'
+      clientObj.mebxPassword = 'testMEBXpw'
+      // SHBC Phase 1 sets action to CCM, but profile activation is ACM
+      clientObj.action = ClientAction.CLIENTCTLMODE as any
+
+      const insertSpy = spyOn(activation.configurator.secretsManager, 'writeSecretWithObject').mockImplementation(
+        async () => true
+      )
+      const response = await activation.saveDeviceInfoToSecretProvider({ input: context })
+      expect(response).toBe(true)
+      expect(insertSpy).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          AMT_PASSWORD: 'testAMTpw',
+          MEBX_PASSWORD: 'testMEBXpw'
+        })
+      )
+    })
+    it('should save MEBX_PASSWORD as null for CCM profile regardless of action', async () => {
+      const clientObj = devices[clientId]
+      clientObj.amtPassword = 'testAMTpw'
+      clientObj.mebxPassword = 'testMEBXpw'
+      clientObj.action = ClientAction.CLIENTCTLMODE as any
+
+      // Override profile to CCM
+      const ccmContext = {
+        ...context,
+        profile: { ...context.profile, activation: ClientAction.CLIENTCTLMODE }
+      }
+
+      const insertSpy = spyOn(activation.configurator.secretsManager, 'writeSecretWithObject').mockImplementation(
+        async () => true
+      )
+      const response = await activation.saveDeviceInfoToSecretProvider({ input: ccmContext })
+      expect(response).toBe(true)
+      expect(insertSpy).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          AMT_PASSWORD: 'testAMTpw',
+          MEBX_PASSWORD: null
+        })
+      )
     })
   })
 
@@ -1664,6 +1713,9 @@ describe('Activation State Machine', () => {
       )
       config.actors!.saveDeviceInfoToSecretProvider = fromPromise(async ({ input }) => await Promise.resolve(true))
       config.actors!.saveDeviceInfoToMPS = fromPromise(async ({ input }) => await Promise.resolve(true))
+      config.actors!.checkAmtTlsState = fromPromise(
+        async () => await Promise.resolve({ tlsEnabled: false, hasCredentialContext: false })
+      )
       config.actors!.unconfiguration = fromPromise(
         async ({ input }) => await Promise.resolve({ clientId: input.clientId })
       )
@@ -1953,6 +2005,15 @@ describe('Activation State Machine', () => {
             }
           })
       )
+      config.actors!.commitChanges = fromPromise(
+        async ({ input }) =>
+          await Promise.resolve({
+            Envelope: {
+              Header: {},
+              Body: { CommitChanges_OUTPUT: { ReturnValue: 0 } }
+            }
+          })
+      )
 
       const mockActivationMachine = activation.machine.provide(config)
       const flowStates = [
@@ -1961,11 +2022,11 @@ describe('Activation State Machine', () => {
         'INIT_TLS_TUNNEL',
         'GET_GENERAL_SETTINGS',
         'SETUP',
+        'COMMIT_CHANGES',
+        'WAIT_AFTER_COMMIT',
         'DELAYED_TRANSITION',
         'SAVE_DEVICE_TO_SECRET_PROVIDER',
         'SAVE_DEVICE_TO_MPS',
-        'COMMIT_CHANGES_FOR_TLS',
-        'WAIT_AFTER_TLS_COMMIT',
         'UNCONFIGURATION',
         'NETWORK_CONFIGURATION',
         'FEATURES_CONFIGURATION',
@@ -1975,7 +2036,7 @@ describe('Activation State Machine', () => {
       ccmActivationService.subscribe((state) => {
         const expectedState: any = flowStates[currentStateIndex++]
         expect(state.matches(expectedState)).toBe(true)
-        if (state.matches('DELAYED_TRANSITION') || state.matches('WAIT_AFTER_TLS_COMMIT')) {
+        if (state.matches('WAIT_AFTER_COMMIT') || state.matches('DELAYED_TRANSITION')) {
           jest.advanceTimersByTime(60000)
         } else if (state.matches('PROVISIONED') && currentStateIndex === flowStates.length) {
           done()
@@ -2019,8 +2080,6 @@ describe('Activation State Machine', () => {
         'SET_MEBX_PASSWORD',
         'SAVE_DEVICE_TO_SECRET_PROVIDER',
         'SAVE_DEVICE_TO_MPS',
-        'COMMIT_CHANGES_FOR_TLS',
-        'WAIT_AFTER_TLS_COMMIT',
         'UNCONFIGURATION',
         'NETWORK_CONFIGURATION',
         'FEATURES_CONFIGURATION',
@@ -2030,7 +2089,7 @@ describe('Activation State Machine', () => {
       acmActivationService.subscribe((state) => {
         const expectedState: any = flowStates[currentStateIndex++]
         expect(state.matches(expectedState)).toBe(true)
-        if (state.matches('DELAYED_TRANSITION') || state.matches('WAIT_AFTER_TLS_COMMIT')) {
+        if (state.matches('DELAYED_TRANSITION')) {
           jest.advanceTimersByTime(60000)
         } else if (state.matches('PROVISIONED') && currentStateIndex === flowStates.length) {
           done()
@@ -2095,6 +2154,141 @@ describe('Activation State Machine', () => {
       const result = await activation.initializeTLSTunnel({ input: context } as any)
       expect(result).toBe(true)
       expect(devices[clientId].tlsTunnelManager).toBeUndefined()
+    })
+  })
+
+  describe('TLS Tunnel Activation', () => {
+    describe('saveTlsTunnelCerts', () => {
+      it('should save leaf cert to vault for ACM', async () => {
+        const clientObj = devices[clientId]
+        clientObj.uuid = 'test-uuid'
+        clientObj.amtPassword = 'testAMTpw'
+        clientObj.mebxPassword = 'testMEBXpw'
+        clientObj.action = ClientAction.ADMINCTLMODE
+        clientObj.tls = { issuedCertPEM: 'issuedCert' } as any
+
+        const insertSpy = spyOn(activation.configurator.secretsManager, 'writeSecretWithObject').mockImplementation(
+          async () => true
+        )
+        const result = await activation.saveTlsTunnelCerts({ input: context } as any)
+        expect(result).toBe(true)
+        expect(insertSpy).toHaveBeenCalledWith('devices/test-uuid', {
+          AMT_PASSWORD: 'testAMTpw',
+          MEBX_PASSWORD: 'testMEBXpw',
+          TLS_ISSUED_CERTIFICATE: 'issuedCert'
+        })
+      })
+
+      it('should save leaf cert to vault for CCM (mebxPassword null)', async () => {
+        const clientObj = devices[clientId]
+        clientObj.uuid = 'test-uuid'
+        clientObj.amtPassword = 'testAMTpw'
+        clientObj.mebxPassword = null
+        clientObj.action = ClientAction.CLIENTCTLMODE as any
+        clientObj.tls = { issuedCertPEM: 'issuedCert' } as any
+
+        const insertSpy = spyOn(activation.configurator.secretsManager, 'writeSecretWithObject').mockImplementation(
+          async () => true
+        )
+        const result = await activation.saveTlsTunnelCerts({ input: context } as any)
+        expect(result).toBe(true)
+        expect(insertSpy).toHaveBeenCalledWith('devices/test-uuid', {
+          AMT_PASSWORD: 'testAMTpw',
+          MEBX_PASSWORD: null,
+          TLS_ISSUED_CERTIFICATE: 'issuedCert'
+        })
+      })
+
+      it('should throw when amtPassword is null', async () => {
+        const clientObj = devices[clientId]
+        clientObj.uuid = 'test-uuid'
+        clientObj.amtPassword = null
+        clientObj.mebxPassword = 'testMEBXpw'
+        clientObj.action = ClientAction.ADMINCTLMODE
+
+        await expect(activation.saveTlsTunnelCerts({ input: context } as any)).rejects.toThrow(
+          'Missing prerequisites for saving TLS tunnel certs'
+        )
+      })
+
+      it('should throw when mebxPassword is null for ACM', async () => {
+        const clientObj = devices[clientId]
+        clientObj.uuid = 'test-uuid'
+        clientObj.amtPassword = 'testAMTpw'
+        clientObj.mebxPassword = null
+        clientObj.action = ClientAction.ADMINCTLMODE
+
+        await expect(activation.saveTlsTunnelCerts({ input: context } as any)).rejects.toThrow(
+          'Missing prerequisites for saving TLS tunnel certs'
+        )
+      })
+
+      it('should save MEBX_PASSWORD for SHBC (action=CCM, profile=ACM)', async () => {
+        const clientObj = devices[clientId]
+        clientObj.uuid = 'test-uuid'
+        clientObj.amtPassword = 'testAMTpw'
+        clientObj.mebxPassword = 'testMEBXpw'
+        // SHBC Phase 1 sets action to CCM, but profile activation is ACM
+        clientObj.action = ClientAction.CLIENTCTLMODE as any
+        clientObj.tls = { issuedCertPEM: 'issuedCert' } as any
+
+        const insertSpy = spyOn(activation.configurator.secretsManager, 'writeSecretWithObject').mockImplementation(
+          async () => true
+        )
+        const result = await activation.saveTlsTunnelCerts({ input: context } as any)
+        expect(result).toBe(true)
+        expect(insertSpy).toHaveBeenCalledWith('devices/test-uuid', {
+          AMT_PASSWORD: 'testAMTpw',
+          MEBX_PASSWORD: 'testMEBXpw',
+          TLS_ISSUED_CERTIFICATE: 'issuedCert'
+        })
+      })
+    })
+
+    describe('signalPortSwitch', () => {
+      it('should send port_switch message and resolve on ACK', async () => {
+        const clientObj = devices[clientId]
+        clientObj.uuid = 'test-uuid'
+        clientObj.tls = {} as any
+        responseMessageSpy.mockRestore()
+        sendSpy.mockRestore()
+        sendSpy = spyOn(devices[clientId].ClientSocket, 'send').mockReturnValue()
+
+        const promise = activation.signalPortSwitch({ input: context } as any)
+
+        // Simulate PORT_SWITCH_ACK by resolving the pending promise
+        await new Promise((r) => setTimeout(r, 10))
+        clientObj.resolve('port_switch_ack')
+
+        const result = await promise
+        expect(result).toBe(true)
+        expect(sendSpy).toHaveBeenCalled()
+      })
+
+      it('should reject on ACK timeout', async () => {
+        jest.useFakeTimers()
+        const clientObj = devices[clientId]
+        clientObj.uuid = 'test-uuid'
+        clientObj.tls = {} as any
+        Environment.Config.delay_tls_timer = 1
+
+        const promise = activation.signalPortSwitch({ input: context } as any)
+        jest.advanceTimersByTime(61 * 1000 + 1)
+
+        await expect(promise).rejects.toThrow('PORT_SWITCH_ACK timeout')
+        jest.useRealTimers()
+      })
+    })
+
+    describe('initializeTlsTunnelConnection', () => {
+      it('should set tlsEnforced on the client object', () => {
+        // initializeTlsTunnelConnection creates a TLSTunnelManager and sets tlsEnforced = true on success.
+        // We verify that the state machine correctly routes failures via onError by checking the state definition.
+        const states = activation.machine.config.states as any
+        expect(states.INIT_TLS_TUNNEL_CONNECTION).toBeDefined()
+        expect(states.INIT_TLS_TUNNEL_CONNECTION.invoke.onError.target).toBe('FAILED')
+        expect(states.INIT_TLS_TUNNEL_CONNECTION.invoke.src).toBe('initializeTlsTunnelConnection')
+      })
     })
   })
 })

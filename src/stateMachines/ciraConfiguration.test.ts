@@ -26,7 +26,6 @@ jest.unstable_mockModule('./common.js', () => ({
   invokeWsmanCall: invokeWsmanCallSpy,
   invokeEnterpriseAssistantCall: jest.fn(),
   processTLSTunnelResponse: jest.fn(),
-  getTLSTimeoutMs: jest.fn(),
   HttpResponseError,
   isDigestRealmValid,
   coalesceMessage

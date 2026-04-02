@@ -975,8 +975,8 @@ export class Unconfiguration {
       },
       PULL_TLS_SETTING_DATA_RESPONSE: {
         always: [
-          // Skip TLS disable for TLS-enforced devices - Put on AMT_TLSSettingData doesn't work through TLS tunnel
-          { guard: 'isTLSEnforced', target: 'ENUMERATE_PUBLIC_KEY_CERTIFICATE' },
+          // Skip TLS disable and cert cleanup for TLS-enforced devices — certs are in use by the active TLS tunnel
+          { guard: 'isTLSEnforced', target: 'GET_ENVIRONMENT_DETECTION_SETTINGS' },
           { guard: 'tlsSettingDataEnabled', target: 'DISABLE_TLS_SETTING_DATA' },
           { guard: 'is8021xProfileDisabled', target: 'ENUMERATE_PUBLIC_PRIVATE_KEY_PAIR' },
           { target: 'ENUMERATE_PUBLIC_KEY_CERTIFICATE' }
