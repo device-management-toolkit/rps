@@ -1,3 +1,10 @@
+# [2.34.0](https://github.com/device-management-toolkit/rps/compare/v2.33.1...v2.34.0) (2026-04-02)
+
+
+### Features
+
+* adds support for E2E TLS connection between AMT and RPS ([#2598](https://github.com/device-management-toolkit/rps/issues/2598)) ([73baf43](https://github.com/device-management-toolkit/rps/commit/73baf4318b23b8ed1d9ad2e5749b5fcce5bc9346))
+
 ## [2.33.1](https://github.com/device-management-toolkit/rps/compare/v2.33.0...v2.33.1) (2026-03-30)
 
 
