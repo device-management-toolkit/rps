@@ -3,15 +3,19 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { type Request } from 'express'
 import { check, type CustomValidator } from 'express-validator'
 import { NodeForge } from '../../../NodeForge.js'
-import { CertManager } from '../../../certManager.js'
+import { CertManager, UnsupportedCertificateError } from '../../../certManager.js'
 import Logger from '../../../Logger.js'
 import { type CertsAndKeys } from '../../../models/index.js'
 
 const nodeForge = new NodeForge()
 const certManager = new CertManager(new Logger('CertManager'), nodeForge)
-let pfxobj
+
+// Per-request parsed PFX, shared across the validator chain.
+// Keyed on Request so concurrent requests stay isolated; entries auto-release with the Request.
+const pfxCache = new WeakMap<Request, CertsAndKeys>()
 
 export const domainInsertValidator = (): any => [
   check('profileName')
@@ -61,13 +65,21 @@ export const domainUpdateValidator = (): any => [
 
 function passwordValidator(): CustomValidator {
   return (value, { req }) => {
-    pfxobj = passwordChecker(certManager, req)
+    const provisioningCert = req?.body?.provisioningCert
+
+    if (value == null || value === '' || provisioningCert == null || provisioningCert === '') {
+      return true
+    }
+
+    pfxCache.set(req as Request, passwordChecker(certManager, req))
     return true
   }
 }
 
 function domainSuffixValidator(): CustomValidator {
   return (value, { req }) => {
+    const pfxobj = pfxCache.get(req as Request)
+
     if (pfxobj != null) {
       domainSuffixChecker(pfxobj, value)
     }
@@ -77,6 +89,8 @@ function domainSuffixValidator(): CustomValidator {
 
 function expirationValidator(): CustomValidator {
   return (value, { req }) => {
+    const pfxobj = pfxCache.get(req as Request)
+
     if (pfxobj != null) {
       expirationChecker(pfxobj)
     }
@@ -86,6 +100,8 @@ function expirationValidator(): CustomValidator {
 
 function rootCertValidator(): CustomValidator {
   return (value, { req }) => {
+    const pfxobj = pfxCache.get(req as Request)
+
     if (pfxobj != null) {
       rootCertChecker(pfxobj)
     }
@@ -98,6 +114,10 @@ export function passwordChecker(certManager: CertManager, req: any): CertsAndKey
     const pfxobj = certManager.convertPfxToObject(req.body.provisioningCert, req.body.provisioningCertPassword)
     return pfxobj
   } catch (error) {
+    if (error instanceof UnsupportedCertificateError) {
+      throw error
+    }
+
     throw new Error(
       'Unable to decrypt provisioning certificate. Please check that the password is correct, and that the certificate is a valid certificate.',
       { cause: error }
@@ -106,7 +126,17 @@ export function passwordChecker(certManager: CertManager, req: any): CertsAndKey
 }
 
 export function domainSuffixChecker(pfxobj: CertsAndKeys, value: any): void {
-  const certCommonName = pfxobj.certs[0].subject.getField('CN').value
+  if (!pfxobj.certs || pfxobj.certs.length === 0) {
+    throw new Error('No certificates found in the provisioning certificate')
+  }
+
+  const cnField = pfxobj.certs[0].subject.getField('CN')
+
+  if (!cnField) {
+    throw new Error('Provisioning certificate does not contain a Common Name (CN) in the subject')
+  }
+
+  const certCommonName = cnField.value
   const splittedCertCommonName: string[] = certCommonName.split('.')
   const parsedCertCommonName = (
     splittedCertCommonName[splittedCertCommonName.length - 2] +
