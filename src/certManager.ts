@@ -23,6 +23,15 @@ interface Attribute {
   value: string
 }
 
+export class UnsupportedCertificateError extends Error {
+  public readonly code = 'UNSUPPORTED_CERTIFICATE'
+
+  constructor(message: string) {
+    super(message)
+    this.name = 'UnsupportedCertificateError'
+  }
+}
+
 export class CertManager {
   private readonly nodeForge: NodeForge
   private readonly logger: ILogger
@@ -189,6 +198,13 @@ export class CertManager {
     } else {
       this.logger.error('No certificate bags found in PFX')
       throw new Error('No certificate bags found')
+    }
+
+    if (pfxOut.certs.length === 0) {
+      throw new UnsupportedCertificateError(
+        'No certificates could be parsed from the provisioning certificate. ' +
+          'The certificate may use an unsupported public-key algorithm; an RSA-keyed certificate is required.'
+      )
     }
 
     // Process key bags

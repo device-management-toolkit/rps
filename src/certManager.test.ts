@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { CertManager } from './certManager.js'
+import { CertManager, UnsupportedCertificateError } from './certManager.js'
 import { NodeForge } from './NodeForge.js'
 import { type AMTKeyUsage, type CertAttributes, type CertificateObject } from './models/index.js'
 import Logger from './Logger.js'
@@ -62,6 +62,39 @@ describe('certManager tests', () => {
 
       expect(pfxobj.certs).toHaveLength(2)
       expect(pfxobj.keys).toHaveLength(1)
+    })
+
+    test('throws UnsupportedCertificateError with remediation guidance when cert bags contain no parseable certs (e.g. ECDSA)', () => {
+      const nodeForge = new NodeForge()
+      const certManager = new CertManager(new Logger('CertManager'), nodeForge)
+      const certBagOid = nodeForge.pkiOidsCertBag
+      const keyBagOid = nodeForge.pkcs8ShroudedKeyBag
+
+      spyOn(nodeForge, 'pkcs12FromAsn1').mockReturnValue({
+        getBags: (opts: any) => {
+          if (opts.bagType === certBagOid) {
+            return { [certBagOid]: [{ cert: null }, { cert: null }] }
+          }
+
+          return { [keyBagOid]: [] }
+        }
+      } as any)
+
+      let thrown: unknown
+      try {
+        certManager.convertPfxToObject(TEST_PFXCERT, 'P@ssw0rd')
+      } catch (e) {
+        thrown = e
+      }
+
+      expect(thrown).toBeInstanceOf(UnsupportedCertificateError)
+      const err = thrown as UnsupportedCertificateError
+      expect(err.code).toBe('UNSUPPORTED_CERTIFICATE')
+      expect(err.name).toBe('UnsupportedCertificateError')
+      // diagnostic opening — must remain stable so the UI/clients can match on it
+      expect(err.message).toMatch(/No certificates could be parsed from the provisioning certificate/)
+      // states the actual requirement
+      expect(err.message).toMatch(/RSA/)
     })
   })
 

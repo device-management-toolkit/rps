@@ -5,7 +5,7 @@
 
 import { passwordChecker, domainSuffixChecker, expirationChecker, rootCertChecker } from './domain.js'
 import { NodeForge } from '../../../NodeForge.js'
-import { CertManager } from '../../../certManager.js'
+import { CertManager, UnsupportedCertificateError } from '../../../certManager.js'
 import Logger from '../../../Logger.js'
 
 describe('Domain Profile Validation', () => {
@@ -135,6 +135,36 @@ describe('Domain Profile Validation', () => {
     )
   })
 
+  test('passwordChecker - propagates UnsupportedCertificateError without wrapping', () => {
+    const ecdsaError = new UnsupportedCertificateError(
+      'No certificates could be parsed from the provisioning certificate. ' +
+        'The certificate may use an unsupported public-key algorithm; an RSA-keyed certificate is required.'
+    )
+    const stubCertManager = {
+      convertPfxToObject: () => {
+        throw ecdsaError
+      }
+    } as unknown as CertManager
+
+    const reqWithEcdsaCert = {
+      body: { provisioningCert: 'fake-ecdsa-pfx', provisioningCertPassword: 'P@ssw0rd' }
+    }
+
+    let thrown: unknown
+    try {
+      passwordChecker(stubCertManager, reqWithEcdsaCert)
+    } catch (e) {
+      thrown = e
+    }
+
+    // Must propagate the original UnsupportedCertificateError unchanged so the user
+    // sees the actionable RSA-required message instead of the generic
+    // "Unable to decrypt provisioning certificate" wrapper.
+    expect(thrown).toBeInstanceOf(UnsupportedCertificateError)
+    expect(thrown).toBe(ecdsaError)
+    expect((thrown as Error).message).not.toMatch(/Unable to decrypt/)
+  })
+
   test('passwordChecker - failure', () => {
     req = {
       body: {
@@ -182,6 +212,23 @@ describe('Domain Profile Validation', () => {
     expect(() => {
       domainSuffixChecker(pfxobj, value)
     }).toThrow(new Error('FQDN not associated with provisioning certificate'))
+  })
+
+  test('domainSuffixChecker - empty certs array', () => {
+    const emptyCertsPfx = { certs: [], keys: [] }
+    expect(() => {
+      domainSuffixChecker(emptyCertsPfx as any, 'vprodemo.com')
+    }).toThrow(new Error('No certificates found in the provisioning certificate'))
+  })
+
+  test('domainSuffixChecker - cert without CN', () => {
+    const noCnPfx = {
+      certs: [{ subject: { getField: () => null } }],
+      keys: []
+    }
+    expect(() => {
+      domainSuffixChecker(noCnPfx as any, 'vprodemo.com')
+    }).toThrow(new Error('Provisioning certificate does not contain a Common Name (CN) in the subject'))
   })
 
   test('expirationChecker - success', () => {

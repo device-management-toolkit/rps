@@ -442,12 +442,9 @@
                   "});\r",
                   "pm.test(\"Creation should fail when certificate doesn't exist\", function () {\r",
                   "    var result = pm.response.json();\r",
-                  "    pm.expect(result.errors[0].msg).to.eql(\"Unable to decrypt provisioning certificate. Please check that the password is correct, and that the certificate is a valid certificate.\")\r",
-                  "    pm.expect(result.errors[0].path).to.eql(\"provisioningCertPassword\")\r",
+                  "    pm.expect(result.errors[0].msg).to.eql(\"Provisioning certificate is required\")\r",
+                  "    pm.expect(result.errors[0].path).to.eql(\"provisioningCert\")\r",
                   "    pm.expect(result.errors[0].location).to.eql(\"body\")\r",
-                  "    pm.expect(result.errors[1].msg).to.eql(\"Provisioning certificate is required\")\r",
-                  "    pm.expect(result.errors[1].path).to.eql(\"provisioningCert\")\r",
-                  "    pm.expect(result.errors[1].location).to.eql(\"body\")\r",
                   "});"
                 ],
                 "type": "text/javascript"

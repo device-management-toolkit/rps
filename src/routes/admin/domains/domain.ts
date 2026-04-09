@@ -5,13 +5,12 @@
 
 import { check, type CustomValidator } from 'express-validator'
 import { NodeForge } from '../../../NodeForge.js'
-import { CertManager } from '../../../certManager.js'
+import { CertManager, UnsupportedCertificateError } from '../../../certManager.js'
 import Logger from '../../../Logger.js'
 import { type CertsAndKeys } from '../../../models/index.js'
 
 const nodeForge = new NodeForge()
 const certManager = new CertManager(new Logger('CertManager'), nodeForge)
-let pfxobj
 
 export const domainInsertValidator = (): any => [
   check('profileName')
@@ -25,15 +24,13 @@ export const domainInsertValidator = (): any => [
     .isEmpty()
     .withMessage('Provisioning Cert Password is required')
     .isLength({ max: 64 })
-    .withMessage('Password should not exceed 64 characters in length')
-    .custom(passwordValidator()),
-  check('domainSuffix').not().isEmpty().withMessage('Domain suffix name is required').custom(domainSuffixValidator()),
+    .withMessage('Password should not exceed 64 characters in length'),
+  check('domainSuffix').not().isEmpty().withMessage('Domain suffix name is required'),
   check('provisioningCert')
     .not()
     .isEmpty()
     .withMessage('Provisioning certificate is required')
-    .custom(expirationValidator())
-    .custom(rootCertValidator()),
+    .custom(provisioningCertValidator()),
   check('provisioningCertStorageFormat')
     .not()
     .isEmpty()
@@ -59,36 +56,17 @@ export const domainUpdateValidator = (): any => [
     .withMessage('Password should not exceed 64 characters in length')
 ]
 
-function passwordValidator(): CustomValidator {
+function provisioningCertValidator(): CustomValidator {
   return (value, { req }) => {
-    pfxobj = passwordChecker(certManager, req)
-    return true
-  }
-}
-
-function domainSuffixValidator(): CustomValidator {
-  return (value, { req }) => {
-    if (pfxobj != null) {
-      domainSuffixChecker(pfxobj, value)
+    const password = req?.body?.provisioningCertPassword
+    if (password == null || password === '' || value == null || value === '') {
+      return true
     }
-    return true
-  }
-}
 
-function expirationValidator(): CustomValidator {
-  return (value, { req }) => {
-    if (pfxobj != null) {
-      expirationChecker(pfxobj)
-    }
-    return true
-  }
-}
-
-function rootCertValidator(): CustomValidator {
-  return (value, { req }) => {
-    if (pfxobj != null) {
-      rootCertChecker(pfxobj)
-    }
+    const pfxobj = passwordChecker(certManager, req)
+    domainSuffixChecker(pfxobj, req?.body?.domainSuffix)
+    expirationChecker(pfxobj)
+    rootCertChecker(pfxobj)
     return true
   }
 }
@@ -98,6 +76,10 @@ export function passwordChecker(certManager: CertManager, req: any): CertsAndKey
     const pfxobj = certManager.convertPfxToObject(req.body.provisioningCert, req.body.provisioningCertPassword)
     return pfxobj
   } catch (error) {
+    if (error instanceof UnsupportedCertificateError) {
+      throw error
+    }
+
     throw new Error(
       'Unable to decrypt provisioning certificate. Please check that the password is correct, and that the certificate is a valid certificate.',
       { cause: error }
@@ -106,7 +88,17 @@ export function passwordChecker(certManager: CertManager, req: any): CertsAndKey
 }
 
 export function domainSuffixChecker(pfxobj: CertsAndKeys, value: any): void {
-  const certCommonName = pfxobj.certs[0].subject.getField('CN').value
+  if (!pfxobj.certs || pfxobj.certs.length === 0) {
+    throw new Error('No certificates found in the provisioning certificate')
+  }
+
+  const cnField = pfxobj.certs[0].subject.getField('CN')
+
+  if (!cnField) {
+    throw new Error('Provisioning certificate does not contain a Common Name (CN) in the subject')
+  }
+
+  const certCommonName = cnField.value
   const splittedCertCommonName: string[] = certCommonName.split('.')
   const parsedCertCommonName = (
     splittedCertCommonName[splittedCertCommonName.length - 2] +
