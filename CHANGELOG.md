@@ -1,3 +1,10 @@
+## [2.34.1](https://github.com/device-management-toolkit/rps/compare/v2.34.0...v2.34.1) (2026-04-09)
+
+
+### Bug Fixes
+
+* return clear error for unsupported ECDSA/EC provisioning certificates ([#2604](https://github.com/device-management-toolkit/rps/issues/2604)) ([35d4840](https://github.com/device-management-toolkit/rps/commit/35d484017b1b8428e53eef3c550a75da2a843298)), closes [#2505](https://github.com/device-management-toolkit/rps/issues/2505)
+
 # [2.34.0](https://github.com/device-management-toolkit/rps/compare/v2.33.1...v2.34.0) (2026-04-02)
 
 
