@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { type Request } from 'express'
 import { check, type CustomValidator } from 'express-validator'
 import { NodeForge } from '../../../NodeForge.js'
 import { CertManager, UnsupportedCertificateError } from '../../../certManager.js'
@@ -12,10 +11,6 @@ import { type CertsAndKeys } from '../../../models/index.js'
 
 const nodeForge = new NodeForge()
 const certManager = new CertManager(new Logger('CertManager'), nodeForge)
-
-// Per-request parsed PFX, shared across the validator chain.
-// Keyed on Request so concurrent requests stay isolated; entries auto-release with the Request.
-const pfxCache = new WeakMap<Request, CertsAndKeys>()
 
 export const domainInsertValidator = (): any => [
   check('profileName')
@@ -29,15 +24,13 @@ export const domainInsertValidator = (): any => [
     .isEmpty()
     .withMessage('Provisioning Cert Password is required')
     .isLength({ max: 64 })
-    .withMessage('Password should not exceed 64 characters in length')
-    .custom(passwordValidator()),
-  check('domainSuffix').not().isEmpty().withMessage('Domain suffix name is required').custom(domainSuffixValidator()),
+    .withMessage('Password should not exceed 64 characters in length'),
+  check('domainSuffix').not().isEmpty().withMessage('Domain suffix name is required'),
   check('provisioningCert')
     .not()
     .isEmpty()
     .withMessage('Provisioning certificate is required')
-    .custom(expirationValidator())
-    .custom(rootCertValidator()),
+    .custom(provisioningCertValidator()),
   check('provisioningCertStorageFormat')
     .not()
     .isEmpty()
@@ -63,48 +56,17 @@ export const domainUpdateValidator = (): any => [
     .withMessage('Password should not exceed 64 characters in length')
 ]
 
-function passwordValidator(): CustomValidator {
+function provisioningCertValidator(): CustomValidator {
   return (value, { req }) => {
-    const provisioningCert = req?.body?.provisioningCert
-
-    if (value == null || value === '' || provisioningCert == null || provisioningCert === '') {
+    const password = req?.body?.provisioningCertPassword
+    if (password == null || password === '' || value == null || value === '') {
       return true
     }
 
-    pfxCache.set(req as Request, passwordChecker(certManager, req))
-    return true
-  }
-}
-
-function domainSuffixValidator(): CustomValidator {
-  return (value, { req }) => {
-    const pfxobj = pfxCache.get(req as Request)
-
-    if (pfxobj != null) {
-      domainSuffixChecker(pfxobj, value)
-    }
-    return true
-  }
-}
-
-function expirationValidator(): CustomValidator {
-  return (value, { req }) => {
-    const pfxobj = pfxCache.get(req as Request)
-
-    if (pfxobj != null) {
-      expirationChecker(pfxobj)
-    }
-    return true
-  }
-}
-
-function rootCertValidator(): CustomValidator {
-  return (value, { req }) => {
-    const pfxobj = pfxCache.get(req as Request)
-
-    if (pfxobj != null) {
-      rootCertChecker(pfxobj)
-    }
+    const pfxobj = passwordChecker(certManager, req)
+    domainSuffixChecker(pfxobj, req?.body?.domainSuffix)
+    expirationChecker(pfxobj)
+    rootCertChecker(pfxobj)
     return true
   }
 }
