@@ -35,7 +35,7 @@ services:
     volumes:
       - ./data:/docker-entrypoint-initdb.d
   vault:
-    image: hashicorp/vault
+    image: hashicorp/vault:1.21
     networks:
       - openamtnetwork1
     ports:
