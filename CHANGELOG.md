@@ -1,3 +1,10 @@
+## [2.34.3](https://github.com/device-management-toolkit/rps/compare/v2.34.2...v2.34.3) (2026-04-22)
+
+
+### Performance Improvements
+
+* improves rpc to rps performance ([#2681](https://github.com/device-management-toolkit/rps/issues/2681)) ([79f9a53](https://github.com/device-management-toolkit/rps/commit/79f9a5370d518d79efbe7aeec8048d3dd6e9bb52))
+
 ## [2.34.2](https://github.com/device-management-toolkit/rps/compare/v2.34.1...v2.34.2) (2026-04-10)
 
 ## [2.34.1](https://github.com/device-management-toolkit/rps/compare/v2.34.0...v2.34.1) (2026-04-09)
