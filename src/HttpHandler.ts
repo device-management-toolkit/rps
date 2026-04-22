@@ -30,7 +30,7 @@ export class HttpHandler {
     this.logger = new Logger('HttpHandler')
   }
 
-  wrapIt(data: string, connectionParams: connectionParams): string | null {
+  wrapIt(data: string, connectionParams: connectionParams, keepAlive = false): string | null {
     try {
       const url = '/wsman'
       const action = 'POST'
@@ -65,11 +65,16 @@ export class HttpHandler {
       }
       // Use Chunked-Encoding
 
+      const headers = [
+        `Host: ${connectionParams.guid}:${connectionParams.port}`,
+        'Transfer-Encoding: chunked'
+      ]
+      if (!keepAlive) {
+        headers.push('Connection: close')
+      }
       message += Buffer.from(
         [
-          `Host: ${connectionParams.guid}:${connectionParams.port}`,
-          'Transfer-Encoding: chunked',
-          'Connection: close',
+          ...headers,
           '',
           data.length.toString(16).toUpperCase(),
           data,
