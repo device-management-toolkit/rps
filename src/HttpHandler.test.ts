@@ -114,6 +114,7 @@ it('should return a WSMan request', async () => {
   }
   const result = httpHandler.wrapIt(xmlRequestBody, connectionParams)
   expect(result).toContain('Authorization')
+  expect(result).toContain('Connection: close')
 })
 it('should return a null when no xml is passed to wrap a WSMan request', async () => {
   const digestChallenge = {

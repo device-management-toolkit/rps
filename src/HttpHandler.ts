@@ -69,6 +69,7 @@ export class HttpHandler {
         [
           `Host: ${connectionParams.guid}:${connectionParams.port}`,
           'Transfer-Encoding: chunked',
+          'Connection: close',
           '',
           data.length.toString(16).toUpperCase(),
           data,
