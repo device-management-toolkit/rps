@@ -26,6 +26,9 @@ config.delay_tls_put_data_sync = 5000
 config.delay_tls_timer = config.delay_tls_timer ?? 15
 // Set to true to validate AMT TLS certificates; defaults to false (self-signed certs)
 config.amt_tls_reject_unauthorized = config.amt_tls_reject_unauthorized ?? false
+// When true, the TLS tunnel is reused across WSMAN calls (keep-alive). When false,
+// the tunnel is torn down and re-established for every message (Connection: close).
+config.amt_tls_tunnel_persistent = config.amt_tls_tunnel_persistent ?? true
 log.silly(`config: ${JSON.stringify(config, null, 2)}`)
 
 const Environment = {

@@ -23,5 +23,5 @@
   "consul_host": "localhost",
   "consul_port": "8500",
   "consul_key_prefix": "RPS",
-  "amt_tls_reject_unauthorized": false
+  "amt_tls_tunnel_persistent": true
 }

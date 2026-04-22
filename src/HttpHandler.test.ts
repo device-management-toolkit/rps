@@ -114,6 +114,27 @@ it('should return a WSMan request', async () => {
   }
   const result = httpHandler.wrapIt(xmlRequestBody, connectionParams)
   expect(result).toContain('Authorization')
+  expect(result).toContain('Connection: close')
+})
+it('should omit Connection: close when keepAlive is true', async () => {
+  const cim = new CIM.Messages()
+  const xmlRequestBody = cim.ServiceAvailableToElement.Enumerate()
+  const digestChallenge = {
+    realm: 'Digest:56ABC7BE224EF620C69EB88F01071DC8',
+    nonce: 'fVNueyEAAAAAAAAAcO8WqJ8s+WdyFUIY',
+    stale: 'false',
+    qop: 'auth'
+  }
+  const connectionParams = {
+    guid: '4c4c4544-004b-4210-8033-b6c04f504633',
+    port: 16992,
+    digestChallenge,
+    username: 'admin',
+    password: 'P@ssw0rd'
+  }
+  const result = httpHandler.wrapIt(xmlRequestBody, connectionParams, true)
+  expect(result).toContain('Authorization')
+  expect(result).not.toContain('Connection: close')
 })
 it('should return a null when no xml is passed to wrap a WSMan request', async () => {
   const digestChallenge = {

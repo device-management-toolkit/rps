@@ -113,6 +113,7 @@ export interface RPSConfig {
   jwt_token_header: string
   jwt_tenant_property: string
   amt_tls_reject_unauthorized: boolean
+  amt_tls_tunnel_persistent?: boolean
 }
 export enum AMTRedirectionServiceEnabledStates {
   DISABLED = 32768,

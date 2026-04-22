@@ -47,7 +47,11 @@ export class HttpResponseError extends Error {
 const invokeWsmanCallInternal = async <T>(context: any): Promise<T> => {
   const { clientId, xmlMessage, httpHandler } = context
   const clientObj = devices[clientId]
-  const message = httpHandler.wrapIt(xmlMessage, clientObj.connectionParams)
+  // Keep-alive only makes sense when reusing a TLS tunnel across messages.
+  // Non-TLS path opens a fresh socket per message in rpc-go, so Connection: close is optimal there.
+  const persistentTunnel = Environment.Config.amt_tls_tunnel_persistent !== false
+  const keepAlive = clientObj.tlsEnforced === true && persistentTunnel
+  const message = httpHandler.wrapIt(xmlMessage, clientObj.connectionParams, keepAlive)
 
   // Log the outgoing WSMAN request
   const actionMatch = xmlMessage?.match(/<a:Action>([^<]+)<\/a:Action>/)
@@ -129,7 +133,19 @@ const invokeWsmanCallViaTLSTunnel = async <T>(context: any, message: string): Pr
     clientObj.reject(err)
   }
 
-  return await clientObj.pendingPromise
+  const result = (await clientObj.pendingPromise) as T
+
+  // When tunnel persistence is disabled, we send Connection: close so AMT tears down
+  // the TCP socket after each response. Close the tunnel here so the next call rebuilds.
+  if (Environment.Config.amt_tls_tunnel_persistent === false) {
+    invokeWsmanLogger.debug('Closing TLS tunnel after response (amt_tls_tunnel_persistent=false)')
+    clientObj.tlsTunnelManager?.close()
+    clientObj.tlsTunnelManager = undefined
+    clientObj.tlsTunnelSessionId = undefined
+    clientObj.tlsTunnelNeedsReset = true
+  }
+
+  return result
 }
 
 /**
