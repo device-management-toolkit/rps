@@ -3,30 +3,34 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import Consul from 'consul'
+import got, { type Got } from 'got'
 import Logger from './Logger.js'
 import { type RPSConfig } from './models/index.js'
 import type { IServiceManager } from './interfaces/IServiceManager.js'
 import { Environment } from './utils/Environment.js'
 
 export class ConsulService implements IServiceManager {
-  consul: Consul
+  gotClient: Got
   log = new Logger('ConsulService')
   constructor(host: string, port: number) {
-    this.consul = new Consul({
-      host,
-      port,
-      secure: false // set to true if your Consul server uses https
+    this.gotClient = got.extend({
+      prefixUrl: `http://${host}:${port}/v1/`
     })
   }
 
   async health(serviceName: string): Promise<any> {
-    return await this.consul.health.service({ service: serviceName, passing: true })
+    return await this.gotClient
+      .get(`health/service/${encodeURIComponent(serviceName)}`, {
+        searchParams: { passing: true }
+      })
+      .json()
   }
 
   async seed(prefix: string, config: RPSConfig): Promise<boolean> {
     try {
-      await this.consul.kv.set(`${prefix}/config`, JSON.stringify(config, null, 2))
+      await this.gotClient.put(`kv/${encodeURIComponent(prefix)}/config`, {
+        body: JSON.stringify(config, null, 2)
+      })
       this.log.info('Wrote configuration settings to Consul.')
       return true
     } catch (e) {
@@ -35,7 +39,20 @@ export class ConsulService implements IServiceManager {
   }
 
   async get(prefix: string): Promise<any> {
-    return await this.consul.kv.get({ key: prefix + '/', recurse: true })
+    try {
+      const entries = (await this.gotClient
+        .get(`kv/${encodeURIComponent(prefix)}/`, {
+          searchParams: { recurse: true }
+        })
+        .json()) as { Key: string; Value: string | null }[]
+      return entries.map((entry) => ({
+        ...entry,
+        Value: entry.Value != null ? Buffer.from(entry.Value, 'base64').toString('utf-8') : entry.Value
+      }))
+    } catch (e: any) {
+      if (e?.response?.statusCode === 404) return null
+      throw e
+    }
   }
 
   process(consulValues: object): string {
