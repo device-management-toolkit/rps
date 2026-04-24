@@ -3,7 +3,16 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { passwordChecker, domainSuffixChecker, expirationChecker, rootCertChecker } from './domain.js'
+import {
+  passwordChecker,
+  domainSuffixChecker,
+  expirationChecker,
+  rootCertChecker,
+  keySizeChecker,
+  privateKeyChecker,
+  chainIntegrityChecker,
+  amtOidChecker
+} from './domain.js'
 import { NodeForge } from '../../../NodeForge.js'
 import { CertManager, UnsupportedCertificateError } from '../../../certManager.js'
 import Logger from '../../../Logger.js'
@@ -237,11 +246,20 @@ describe('Domain Profile Validation', () => {
     }).not.toThrow(new Error('Uploaded certificate has expired'))
   })
 
-  test('expirationChecker - failure', () => {
+  test('expirationChecker - failure - expired', () => {
     pfxobj.certs[0].validity.notAfter = new Date(1478708162000)
     expect(() => {
       expirationChecker(pfxobj)
     }).toThrow(new Error('Uploaded certificate has expired'))
+  })
+
+  test('expirationChecker - failure - not yet valid', () => {
+    const tomorrow = new Date()
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    pfxobj.certs[0].validity.notBefore = tomorrow
+    expect(() => {
+      expirationChecker(pfxobj)
+    }).toThrow('Uploaded certificate is not yet valid: notBefore date')
   })
 
   test('rootCertChecker - success', () => {
@@ -262,5 +280,94 @@ describe('Domain Profile Validation', () => {
     expect(() => {
       rootCertChecker(pfxobjNoRoot)
     }).toThrow(new Error('Provisioning certificate does not contain a root certificate'))
+  })
+
+  test('keySizeChecker - success', () => {
+    expect(() => {
+      keySizeChecker(pfxobj)
+    }).not.toThrow()
+  })
+
+  test('keySizeChecker - failure - key too small', () => {
+    const weakPfxobj = {
+      certs: [{ publicKey: { n: { bitLength: () => 1024 } } }],
+      keys: []
+    } as any
+    expect(() => {
+      keySizeChecker(weakPfxobj)
+    }).toThrow('Certificate key size 1024 bits is below the minimum required 2048 bits for AMT')
+  })
+
+  test('privateKeyChecker - success', () => {
+    expect(() => {
+      privateKeyChecker(pfxobj)
+    }).not.toThrow()
+  })
+
+  test('privateKeyChecker - failure - no private key', () => {
+    const noKeyPfxobj = { certs: [{}], keys: [] } as any
+    expect(() => {
+      privateKeyChecker(noKeyPfxobj)
+    }).toThrow('Provisioning certificate does not contain a private key')
+  })
+
+  test('privateKeyChecker - failure - mismatched key', () => {
+    const mismatchedPfxobj = {
+      certs: [{ publicKey: { n: { equals: () => false } } }],
+      keys: [{ n: {} }]
+    } as any
+    expect(() => {
+      privateKeyChecker(mismatchedPfxobj)
+    }).toThrow('Private key in the PFX does not match the leaf certificate public key')
+  })
+
+  test('chainIntegrityChecker - success - single cert returns early', () => {
+    const singleCertPfxobj = { certs: [{}], keys: [] } as any
+    expect(() => {
+      chainIntegrityChecker(singleCertPfxobj)
+    }).not.toThrow()
+  })
+
+  test('chainIntegrityChecker - failure - broken issuer link', () => {
+    const brokenChainPfxobj = {
+      certs: [
+        { subject: { hash: 'leaf' }, issuer: { hash: 'intermediate' } },
+        { subject: { hash: 'unrelated' }, issuer: { hash: 'unrelated' } } // self-signed but wrong subject
+      ],
+      keys: []
+    } as any
+    expect(() => {
+      chainIntegrityChecker(brokenChainPfxobj)
+    }).toThrow('Certificate chain is broken: cannot find issuer for a certificate in the chain')
+  })
+
+  test('amtOidChecker - success', () => {
+    const validPfxobj = {
+      certs: [{ getExtension: () => ({ '2.16.840.1.113741.1.2.3': true }) }],
+      keys: []
+    } as any
+    expect(() => {
+      amtOidChecker(validPfxobj)
+    }).not.toThrow()
+  })
+
+  test('amtOidChecker - failure - missing AMT OID', () => {
+    const noOidPfxobj = {
+      certs: [{ getExtension: () => ({ serverAuth: true, clientAuth: true }) }],
+      keys: []
+    } as any
+    expect(() => {
+      amtOidChecker(noOidPfxobj)
+    }).toThrow('Leaf certificate is missing the Intel AMT Activation EKU OID (2.16.840.1.113741.1.2.3)')
+  })
+
+  test('amtOidChecker - failure - no EKU extension', () => {
+    const noEkuPfxobj = {
+      certs: [{ getExtension: () => null }],
+      keys: []
+    } as any
+    expect(() => {
+      amtOidChecker(noEkuPfxobj)
+    }).toThrow('Leaf certificate is missing the Intel AMT Activation EKU OID (2.16.840.1.113741.1.2.3)')
   })
 })
