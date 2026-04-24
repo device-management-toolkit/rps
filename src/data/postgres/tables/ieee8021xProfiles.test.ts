@@ -16,13 +16,12 @@ import {
 import { IEEE8021xProfilesTable } from './ieee8021xProfiles.js'
 import { PostgresErr } from '../errors.js'
 import { RPSError } from '../../../utils/RPSError.js'
-import { jest } from '@jest/globals'
-import { type Spied, spyOn } from 'jest-mock'
 
+import { vi, type MockInstance } from 'vitest'
 describe('8021x profiles tests', () => {
   let db: PostgresDb
   let ieee8021xprofilesTable: IEEE8021xProfilesTable
-  let querySpy: Spied<any>
+  let querySpy: MockInstance
   let ieee8021xConfig: Ieee8021xConfig
   const profileName = 'profileName'
   beforeEach(() => {
@@ -42,10 +41,10 @@ describe('8021x profiles tests', () => {
     }
     db = new PostgresDb('')
     ieee8021xprofilesTable = new IEEE8021xProfilesTable(db)
-    querySpy = spyOn(ieee8021xprofilesTable.db, 'query')
+    querySpy = vi.spyOn(ieee8021xprofilesTable.db, 'query')
   })
   afterEach(() => {
-    jest.clearAllMocks()
+    vi.clearAllMocks()
   })
   describe('Get', () => {
     test('should get expected count', async () => {
@@ -158,7 +157,7 @@ describe('8021x profiles tests', () => {
   describe('Insert', () => {
     test('should insert', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 1 })
-      const getByNameSpy = spyOn(ieee8021xprofilesTable, 'getByName')
+      const getByNameSpy = vi.spyOn(ieee8021xprofilesTable, 'getByName')
       getByNameSpy.mockResolvedValue(ieee8021xConfig)
       const result = await ieee8021xprofilesTable.insert(ieee8021xConfig)
 
@@ -167,7 +166,7 @@ describe('8021x profiles tests', () => {
     })
     test('should get a null if insert returns no rows (should throw error actually)', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 0 })
-      const getByNameSpy = spyOn(ieee8021xprofilesTable, 'getByName')
+      const getByNameSpy = vi.spyOn(ieee8021xprofilesTable, 'getByName')
       getByNameSpy.mockResolvedValue(ieee8021xConfig)
       const result = await ieee8021xprofilesTable.insert(ieee8021xConfig)
       expect(result).toBeNull()
@@ -188,7 +187,7 @@ describe('8021x profiles tests', () => {
   describe('Update', () => {
     test('should Update', async () => {
       querySpy.mockResolvedValueOnce({ rows: [{}], rowCount: 1 })
-      const getByNameSpy = spyOn(ieee8021xprofilesTable, 'getByName')
+      const getByNameSpy = vi.spyOn(ieee8021xprofilesTable, 'getByName')
       getByNameSpy.mockResolvedValue(ieee8021xConfig)
       const result = await ieee8021xprofilesTable.update(ieee8021xConfig)
       expect(result).toBe(ieee8021xConfig)
@@ -202,7 +201,7 @@ describe('8021x profiles tests', () => {
     })
     test('should NOT update when concurrency issue', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 0 })
-      const getByNameSpy = spyOn(ieee8021xprofilesTable, 'getByName')
+      const getByNameSpy = vi.spyOn(ieee8021xprofilesTable, 'getByName')
       getByNameSpy.mockResolvedValue(ieee8021xConfig)
       await expect(ieee8021xprofilesTable.update(ieee8021xConfig)).rejects.toThrow(CONCURRENCY_MESSAGE)
       expect(querySpy).toHaveBeenCalledTimes(1)

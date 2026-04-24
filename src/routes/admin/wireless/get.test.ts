@@ -3,15 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { createSpyObj } from '../../../test/helper/jest.js'
+import { createSpyObj } from '../../../test/helper/testUtils.js'
 import { getWirelessProfile } from './get.js'
-import { jest } from '@jest/globals'
-import { type Spied, spyOn } from 'jest-mock'
 
+import { vi, type MockInstance } from 'vitest'
 describe('Wireless - Get', () => {
   let resSpy
   let req
-  let getByNameSpy: Spied<any>
+  let getByNameSpy: MockInstance
 
   beforeEach(() => {
     resSpy = createSpyObj('Response', [
@@ -21,12 +20,12 @@ describe('Wireless - Get', () => {
       'send'
     ])
     req = {
-      db: { wirelessProfiles: { getByName: jest.fn() } },
+      db: { wirelessProfiles: { getByName: vi.fn() } },
       query: {},
       params: { profileName: 'profileName' },
       tenantId: ''
     }
-    getByNameSpy = spyOn(req.db.wirelessProfiles, 'getByName').mockResolvedValue({})
+    getByNameSpy = vi.spyOn(req.db.wirelessProfiles, 'getByName').mockResolvedValue({})
 
     resSpy.status.mockReturnThis()
     resSpy.json.mockReturnThis()
@@ -38,7 +37,7 @@ describe('Wireless - Get', () => {
     expect(resSpy.status).toHaveBeenCalledWith(200)
   })
   it('should handle error', async () => {
-    spyOn(req.db.wirelessProfiles, 'getByName').mockRejectedValue(null)
+    vi.spyOn(req.db.wirelessProfiles, 'getByName').mockRejectedValue(null)
     await getWirelessProfile(req, resSpy)
     expect(getByNameSpy).toHaveBeenCalledWith('profileName', req.tenantId)
     expect(resSpy.status).toHaveBeenCalledWith(500)

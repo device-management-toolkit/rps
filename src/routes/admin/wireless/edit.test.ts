@@ -3,15 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { createSpyObj } from '../../../test/helper/jest.js'
+import { createSpyObj } from '../../../test/helper/testUtils.js'
 import { editWirelessProfile } from './edit.js'
-import { jest } from '@jest/globals'
-import { type Spied, spyOn } from 'jest-mock'
 
+import { vi, type MockInstance } from 'vitest'
 describe('Wireless - Edit', () => {
   let resSpy
   let req
-  let getByNameSpy: Spied<any>
+  let getByNameSpy: MockInstance
 
   beforeEach(() => {
     resSpy = createSpyObj('Response', [
@@ -21,13 +20,13 @@ describe('Wireless - Edit', () => {
       'send'
     ])
     req = {
-      db: { wirelessProfiles: { getByName: jest.fn(), update: jest.fn() } },
+      db: { wirelessProfiles: { getByName: vi.fn(), update: vi.fn() } },
       body: { profileName: 'profileName' },
       tenantId: '',
       query: {}
     }
-    getByNameSpy = spyOn(req.db.wirelessProfiles, 'getByName').mockResolvedValue({})
-    spyOn(req.db.wirelessProfiles, 'update').mockResolvedValue({})
+    getByNameSpy = vi.spyOn(req.db.wirelessProfiles, 'getByName').mockResolvedValue({})
+    vi.spyOn(req.db.wirelessProfiles, 'update').mockResolvedValue({})
 
     resSpy.status.mockReturnThis()
     resSpy.json.mockReturnThis()
@@ -39,13 +38,13 @@ describe('Wireless - Edit', () => {
     expect(resSpy.status).toHaveBeenCalledWith(200)
   })
   it('should handle not found', async () => {
-    spyOn(req.db.wirelessProfiles, 'getByName').mockResolvedValue(null)
+    vi.spyOn(req.db.wirelessProfiles, 'getByName').mockResolvedValue(null)
     await editWirelessProfile(req, resSpy)
     expect(getByNameSpy).toHaveBeenCalledWith('profileName', req.tenantId)
     expect(resSpy.status).toHaveBeenCalledWith(404)
   })
   it('should handle error', async () => {
-    spyOn(req.db.wirelessProfiles, 'getByName').mockRejectedValue(null)
+    vi.spyOn(req.db.wirelessProfiles, 'getByName').mockRejectedValue(null)
     await editWirelessProfile(req, resSpy)
     expect(getByNameSpy).toHaveBeenCalledWith('profileName', req.tenantId)
     expect(resSpy.status).toHaveBeenCalledWith(500)

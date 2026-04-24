@@ -6,20 +6,19 @@
 import Logger from './Logger.js'
 import { type ILogger } from './interfaces/ILogger.js'
 import { promises, enterpriseAssistantSocket, WSEnterpriseAssistantListener } from './WSEnterpriseAssistantListener.js'
-import { jest } from '@jest/globals'
-import { type Spied, spyOn } from 'jest-mock'
 
+import { vi, type MockInstance } from 'vitest'
 describe('Websocket Listener', () => {
   const log: ILogger = new Logger('WebSocketListener')
   let server: WSEnterpriseAssistantListener
   let isConnected: boolean
-  let onSpy: Spied<any>
+  let onSpy: MockInstance
   let serverStub
   beforeEach(() => {
     serverStub = {
-      on: jest.fn()
+      on: vi.fn()
     } as any
-    onSpy = spyOn(serverStub, 'on')
+    onSpy = vi.spyOn(serverStub, 'on')
     server = new WSEnterpriseAssistantListener(log)
   })
   it('should start WebSocket server', () => {
@@ -36,9 +35,9 @@ describe('Websocket Listener', () => {
 
   it('Should initialize enterprise assistant socket on connect', async () => {
     const mockWebSocket = {
-      on: jest.fn()
+      on: vi.fn()
     }
-    const webSocketMock = spyOn(mockWebSocket, 'on')
+    const webSocketMock = vi.spyOn(mockWebSocket, 'on')
     server.onClientConnected(mockWebSocket as any)
     expect(webSocketMock).toHaveBeenCalledTimes(3)
     expect(enterpriseAssistantSocket).toBeDefined()
@@ -49,7 +48,7 @@ describe('Websocket Listener', () => {
       name: 'abc',
       message: 'abcd'
     }
-    const loggerSpy = spyOn(server.logger, 'error')
+    const loggerSpy = vi.spyOn(server.logger, 'error')
     server.onError(error)
     expect(loggerSpy).toHaveBeenCalled()
   })
@@ -60,7 +59,7 @@ describe('Websocket Listener', () => {
       promises['4c4c4544-004d-4d10-8050-b2c04f325133'].resolve = resolve
       promises['4c4c4544-004d-4d10-8050-b2c04f325133'].reject = reject
     })
-    const promiseSpy = spyOn(promises['4c4c4544-004d-4d10-8050-b2c04f325133'], 'resolve')
+    const promiseSpy = vi.spyOn(promises['4c4c4544-004d-4d10-8050-b2c04f325133'], 'resolve')
 
     const message: any = JSON.stringify({
       action: 'satellite',
@@ -83,13 +82,13 @@ describe('Websocket Listener', () => {
   })
 
   it('Should generate error when not parse-able', async () => {
-    const loggerSpy = spyOn(server.logger, 'error')
+    const loggerSpy = vi.spyOn(server.logger, 'error')
     const message: any = 'break the code'
     await server.onMessageReceived(message)
     expect(loggerSpy).toHaveBeenCalled()
   })
   // it('Should process client message and not respond when no response to send', async () => {
-  //   const processMessageSpy = spyOn(server.dataProcessor, 'processData').mockResolvedValue(null)
+  //   const processMessageSpy = vi.spyOn(server.dataProcessor, 'processData').mockResolvedValue(null)
   //   const message: WebSocket.Data = 'abcd'
   //   await server.onMessageReceived(message)
   //   expect(processMessageSpy).toHaveBeenCalled()

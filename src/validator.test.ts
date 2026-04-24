@@ -15,9 +15,8 @@ import { VersionChecker } from './VersionChecker.js'
 import { devices } from './devices.js'
 import { ClientAction, type ClientObject } from './models/RCS.Config.js'
 import { type DeviceCredentials } from './interfaces/ISecretManagerService.js'
-import { jest } from '@jest/globals'
-import { spyOn } from 'jest-mock'
 
+import { vi } from 'vitest'
 Environment.Config = config
 const configurator: Configurator = new Configurator()
 const validator = new Validator(new Logger('Validator'), configurator)
@@ -61,23 +60,23 @@ describe('validator', () => {
   describe('get Device Credentials ', () => {
     test('should get device credentials from secret provider', async () => {
       const cred = { MPS_PASSWORD: 'sOK1A4Wh$rtp!FB2', AMT_PASSWORD: 'Intel123!', MEBX_PASSWORD: 'Intel123!' }
-      const getSpy = spyOn(validator.configurator.secretsManager, 'getSecretAtPath').mockImplementation(
-        async () => cred
-      )
+      const getSpy = vi
+        .spyOn(validator.configurator.secretsManager, 'getSecretAtPath')
+        .mockImplementation(async () => cred)
       const amtDevice = await validator.getDeviceCredentials(msg)
       expect(amtDevice).toBe(cred)
       expect(getSpy).toHaveBeenCalled()
     })
     test('should return null when credentials does not exists', async () => {
-      const getSpy = spyOn(validator.configurator.secretsManager, 'getSecretAtPath').mockImplementation(
-        async () => null
-      )
+      const getSpy = vi
+        .spyOn(validator.configurator.secretsManager, 'getSecretAtPath')
+        .mockImplementation(async () => null)
       const amtDevice = await validator.getDeviceCredentials(msg)
       expect(amtDevice).toBeNull()
       expect(getSpy).toHaveBeenCalled()
     })
     test('should return null on an exception', async () => {
-      const getSpy = spyOn(validator.configurator.secretsManager, 'getSecretAtPath').mockImplementation(async () => {
+      const getSpy = vi.spyOn(validator.configurator.secretsManager, 'getSecretAtPath').mockImplementation(async () => {
         throw new Error()
       })
       const amtDevice = await validator.getDeviceCredentials(msg)
@@ -90,9 +89,9 @@ describe('validator', () => {
     let getSpy
     beforeEach(() => {
       const cred = { MPS_PASSWORD: 'sOK1A4Wh$rtp!FB2', AMT_PASSWORD: 'Intel123!', MEBX_PASSWORD: 'Intel123!' }
-      getSpy = spyOn(validator.configurator.secretsManager, 'getSecretAtPath').mockImplementation(
-        async () => cred as any
-      )
+      getSpy = vi
+        .spyOn(validator.configurator.secretsManager, 'getSecretAtPath')
+        .mockImplementation(async () => cred as any)
     })
     test('should get device credentials from secret provider', async () => {
       const clientId = randomUUID()
@@ -230,13 +229,12 @@ describe('validator', () => {
     let rpsError = null
     let verifyDevicePasswordSpy
     beforeEach(() => {
-      jest.resetAllMocks()
+      vi.resetAllMocks()
       rpsError = null
       msg.method = 'maintenance'
       msg.payload.task = 'synctime'
       msg.payload.currentMode = 1
-      verifyDevicePasswordSpy = spyOn(validator, 'verifyDevicePassword').mockResolvedValue()
-      verifyDevicePasswordSpy.mockReset()
+      verifyDevicePasswordSpy = vi.spyOn(validator, 'verifyDevicePassword').mockResolvedValue()
     })
     test('should pass happy path', async () => {
       try {
@@ -325,7 +323,7 @@ describe('validator', () => {
       expect(rpsError.message).toEqual(`Device ${msg.payload.uuid} activation failed. Missing password.`)
     })
     test('should throw an exception if profile does not match', async () => {
-      const getAMTProfileSpy = spyOn(configurator.profileManager, 'getAmtProfile').mockReturnValue(null as any)
+      const getAMTProfileSpy = vi.spyOn(configurator.profileManager, 'getAmtProfile').mockReturnValue(null as any)
       let rpsError: any = null
       try {
         msg.payload.profile = 'profile5'
@@ -368,12 +366,12 @@ describe('validator', () => {
     let verifyAMTVersionSpy
     let verifyDevicePasswordSpy
     beforeEach(() => {
-      jest.resetAllMocks()
+      vi.resetAllMocks()
       msg.method = 'deactivation'
       rpsError = null
       devices[clientId] = { ClientId: clientId, ClientSocket: null as any, unauthCount: 0 } as any
-      verifyAMTVersionSpy = spyOn(validator, 'verifyAMTVersion')
-      verifyDevicePasswordSpy = spyOn(validator, 'verifyDevicePassword').mockResolvedValue()
+      verifyAMTVersionSpy = vi.spyOn(validator, 'verifyAMTVersion')
+      verifyDevicePasswordSpy = vi.spyOn(validator, 'verifyDevicePassword').mockResolvedValue()
     })
     test('should throw an exception when device is already in pre-provisioning mode', async () => {
       try {
@@ -440,7 +438,7 @@ describe('validator', () => {
       expect(rpsError.message).toEqual(`Device ${msg.payload.uuid} activation failed. Missing DNS Suffix.`)
     })
     test('should throw an exception if no fqdn (with doesDomainExist mock)', async () => {
-      spyOn(validator.configurator.domainCredentialManager, 'doesDomainExist').mockImplementation(async () => null)
+      vi.spyOn(validator.configurator.domainCredentialManager, 'doesDomainExist').mockImplementation(async () => null)
       let rpsError: any = null
       try {
         msg.payload.fqdn = 'abcd'
@@ -465,7 +463,7 @@ describe('validator', () => {
       expect(rpsError).toBe(null)
     })
     test('should not throw an exception if no fqdn (with doesDomainExist mock)', async () => {
-      spyOn(validator.configurator.domainCredentialManager, 'doesDomainExist').mockImplementation(async () => null)
+      vi.spyOn(validator.configurator.domainCredentialManager, 'doesDomainExist').mockImplementation(async () => null)
       let rpsError = null
       try {
         msg.payload.fqdn = 'abcd'
@@ -489,11 +487,11 @@ describe('validator', () => {
         unauthCount: 0
       } as any
       devices[clientId] = clientObj
-      const getDevcieCredentialsSpy = spyOn(validator, 'getDeviceCredentials').mockResolvedValue({
+      const getDevcieCredentialsSpy = vi.spyOn(validator, 'getDeviceCredentials').mockResolvedValue({
         AMT_PASSWORD: msg.payload.password,
         MEBX_PASSWORD: 'TestP{assw0rd'
       } as DeviceCredentials)
-      const updateTagsSpy = spyOn(validator, 'updateTags').mockResolvedValue()
+      const updateTagsSpy = vi.spyOn(validator, 'updateTags').mockResolvedValue()
       await validator.setNextStepsForConfiguration(msg, clientObj.ClientId)
       expect(clientObj.amtPassword).toBe(msg.payload.password)
       expect(clientObj.ClientData).toBe(msg)
@@ -510,10 +508,10 @@ describe('validator', () => {
         unauthCount: 0
       } as any
       devices[clientId] = clientObj
-      const getDeviceCredentialsSpy = spyOn(validator, 'getDeviceCredentials').mockResolvedValue({
+      const getDeviceCredentialsSpy = vi.spyOn(validator, 'getDeviceCredentials').mockResolvedValue({
         AMT_PASSWORD: msg.payload.password
       } as DeviceCredentials)
-      const updateTagsSpy = spyOn(validator, 'updateTags').mockResolvedValue()
+      const updateTagsSpy = vi.spyOn(validator, 'updateTags').mockResolvedValue()
       await validator.setNextStepsForConfiguration(msg, clientObj.ClientId)
       expect(clientObj.amtPassword).toBe(msg.payload.password)
       expect(clientObj.ClientData).toBe(msg)
@@ -533,7 +531,7 @@ describe('validator', () => {
         mebxPassword: 'P@ssw0rd',
         tenantId: ''
       }
-      setNextStepsForConfigurationSpy = spyOn(validator, 'setNextStepsForConfiguration')
+      setNextStepsForConfigurationSpy = vi.spyOn(validator, 'setNextStepsForConfiguration')
     })
     test('should set nothing when current mode is 0', async () => {
       msg.payload.currentMode = 0

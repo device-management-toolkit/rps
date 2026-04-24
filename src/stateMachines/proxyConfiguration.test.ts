@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { devices } from '../devices.js'
 import { Environment } from '../utils/Environment.js'
@@ -16,7 +17,6 @@ import {
 import { type MachineImplementationsSimplified, createActor, fromPromise } from 'xstate'
 import { HttpHandler } from '../HttpHandler.js'
 import { IPS } from '@device-management-toolkit/wsman-messages'
-import { jest } from '@jest/globals'
 
 const { ProxyConfiguration } = await import('./proxyConfiguration.js')
 const clientId = randomUUID()
@@ -79,170 +79,220 @@ describe('Proxy Configuration State Machine', () => {
   })
 
   describe('State machines', () => {
-    it('should reach FAILED state if getProxyConfig throws', (done) => {
-      config.actors!.getProxyConfig = fromPromise(async ({ input }) => await Promise.reject(new Error()))
-      const machine = proxyConfiguration.machine.provide(config)
-      const flowStates = [
-        'ACTIVATION',
-        'GET_PROXY_CONFIG',
-        'FAILED'
-      ]
-      const service = createActor(machine, { input: context })
+    it('should reach FAILED state if getProxyConfig throws', () =>
+      new Promise<void>((resolve, reject) => {
+        config.actors!.getProxyConfig = fromPromise(async ({ input }) => await Promise.reject(new Error()))
+        const machine = proxyConfiguration.machine.provide(config)
+        const flowStates = [
+          'ACTIVATION',
+          'GET_PROXY_CONFIG',
+          'FAILED'
+        ]
+        const service = createActor(machine, { input: context })
 
-      service.subscribe((state) => {
-        const expectedState: any = flowStates[currentStateIndex++]
-        expect(state.matches(expectedState)).toBe(true)
-        if (state.matches('FAILED') && currentStateIndex === flowStates.length) {
-          const status = devices[clientId].status.Network
-          expect(status).toContain('Failed to get proxy config from DB')
-          service.stop()
-          done()
+        service.subscribe({
+          next: (state) => {
+            try {
+              const expectedState: any = flowStates[currentStateIndex++]
+              expect(state.matches(expectedState)).toBe(true)
+              if (state.matches('FAILED') && currentStateIndex === flowStates.length) {
+                const status = devices[clientId].status.Network
+                expect(status).toContain('Failed to get proxy config from DB')
+                service.stop()
+                resolve()
+              }
+            } catch (err) {
+              reject(err)
+            }
+          },
+          error: (err) => {
+            reject(err)
+          }
+        })
+        service.start()
+        service.send({ type: 'PROXYCONFIG', clientId })
+      }))
+
+    it('should add a Proxy config to AMT.', () =>
+      new Promise<void>((resolve, reject) => {
+        context.proxyConfig = {
+          proxyName: 'proxy1',
+          address: 'www.vprodemo.com',
+          infoFormat: 201,
+          port: 900,
+          networkDnsSuffix: 'intel.com'
         }
-      })
-      service.start()
-      service.send({ type: 'PROXYCONFIG', clientId })
-    })
-
-    it('should add a Proxy config to AMT.', (done) => {
-      context.proxyConfig = {
-        proxyName: 'proxy1',
-        address: 'www.vprodemo.com',
-        infoFormat: 201,
-        port: 900,
-        networkDnsSuffix: 'intel.com'
-      }
-      context.proxyConfigName = 'proxy1'
-      context.proxyConfigsCount = 1
-      config.guards = {
-        isMoreProxyConfigs: () => false,
-        isProxyConfigsExist: () => true
-      }
-
-      const machine = proxyConfiguration.machine.provide(config)
-      const flowStates = [
-        'ACTIVATION',
-        'GET_PROXY_CONFIG',
-        'ADD_PROXY_CONFIGS',
-        'SUCCESS'
-      ]
-      const service = createActor(machine, { input: context })
-      service.subscribe((state) => {
-        const expectedState: any = flowStates[currentStateIndex++]
-        expect(state.matches(expectedState)).toBe(true)
-        if (state.matches('SUCCESS') && currentStateIndex === flowStates.length) {
-          const status = devices[clientId].status.Network
-          expect(status).toEqual('Initial. Proxy Configured')
-          service.stop()
-          done()
+        context.proxyConfigName = 'proxy1'
+        context.proxyConfigsCount = 1
+        config.guards = {
+          isMoreProxyConfigs: () => false,
+          isProxyConfigsExist: () => true
         }
-      })
-      service.start()
-      service.send({ type: 'PROXYCONFIG', clientId })
-    })
 
-    it('should fail and report the detail message with added and failed configs.', (done) => {
-      context.proxyConfig = {
-        proxyName: 'proxy1',
-        address: 'www.vprodemo.com',
-        infoFormat: 201,
-        port: 900,
-        networkDnsSuffix: 'intel.com'
-      }
-      config.actors!.addProxyConfigs = fromPromise(async ({ input }) => await Promise.reject(new Error()))
-      context.proxyConfigName = 'proxy1'
-      context.proxyConfigsCount = 1
-      config.guards = {
-        isMoreProxyConfigs: () => false,
-        isProxyConfigsExist: () => true
-      }
+        const machine = proxyConfiguration.machine.provide(config)
+        const flowStates = [
+          'ACTIVATION',
+          'GET_PROXY_CONFIG',
+          'ADD_PROXY_CONFIGS',
+          'SUCCESS'
+        ]
+        const service = createActor(machine, { input: context })
+        service.subscribe({
+          next: (state) => {
+            try {
+              const expectedState: any = flowStates[currentStateIndex++]
+              expect(state.matches(expectedState)).toBe(true)
+              if (state.matches('SUCCESS') && currentStateIndex === flowStates.length) {
+                const status = devices[clientId].status.Network
+                expect(status).toEqual('Initial. Proxy Configured')
+                service.stop()
+                resolve()
+              }
+            } catch (err) {
+              reject(err)
+            }
+          },
+          error: (err) => {
+            reject(err)
+          }
+        })
+        service.start()
+        service.send({ type: 'PROXYCONFIG', clientId })
+      }))
 
-      const mockNetworkConfigurationMachine = proxyConfiguration.machine.provide(config)
-      const flowStates = [
-        'ACTIVATION',
-        'GET_PROXY_CONFIG',
-        'ADD_PROXY_CONFIGS',
-        'SUCCESS'
-      ]
-      const service = createActor(mockNetworkConfigurationMachine, { input: context })
-      service.subscribe((state) => {
-        const expectedState: any = flowStates[currentStateIndex++]
-        expect(state.matches(expectedState)).toBe(true)
-        if (state.matches('SUCCESS') && currentStateIndex === flowStates.length) {
-          const status = devices[clientId].status.Network
-          expect(status).toEqual('Initial. Failed to add proxy1')
-          done()
+    it('should fail and report the detail message with added and failed configs.', () =>
+      new Promise<void>((resolve, reject) => {
+        context.proxyConfig = {
+          proxyName: 'proxy1',
+          address: 'www.vprodemo.com',
+          infoFormat: 201,
+          port: 900,
+          networkDnsSuffix: 'intel.com'
         }
-      })
-      service.start()
-      service.send({ type: 'PROXYCONFIG', clientId })
-    })
-
-    it('should fail and report the detail message with added and return value 1.', (done) => {
-      config.actors!.addProxyConfigs = fromPromise(
-        async ({ input }) =>
-          await Promise.resolve({ Envelope: { Body: { AddProxyAccessPoint_OUTPUT: { ReturnValue: 1 } } } })
-      )
-      context.proxyConfigName = 'proxy1'
-      context.proxyConfigsCount = 1
-      config.guards = {
-        isMoreProxyConfigs: () => false,
-        isProxyConfigsExist: () => true
-      }
-
-      const mockNetworkConfigurationMachine = proxyConfiguration.machine.provide(config)
-      const flowStates = [
-        'ACTIVATION',
-        'GET_PROXY_CONFIG',
-        'ADD_PROXY_CONFIGS',
-        'SUCCESS'
-      ]
-      const service = createActor(mockNetworkConfigurationMachine, { input: context })
-      service.subscribe((state) => {
-        const expectedState: any = flowStates[currentStateIndex++]
-        expect(state.matches(expectedState)).toBe(true)
-        if (state.matches('SUCCESS') && currentStateIndex === flowStates.length) {
-          const status = devices[clientId].status.Network
-          expect(status).toEqual('Initial. Failed to add proxy1')
-          done()
+        config.actors!.addProxyConfigs = fromPromise(async ({ input }) => await Promise.reject(new Error()))
+        context.proxyConfigName = 'proxy1'
+        context.proxyConfigsCount = 1
+        config.guards = {
+          isMoreProxyConfigs: () => false,
+          isProxyConfigsExist: () => true
         }
-      })
-      service.start()
-      service.send({ type: 'PROXYCONFIG', clientId })
-    })
 
-    it('should fail and report the detail message with added', (done) => {
-      config.actors!.addProxyConfigs = fromPromise(
-        async ({ input }) =>
-          await Promise.resolve({ Envelope: { Body: { AddProxyAccessPoint_OUTPUT: { ReturnValue: 0 } } } })
-      )
-      context.proxyConfigsAdded = 'proxy1'
-      context.proxyConfigName = 'proxy2'
-      context.proxyConfigsCount = 1
-      config.guards = {
-        isMoreProxyConfigs: () => false,
-        isProxyConfigsExist: () => true
-      }
+        const mockNetworkConfigurationMachine = proxyConfiguration.machine.provide(config)
+        const flowStates = [
+          'ACTIVATION',
+          'GET_PROXY_CONFIG',
+          'ADD_PROXY_CONFIGS',
+          'SUCCESS'
+        ]
+        const service = createActor(mockNetworkConfigurationMachine, { input: context })
+        service.subscribe({
+          next: (state) => {
+            try {
+              const expectedState: any = flowStates[currentStateIndex++]
+              expect(state.matches(expectedState)).toBe(true)
+              if (state.matches('SUCCESS') && currentStateIndex === flowStates.length) {
+                const status = devices[clientId].status.Network
+                expect(status).toEqual('Initial. Failed to add proxy1')
+                resolve()
+              }
+            } catch (err) {
+              reject(err)
+            }
+          },
+          error: (err) => {
+            reject(err)
+          }
+        })
+        service.start()
+        service.send({ type: 'PROXYCONFIG', clientId })
+      }))
 
-      const mockNetworkConfigurationMachine = proxyConfiguration.machine.provide(config)
-      const flowStates = [
-        'ACTIVATION',
-        'GET_PROXY_CONFIG',
-        'ADD_PROXY_CONFIGS',
-        'SUCCESS'
-      ]
-      const service = createActor(mockNetworkConfigurationMachine, { input: context })
-      service.subscribe((state) => {
-        const expectedState: any = flowStates[currentStateIndex++]
-        expect(state.matches(expectedState)).toBe(true)
-        if (state.matches('SUCCESS') && currentStateIndex === flowStates.length) {
-          const status = devices[clientId].status.Network
-          expect(status).toEqual('Initial. Proxy Configured')
-          done()
+    it('should fail and report the detail message with added and return value 1.', () =>
+      new Promise<void>((resolve, reject) => {
+        config.actors!.addProxyConfigs = fromPromise(
+          async ({ input }) =>
+            await Promise.resolve({ Envelope: { Body: { AddProxyAccessPoint_OUTPUT: { ReturnValue: 1 } } } })
+        )
+        context.proxyConfigName = 'proxy1'
+        context.proxyConfigsCount = 1
+        config.guards = {
+          isMoreProxyConfigs: () => false,
+          isProxyConfigsExist: () => true
         }
-      })
-      service.start()
-      service.send({ type: 'PROXYCONFIG', clientId })
-    })
+
+        const mockNetworkConfigurationMachine = proxyConfiguration.machine.provide(config)
+        const flowStates = [
+          'ACTIVATION',
+          'GET_PROXY_CONFIG',
+          'ADD_PROXY_CONFIGS',
+          'SUCCESS'
+        ]
+        const service = createActor(mockNetworkConfigurationMachine, { input: context })
+        service.subscribe({
+          next: (state) => {
+            try {
+              const expectedState: any = flowStates[currentStateIndex++]
+              expect(state.matches(expectedState)).toBe(true)
+              if (state.matches('SUCCESS') && currentStateIndex === flowStates.length) {
+                const status = devices[clientId].status.Network
+                expect(status).toEqual('Initial. Failed to add proxy1')
+                resolve()
+              }
+            } catch (err) {
+              reject(err)
+            }
+          },
+          error: (err) => {
+            reject(err)
+          }
+        })
+        service.start()
+        service.send({ type: 'PROXYCONFIG', clientId })
+      }))
+
+    it('should fail and report the detail message with added', () =>
+      new Promise<void>((resolve, reject) => {
+        config.actors!.addProxyConfigs = fromPromise(
+          async ({ input }) =>
+            await Promise.resolve({ Envelope: { Body: { AddProxyAccessPoint_OUTPUT: { ReturnValue: 0 } } } })
+        )
+        context.proxyConfigsAdded = 'proxy1'
+        context.proxyConfigName = 'proxy2'
+        context.proxyConfigsCount = 1
+        config.guards = {
+          isMoreProxyConfigs: () => false,
+          isProxyConfigsExist: () => true
+        }
+
+        const mockNetworkConfigurationMachine = proxyConfiguration.machine.provide(config)
+        const flowStates = [
+          'ACTIVATION',
+          'GET_PROXY_CONFIG',
+          'ADD_PROXY_CONFIGS',
+          'SUCCESS'
+        ]
+        const service = createActor(mockNetworkConfigurationMachine, { input: context })
+        service.subscribe({
+          next: (state) => {
+            try {
+              const expectedState: any = flowStates[currentStateIndex++]
+              expect(state.matches(expectedState)).toBe(true)
+              if (state.matches('SUCCESS') && currentStateIndex === flowStates.length) {
+                const status = devices[clientId].status.Network
+                expect(status).toEqual('Initial. Proxy Configured')
+                resolve()
+              }
+            } catch (err) {
+              reject(err)
+            }
+          },
+          error: (err) => {
+            reject(err)
+          }
+        })
+        service.start()
+        service.send({ type: 'PROXYCONFIG', clientId })
+      }))
   })
 
   describe('Get configs', () => {
@@ -256,14 +306,14 @@ describe('Proxy Configuration State Machine', () => {
       }
       const mockDb = {
         proxyConfigs: {
-          getByName: jest.fn()
+          getByName: vi.fn()
         }
       }
 
       proxyConfiguration.dbFactory = {
         getDb: async () => mockDb
       } as any
-      const getByNameSpy = jest.spyOn(mockDb.proxyConfigs, 'getByName').mockReturnValue(expectedConfig)
+      const getByNameSpy = vi.spyOn(mockDb.proxyConfigs, 'getByName').mockReturnValue(expectedConfig)
 
       await proxyConfiguration.getProxyConfig({ input: context })
       expect(context.proxyConfig).toBe(expectedConfig)

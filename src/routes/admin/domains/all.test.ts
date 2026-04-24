@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { createSpyObj } from '../../../test/helper/jest.js'
+import { vi } from 'vitest'
+import { createSpyObj } from '../../../test/helper/testUtils.js'
 import { getAllDomains } from './all.js'
-import { jest } from '@jest/globals'
 
 describe('Domains - All', () => {
   let resSpy
@@ -20,8 +20,8 @@ describe('Domains - All', () => {
     req = {
       db: {
         domains: {
-          get: jest.fn<() => Promise<any>>().mockImplementation(async () => await Promise.resolve([])),
-          getCount: jest.fn<() => Promise<number>>().mockImplementation(async () => await Promise.resolve(123))
+          get: vi.fn<() => Promise<any>>().mockImplementation(async () => await Promise.resolve([])),
+          getCount: vi.fn<() => Promise<number>>().mockImplementation(async () => await Promise.resolve(123))
         }
       },
       query: {}
@@ -45,7 +45,7 @@ describe('Domains - All', () => {
   })
 
   it('should set status to 500 if error occurs', async () => {
-    req.db.domains.getCount = jest.fn().mockImplementation(() => {
+    req.db.domains.getCount = vi.fn().mockImplementation(() => {
       throw new TypeError('fake error')
     })
     req.query.$count = true

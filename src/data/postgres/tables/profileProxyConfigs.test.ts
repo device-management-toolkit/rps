@@ -7,13 +7,12 @@ import PostgresDb from '../index.js'
 import { API_UNEXPECTED_EXCEPTION } from '../../../utils/constants.js'
 import { type ProfileProxyConfigs } from '../../../models/RCS.Config.js'
 import { ProfileProxyConfigsTable } from './profileProxyConfigs.js'
-import { jest } from '@jest/globals'
-import { type Spied, spyOn } from 'jest-mock'
 
+import { vi, type MockInstance } from 'vitest'
 describe('profileproxyconfig tests', () => {
   let db: PostgresDb
   let profilesProxyConfigsTable: ProfileProxyConfigsTable
-  let querySpy: Spied<any>
+  let querySpy: MockInstance
   const proxyConfigs: ProfileProxyConfigs[] = [
     { name: 'proxyConfig', priority: 1 } as any
   ]
@@ -23,10 +22,10 @@ describe('profileproxyconfig tests', () => {
   beforeEach(() => {
     db = new PostgresDb('')
     profilesProxyConfigsTable = new ProfileProxyConfigsTable(db)
-    querySpy = spyOn(profilesProxyConfigsTable.db, 'query')
+    querySpy = vi.spyOn(profilesProxyConfigsTable.db, 'query')
   })
   afterEach(() => {
-    jest.clearAllMocks()
+    vi.clearAllMocks()
   })
   describe('Get', () => {
     test('should Get', async () => {

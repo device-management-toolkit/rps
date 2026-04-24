@@ -3,15 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { createSpyObj } from '../../../test/helper/jest.js'
+import { createSpyObj } from '../../../test/helper/testUtils.js'
 import { createIEEE8021xProfile } from './create.js'
-import { jest } from '@jest/globals'
-import { type Spied, spyOn } from 'jest-mock'
 
+import { vi, type MockInstance } from 'vitest'
 describe('Checks createIEEE8021xProfile', () => {
   let resSpy
   let req
-  let insertSpy: Spied<any>
+  let insertSpy: MockInstance
   beforeEach(() => {
     resSpy = createSpyObj('Response', [
       'status',
@@ -20,14 +19,14 @@ describe('Checks createIEEE8021xProfile', () => {
       'send'
     ])
     req = {
-      db: { ieee8021xProfiles: { insert: jest.fn() } },
+      db: { ieee8021xProfiles: { insert: vi.fn() } },
       body: {},
       query: {},
-      secretsManager: { writeSecretWithObject: jest.fn() },
+      secretsManager: { writeSecretWithObject: vi.fn() },
       profileName: 'abcd'
     }
-    spyOn(req.secretsManager, 'writeSecretWithObject').mockResolvedValue({})
-    insertSpy = spyOn(req.db.ieee8021xProfiles, 'insert').mockResolvedValue({})
+    vi.spyOn(req.secretsManager, 'writeSecretWithObject').mockResolvedValue({})
+    insertSpy = vi.spyOn(req.db.ieee8021xProfiles, 'insert').mockResolvedValue({})
     resSpy.status.mockReturnThis()
     resSpy.json.mockReturnThis()
     resSpy.send.mockReturnThis()
@@ -38,7 +37,7 @@ describe('Checks createIEEE8021xProfile', () => {
     expect(resSpy.status).toHaveBeenCalledWith(201)
   })
   it('should handle error', async () => {
-    spyOn(req.db.ieee8021xProfiles, 'insert').mockRejectedValue(null)
+    vi.spyOn(req.db.ieee8021xProfiles, 'insert').mockRejectedValue(null)
     await createIEEE8021xProfile(req, resSpy)
     expect(insertSpy).toHaveBeenCalledTimes(1)
     expect(resSpy.status).toHaveBeenCalledWith(500)

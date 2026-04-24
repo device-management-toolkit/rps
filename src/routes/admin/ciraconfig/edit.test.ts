@@ -3,15 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { createSpyObj } from '../../../test/helper/jest.js'
+import { createSpyObj } from '../../../test/helper/testUtils.js'
 import { editCiraConfig } from './edit.js'
-import { jest } from '@jest/globals'
-import { type Spied, spyOn } from 'jest-mock'
 
+import { vi, type MockInstance } from 'vitest'
 describe('CIRA Config - Edit', () => {
   let resSpy
   let req
-  let getByNameSpy: Spied<any>
+  let getByNameSpy: MockInstance
 
   beforeEach(() => {
     resSpy = createSpyObj('Response', [
@@ -21,13 +20,13 @@ describe('CIRA Config - Edit', () => {
       'send'
     ])
     req = {
-      db: { ciraConfigs: { getByName: jest.fn(), update: jest.fn() } },
+      db: { ciraConfigs: { getByName: vi.fn(), update: vi.fn() } },
       body: { configName: 'configName' },
       query: {},
       tenantId: ''
     }
-    getByNameSpy = spyOn(req.db.ciraConfigs, 'getByName').mockResolvedValue({})
-    spyOn(req.db.ciraConfigs, 'update').mockResolvedValue({})
+    getByNameSpy = vi.spyOn(req.db.ciraConfigs, 'getByName').mockResolvedValue({})
+    vi.spyOn(req.db.ciraConfigs, 'update').mockResolvedValue({})
 
     resSpy.status.mockReturnThis()
     resSpy.json.mockReturnThis()
@@ -39,13 +38,13 @@ describe('CIRA Config - Edit', () => {
     expect(resSpy.status).toHaveBeenCalledWith(200)
   })
   it('should handle not found', async () => {
-    spyOn(req.db.ciraConfigs, 'getByName').mockResolvedValue(null)
+    vi.spyOn(req.db.ciraConfigs, 'getByName').mockResolvedValue(null)
     await editCiraConfig(req, resSpy)
     expect(getByNameSpy).toHaveBeenCalledWith('configName', req.tenantId)
     expect(resSpy.status).toHaveBeenCalledWith(404)
   })
   it('should handle error', async () => {
-    spyOn(req.db.ciraConfigs, 'getByName').mockRejectedValue(null)
+    vi.spyOn(req.db.ciraConfigs, 'getByName').mockRejectedValue(null)
     await editCiraConfig(req, resSpy)
     expect(getByNameSpy).toHaveBeenCalledWith('configName', req.tenantId)
     expect(resSpy.status).toHaveBeenCalledWith(500)

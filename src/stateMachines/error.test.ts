@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { vi } from 'vitest'
 import { type MachineImplementationsSimplified, createActor } from 'xstate'
 import { Error, type ErrorContext } from './error.js'
 import { randomUUID } from 'node:crypto'
 import { devices } from '../devices.js'
-import { jest } from '@jest/globals'
 
 let context: ErrorContext
 const clientId = randomUUID()
@@ -51,7 +51,7 @@ describe('Error State Machine', () => {
     devices[clientId] = {
       unauthCount: 0,
       ClientId: clientId,
-      ClientSocket: { send: jest.fn() } as any,
+      ClientSocket: { send: vi.fn() } as any,
       ClientData: '',
       ciraconfig: {},
       network: {},
@@ -73,59 +73,89 @@ describe('Error State Machine', () => {
     }
   })
 
-  it('should eventually reach UNKNOWN', (done) => {
-    const mockerrorMachine = error.machine.provide(config)
-    const flowStates = ['ERRORED', 'UNKNOWN']
-    const errorService = createActor(mockerrorMachine, { input: context })
-    errorService.subscribe((state) => {
-      const expectedState: any = flowStates[currentStateIndex++]
-      expect(state.matches(expectedState)).toBe(true)
-      if (state.matches('UNKNOWN') && currentStateIndex === flowStates.length) {
-        done()
-      }
-    })
-    errorService.start()
-    errorService.send({ type: 'PARSE', clientId })
-  })
+  it('should eventually reach UNKNOWN', () =>
+    new Promise<void>((resolve, reject) => {
+      const mockerrorMachine = error.machine.provide(config)
+      const flowStates = ['ERRORED', 'UNKNOWN']
+      const errorService = createActor(mockerrorMachine, { input: context })
+      errorService.subscribe({
+        next: (state) => {
+          try {
+            const expectedState: any = flowStates[currentStateIndex++]
+            expect(state.matches(expectedState)).toBe(true)
+            if (state.matches('UNKNOWN') && currentStateIndex === flowStates.length) {
+              resolve()
+            }
+          } catch (err) {
+            reject(err)
+          }
+        },
+        error: (err) => {
+          reject(err)
+        }
+      })
+      errorService.start()
+      errorService.send({ type: 'PARSE', clientId })
+    }))
 
-  it('should eventually reach BADREQUEST', (done) => {
-    config.guards = {
-      isBadRequest: () => true
-    }
-    context = {
-      message: null,
-      clientId
-    }
-
-    const mockerrorMachine = error.machine.provide(config)
-    const flowStates = ['ERRORED', 'BADREQUEST']
-    const errorService = createActor(mockerrorMachine, { input: context })
-    errorService.subscribe((state) => {
-      const expectedState: any = flowStates[currentStateIndex++]
-      expect(state.matches(expectedState)).toBe(true)
-      if (state.matches('BADREQUEST') && currentStateIndex === flowStates.length) {
-        done()
+  it('should eventually reach BADREQUEST', () =>
+    new Promise<void>((resolve, reject) => {
+      config.guards = {
+        isBadRequest: () => true
       }
-    })
-    errorService.start()
-    errorService.send({ type: 'PARSE', clientId })
-  })
-
-  it('should eventually reach "AUTHORIZED"', (done) => {
-    config.guards = {}
-    const mockerrorMachine = error.machine.provide(config)
-    const flowStates = ['ERRORED', 'AUTHORIZED']
-    const errorService = createActor(mockerrorMachine, { input: context })
-    errorService.subscribe((state) => {
-      const expectedState: any = flowStates[currentStateIndex++]
-      expect(state.matches(expectedState)).toBe(true)
-      if (state.matches('AUTHORIZED') && currentStateIndex === flowStates.length) {
-        done()
+      context = {
+        message: null,
+        clientId
       }
-    })
-    errorService.start()
-    errorService.send({ type: 'PARSE', clientId })
-  })
+
+      const mockerrorMachine = error.machine.provide(config)
+      const flowStates = ['ERRORED', 'BADREQUEST']
+      const errorService = createActor(mockerrorMachine, { input: context })
+      errorService.subscribe({
+        next: (state) => {
+          try {
+            const expectedState: any = flowStates[currentStateIndex++]
+            expect(state.matches(expectedState)).toBe(true)
+            if (state.matches('BADREQUEST') && currentStateIndex === flowStates.length) {
+              resolve()
+            }
+          } catch (err) {
+            reject(err)
+          }
+        },
+        error: (err) => {
+          reject(err)
+        }
+      })
+      errorService.start()
+      errorService.send({ type: 'PARSE', clientId })
+    }))
+
+  it('should eventually reach "AUTHORIZED"', () =>
+    new Promise<void>((resolve, reject) => {
+      config.guards = {}
+      const mockerrorMachine = error.machine.provide(config)
+      const flowStates = ['ERRORED', 'AUTHORIZED']
+      const errorService = createActor(mockerrorMachine, { input: context })
+      errorService.subscribe({
+        next: (state) => {
+          try {
+            const expectedState: any = flowStates[currentStateIndex++]
+            expect(state.matches(expectedState)).toBe(true)
+            if (state.matches('AUTHORIZED') && currentStateIndex === flowStates.length) {
+              resolve()
+            }
+          } catch (err) {
+            reject(err)
+          }
+        },
+        error: (err) => {
+          reject(err)
+        }
+      })
+      errorService.start()
+      errorService.send({ type: 'PARSE', clientId })
+    }))
 
   it('should add authorization header', () => {
     expect(devices[clientId].connectionParams.digestChallenge).toBeNull()

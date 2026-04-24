@@ -12,8 +12,8 @@ import { GATEWAY_TIMEOUT_ERROR, UNEXPECTED_PARSE_ERROR, EA_TIMEOUT_ERROR } from 
 import { randomUUID } from 'node:crypto'
 import { WSEnterpriseAssistantListener, enterpriseAssistantSocket, promises } from '../WSEnterpriseAssistantListener.js'
 import { config } from '../test/helper/Config.js'
-import { jest } from '@jest/globals'
-import { type Spied, spyOn } from 'jest-mock'
+
+import { vi, type MockInstance } from 'vitest'
 import {
   invokeEnterpriseAssistantCall,
   invokeEnterpriseAssistantCallInternal,
@@ -25,9 +25,9 @@ Environment.Config = config
 describe('Common', () => {
   const clientId = randomUUID()
   let sendSpy
-  let responseMessageSpy: Spied<any>
-  let wrapItSpy: Spied<any>
-  let enterpriseAssistantSocketSendSpy: Spied<any>
+  let responseMessageSpy: MockInstance
+  let wrapItSpy: MockInstance
+  let enterpriseAssistantSocketSendSpy: MockInstance
   const context = {
     message: '',
     clientId,
@@ -35,10 +35,10 @@ describe('Common', () => {
     httpHandler: new HttpHandler()
   }
   beforeEach(() => {
-    jest.useFakeTimers()
+    vi.useFakeTimers()
     devices[clientId] = {
       ClientSocket: {
-        send: jest.fn()
+        send: vi.fn()
       },
       connectionParams: {
         guid: clientId,
@@ -47,20 +47,20 @@ describe('Common', () => {
       }
     } as any
 
-    wrapItSpy = spyOn(context.httpHandler, 'wrapIt')
-    responseMessageSpy = spyOn(ClientResponseMsg, 'get')
-    sendSpy = spyOn(devices[clientId].ClientSocket, 'send').mockReturnValue()
+    wrapItSpy = vi.spyOn(context.httpHandler, 'wrapIt')
+    responseMessageSpy = vi.spyOn(ClientResponseMsg, 'get')
+    sendSpy = vi.spyOn(devices[clientId].ClientSocket, 'send').mockReturnValue()
     const x = new WSEnterpriseAssistantListener(new Logger('test'))
     x.onClientConnected({
-      send: jest.fn(),
-      on: jest.fn()
+      send: vi.fn(),
+      on: vi.fn()
     } as any)
-    enterpriseAssistantSocketSendSpy = spyOn(enterpriseAssistantSocket, 'send').mockImplementation(() => ({}) as any)
+    enterpriseAssistantSocketSendSpy = vi.spyOn(enterpriseAssistantSocket, 'send').mockImplementation(() => ({}) as any)
   })
 
   afterEach(() => {
-    jest.runAllTicks()
-    jest.useRealTimers()
+    vi.runAllTicks()
+    vi.useRealTimers()
   })
 
   it('should send a WSMan message once with successful reply', async () => {
@@ -76,7 +76,7 @@ describe('Common', () => {
   it('should successfully resolve after one UNEXPECTED_PARSE_ERROR', async () => {
     const expected = '123'
     let invokeWsmanCallInternalCallCount = 0
-    sendSpy = spyOn(devices[clientId].ClientSocket, 'send')
+    sendSpy = vi.spyOn(devices[clientId].ClientSocket, 'send')
     sendSpy.mockImplementation(async (context) => {
       invokeWsmanCallInternalCallCount++
       if (invokeWsmanCallInternalCallCount === 1) {
@@ -93,7 +93,7 @@ describe('Common', () => {
     const expected = '123'
     let invokeWsmanCallInternalCallCount = 0
 
-    sendSpy = spyOn(devices[clientId].ClientSocket, 'send')
+    sendSpy = vi.spyOn(devices[clientId].ClientSocket, 'send')
     sendSpy.mockImplementation(async (context) => {
       invokeWsmanCallInternalCallCount++
       if (invokeWsmanCallInternalCallCount <= 2) {
@@ -110,7 +110,7 @@ describe('Common', () => {
   it('should try three times on UNEXPECTED_PARSE_ERROR', async () => {
     const expected = '123'
     let invokeWsmanCallInternalCallCount = 0
-    sendSpy = spyOn(devices[clientId].ClientSocket, 'send')
+    sendSpy = vi.spyOn(devices[clientId].ClientSocket, 'send')
     sendSpy.mockImplementation(async (context) => {
       invokeWsmanCallInternalCallCount++
       if (invokeWsmanCallInternalCallCount <= 3) {
@@ -137,7 +137,7 @@ describe('Common', () => {
       statusMessage: 'Unauthorized'
     }
     let invokeWsmanCallInternalCallCount = 0
-    sendSpy = spyOn(devices[clientId].ClientSocket, 'send')
+    sendSpy = vi.spyOn(devices[clientId].ClientSocket, 'send')
     sendSpy.mockImplementation(async (context) => {
       invokeWsmanCallInternalCallCount++
       if (invokeWsmanCallInternalCallCount <= 1) {
@@ -162,7 +162,7 @@ describe('Common', () => {
   it('should timeout on no response from AMT', async () => {
     try {
       const x = invokeWsmanCall(context)
-      jest.advanceTimersByTime(Environment.Config.delay_timer * 1000)
+      vi.advanceTimersByTime(Environment.Config.delay_timer * 1000)
       await x
     } catch (err) {
       expect(err).toBeInstanceOf(GATEWAY_TIMEOUT_ERROR)
@@ -172,7 +172,7 @@ describe('Common', () => {
   it('should timeout on no response from EA', async () => {
     try {
       const x = invokeEnterpriseAssistantCall(context)
-      jest.advanceTimersByTime(Environment.Config.delay_timer * 1000)
+      vi.advanceTimersByTime(Environment.Config.delay_timer * 1000)
       await x
     } catch (err) {
       expect(err).toBeInstanceOf(EA_TIMEOUT_ERROR)
