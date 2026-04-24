@@ -1014,7 +1014,8 @@ export class Unconfiguration {
         always: [
           { guard: 'is8023TLS', target: 'DISABLE_TLS_SETTING_DATA_2' },
           { guard: 'isLMSTLSSettings', target: 'SETUP_AND_CONFIGURATION_SERVICE_COMMIT_CHANGES' },
-          { target: 'FAILURE' }]
+          { target: 'FAILURE' }
+        ]
       },
       SETUP_AND_CONFIGURATION_SERVICE_COMMIT_CHANGES: {
         invoke: {
@@ -1064,7 +1065,8 @@ export class Unconfiguration {
       PULL_TLS_CREDENTIAL_CONTEXT_RESPONSE: {
         always: [
           { guard: 'hasTLSCredentialContext', target: 'DELETE_TLS_CREDENTIAL_CONTEXT' },
-          { target: 'ENUMERATE_PUBLIC_PRIVATE_KEY_PAIR' }]
+          { target: 'ENUMERATE_PUBLIC_PRIVATE_KEY_PAIR' }
+        ]
       },
       DELETE_TLS_CREDENTIAL_CONTEXT: {
         invoke: {
@@ -1116,7 +1118,8 @@ export class Unconfiguration {
       PULL_PUBLIC_PRIVATE_KEY_PAIR_RESPONSE: {
         always: [
           { guard: 'hasPrivateCerts', target: 'DELETE_PUBLIC_PRIVATE_KEY_PAIR' },
-          { target: 'ENUMERATE_PUBLIC_KEY_CERTIFICATE' }]
+          { target: 'ENUMERATE_PUBLIC_KEY_CERTIFICATE' }
+        ]
       },
       DELETE_PUBLIC_PRIVATE_KEY_PAIR: {
         invoke: {
@@ -1171,7 +1174,8 @@ export class Unconfiguration {
       PULL_PUBLIC_KEY_CERTIFICATE_RESPONSE: {
         always: [
           { guard: 'hasPublicKeyCertificate', target: 'DELETE_PUBLIC_KEY_CERTIFICATE' },
-          { target: 'GET_ENVIRONMENT_DETECTION_SETTINGS' }]
+          { target: 'GET_ENVIRONMENT_DETECTION_SETTINGS' }
+        ]
       },
       DELETE_PUBLIC_KEY_CERTIFICATE: {
         invoke: {

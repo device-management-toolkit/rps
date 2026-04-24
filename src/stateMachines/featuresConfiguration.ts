@@ -251,7 +251,8 @@ export class FeaturesConfiguration {
         always: [
           { target: 'SET_REDIRECTION_SERVICE', guard: ({ context }) => context.isRedirectionChanged },
           { target: 'PUT_IPS_OPT_IN_SERVICE', guard: ({ context }) => context.isOptInServiceChanged },
-          { target: 'SUCCESS' }]
+          { target: 'SUCCESS' }
+        ]
       },
       SET_REDIRECTION_SERVICE: {
         invoke: {
@@ -284,7 +285,8 @@ export class FeaturesConfiguration {
           input: ({ context }) => context,
           onDone: [
             { target: 'PUT_IPS_OPT_IN_SERVICE', guard: ({ context }) => context.isOptInServiceChanged },
-            { target: 'SUCCESS' }],
+            { target: 'SUCCESS' }
+          ],
           onError: {
             actions: assign({ statusMessage: () => 'Failed to put redirection service' }),
             target: 'FAILED'
