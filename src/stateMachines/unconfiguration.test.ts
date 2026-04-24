@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { devices } from '../devices.js'
 import { Environment } from '../utils/Environment.js'
@@ -15,19 +16,23 @@ import { config } from '../test/helper/Config.js'
 import { HttpHandler } from '../HttpHandler.js'
 import { type MachineImplementationsSimplified, createActor, fromPromise } from 'xstate'
 import { AMT, CIM, IPS } from '@device-management-toolkit/wsman-messages'
-import { jest } from '@jest/globals'
+
 import { HttpResponseError, coalesceMessage, isDigestRealmValid } from './common.js'
 
-const invokeWsmanCallSpy = jest.fn<any>().mockResolvedValue({})
-const invokeEnterpriseAssistantCallSpy = jest.fn()
-jest.unstable_mockModule('./common.js', () => ({
-  invokeWsmanCall: invokeWsmanCallSpy,
-  invokeEnterpriseAssistantCall: invokeEnterpriseAssistantCallSpy,
-  processTLSTunnelResponse: jest.fn(),
-  HttpResponseError,
-  isDigestRealmValid,
-  coalesceMessage
-}))
+const invokeWsmanCallSpy = vi.hoisted(() => vi.fn<any>().mockResolvedValue({}))
+const invokeEnterpriseAssistantCallSpy = vi.hoisted(() => vi.fn())
+vi.mock('./common.js', async () => {
+  const actual = await vi.importActual<typeof import('./common.js')>('./common.js')
+  const { HttpResponseError, coalesceMessage, isDigestRealmValid } = actual
+  return {
+    invokeWsmanCall: invokeWsmanCallSpy,
+    invokeEnterpriseAssistantCall: invokeEnterpriseAssistantCallSpy,
+    processTLSTunnelResponse: vi.fn(),
+    HttpResponseError,
+    isDigestRealmValid,
+    coalesceMessage
+  }
+})
 const { Unconfiguration } = await import('./unconfiguration.js')
 
 const clientId = randomUUID()
@@ -41,7 +46,7 @@ describe('Unconfiguration State Machine', () => {
   let loggerSpy
 
   beforeEach(() => {
-    jest.clearAllMocks()
+    vi.clearAllMocks()
     unconfiguration = new Unconfiguration()
     unconfigContext = {
       clientId,
@@ -65,7 +70,7 @@ describe('Unconfiguration State Machine', () => {
     devices[clientId] = {
       unauthCount: 0,
       ClientId: clientId,
-      ClientSocket: { send: jest.fn() } as any,
+      ClientSocket: { send: vi.fn() } as any,
       ciraconfig: {
         TLSSettingData: { Enabled: true, AcceptNonSecureConnections: true, MutualAuthentication: true, TrustedCN: null }
       },
@@ -192,21 +197,331 @@ describe('Unconfiguration State Machine', () => {
       },
       delays: {}
     }
-    loggerSpy = jest.spyOn(unconfiguration.logger, 'error')
+    loggerSpy = vi.spyOn(unconfiguration.logger, 'error')
   })
 
-  it('should eventually reach FAILURE after ENUMERATE_WIFI_ENDPOINT_SETTINGS', (done) => {
-    if (configuration.actors != null) {
-      configuration.actors.pullEthernetPortSettings = fromPromise(
+  it('should eventually reach FAILURE after ENUMERATE_WIFI_ENDPOINT_SETTINGS', () =>
+    new Promise<void>((resolve, reject) => {
+      if (configuration.actors != null) {
+        configuration.actors.pullEthernetPortSettings = fromPromise(
+          async ({ input }) =>
+            await Promise.resolve({
+              Envelope: {
+                Body: {
+                  PullResponse: {
+                    Items: {
+                      AMT_EthernetPortSettings: [
+                        { ElementName: 'Ethernet Settings', InstanceID: 'Settings 0' },
+                        { ElementName: 'Ethernet Settings', InstanceID: 'Settings 1', MACAddress: '00-00-00-02-00-05' }
+                      ]
+                    }
+                  }
+                }
+              }
+            })
+        )
+        configuration.actors.enumerateWifiEndpointSettings = fromPromise(
+          async ({ input }) => await Promise.reject(new Error())
+        )
+      }
+
+      const mockUnconfigurationMachine = unconfiguration.machine.provide(configuration)
+      const flowStates = [
+        'UNCONFIGURED',
+        'ENUMERATE_ETHERNET_PORT_SETTINGS',
+        'PULL_ETHERNET_PORT_SETTINGS',
+        'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
+        'FAILURE'
+      ]
+      const service = createActor(mockUnconfigurationMachine, { input: unconfigContext })
+      service.subscribe({
+        next: (state) => {
+          try {
+            const expectedState: any = flowStates[currentStateIndex++]
+            expect(state.matches(expectedState)).toBe(true)
+            if (state.matches('FAILURE') && currentStateIndex === flowStates.length) {
+              resolve()
+            }
+          } catch (err) {
+            reject(err)
+          }
+        },
+        error: (err) => {
+          reject(err)
+        }
+      })
+      service.start()
+      service.send({ type: 'REMOVECONFIG', clientId })
+    }))
+
+  it('should eventually reach FAILURE after ENUMERATE_HTTP_PROXY_ACCESS_POINT', () =>
+    new Promise<void>((resolve, reject) => {
+      configuration.actors!.enumerateHTTPProxyAccessPoint = fromPromise(
+        async ({ input }) => await Promise.reject(new Error())
+      )
+      const mockUnconfigurationMachine = unconfiguration.machine.provide(configuration)
+      const flowStates = [
+        'UNCONFIGURED',
+        'ENUMERATE_ETHERNET_PORT_SETTINGS',
+        'PULL_ETHERNET_PORT_SETTINGS',
+        'GET_8021X_PROFILE',
+        'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
+        'PULL_WIFI_ENDPOINT_SETTINGS',
+        'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
+        'FAILURE'
+      ]
+      const service = createActor(mockUnconfigurationMachine, { input: unconfigContext })
+      service.subscribe({
+        next: (state) => {
+          try {
+            const expectedState: any = flowStates[currentStateIndex++]
+            expect(state.matches(expectedState)).toBe(true)
+            if (state.matches('FAILURE') && currentStateIndex === flowStates.length) {
+              resolve()
+            }
+          } catch (err) {
+            reject(err)
+          }
+        },
+        error: (err) => {
+          reject(err)
+        }
+      })
+      service.start()
+      service.send({ type: 'REMOVECONFIG', clientId })
+    }))
+
+  it('should eventually reach FAILURE after PULL_HTTP_PROXY_ACCESS_POINT', () =>
+    new Promise<void>((resolve, reject) => {
+      configuration.actors!.pullHTTPProxyAccessPoint = fromPromise(
+        async ({ input }) => await Promise.reject(new Error())
+      )
+      const mockUnconfigurationMachine = unconfiguration.machine.provide(configuration)
+      const flowStates = [
+        'UNCONFIGURED',
+        'ENUMERATE_ETHERNET_PORT_SETTINGS',
+        'PULL_ETHERNET_PORT_SETTINGS',
+        'GET_8021X_PROFILE',
+        'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
+        'PULL_WIFI_ENDPOINT_SETTINGS',
+        'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
+        'PULL_HTTP_PROXY_ACCESS_POINT',
+        'FAILURE'
+      ]
+      const service = createActor(mockUnconfigurationMachine, { input: unconfigContext })
+      service.subscribe({
+        next: (state) => {
+          try {
+            const expectedState: any = flowStates[currentStateIndex++]
+            expect(state.matches(expectedState)).toBe(true)
+            if (state.matches('FAILURE') && currentStateIndex === flowStates.length) {
+              resolve()
+            }
+          } catch (err) {
+            reject(err)
+          }
+        },
+        error: (err) => {
+          reject(err)
+        }
+      })
+      service.start()
+      service.send({ type: 'REMOVECONFIG', clientId })
+    }))
+
+  it('should eventually reach FAILURE after DELETE_HTTP_PROXY_ACCESS_POINT', () =>
+    new Promise<void>((resolve, reject) => {
+      configuration.guards!.hasHTTPProxyAccessPoints = () => true
+      configuration.actors!.pullHTTPProxyAccessPoint = fromPromise(
         async ({ input }) =>
           await Promise.resolve({
             Envelope: {
               Body: {
                 PullResponse: {
                   Items: {
-                    AMT_EthernetPortSettings: [
-                      { ElementName: 'Ethernet Settings', InstanceID: 'Settings 0' },
-                      { ElementName: 'Ethernet Settings', InstanceID: 'Settings 1', MACAddress: '00-00-00-02-00-05' }
+                    IPS_HTTPProxyAccessPoint: [
+                      { Name: 'Intel(r) ME:HTTP Proxy Access Point 0' },
+                      { Name: 'Intel(r) ME:HTTP Proxy Access Point 1' }]
+                  },
+                  EndOfSequence: ''
+                }
+              }
+            }
+          })
+      )
+      configuration.actors!.deleteHTTPProxyAccessPoint = fromPromise(
+        async ({ input }) => await Promise.reject(new Error())
+      )
+      const mockUnconfigurationMachine = unconfiguration.machine.provide(configuration)
+      const flowStates = [
+        'UNCONFIGURED',
+        'ENUMERATE_ETHERNET_PORT_SETTINGS',
+        'PULL_ETHERNET_PORT_SETTINGS',
+        'GET_8021X_PROFILE',
+        'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
+        'PULL_WIFI_ENDPOINT_SETTINGS',
+        'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
+        'PULL_HTTP_PROXY_ACCESS_POINT',
+        'DELETE_HTTP_PROXY_ACCESS_POINT',
+        'FAILURE'
+      ]
+      const service = createActor(mockUnconfigurationMachine, { input: unconfigContext })
+      service.subscribe({
+        next: (state) => {
+          try {
+            const expectedState: any = flowStates[currentStateIndex++]
+            expect(state.matches(expectedState)).toBe(true)
+            if (state.matches('FAILURE') && currentStateIndex === flowStates.length) {
+              resolve()
+            }
+          } catch (err) {
+            reject(err)
+          }
+        },
+        error: (err) => {
+          reject(err)
+        }
+      })
+      service.start()
+      service.send({ type: 'REMOVECONFIG', clientId })
+    }))
+
+  it('should handle multiple HTTP Proxy pull operations with EnumerationContext', () =>
+    new Promise<void>((resolve, reject) => {
+      let pullCount = 0
+      configuration.guards!.hasMoreHTTPProxyData = ({ context }) => {
+        // Check if we have EnumerationContext and no EndOfSequence
+        return (
+          context.message.Envelope.Body.PullResponse?.EnumerationContext != null &&
+          context.message.Envelope.Body.PullResponse?.EndOfSequence == null
+        )
+      }
+      configuration.guards!.hasHTTPProxyAccessPoints = () => true
+      configuration.actors!.pullHTTPProxyAccessPoint = fromPromise(async ({ input }) => {
+        pullCount++
+        if (pullCount === 1) {
+          // First pull response with EnumerationContext
+          return await Promise.resolve({
+            Envelope: {
+              Body: {
+                PullResponse: {
+                  EnumerationContext: '50270200-0000-0000-0000-000000000000',
+                  Items: {
+                    IPS_HTTPProxyAccessPoint: { Name: 'Intel(r) ME:HTTP Proxy Access Point 0' }
+                  }
+                }
+              }
+            }
+          })
+        } else {
+          // Second pull response with EndOfSequence
+          return await Promise.resolve({
+            Envelope: {
+              Body: {
+                PullResponse: {
+                  Items: {
+                    IPS_HTTPProxyAccessPoint: { Name: 'Intel(r) ME:HTTP Proxy Access Point 1' }
+                  },
+                  EndOfSequence: ''
+                }
+              }
+            }
+          })
+        }
+      })
+      configuration.actors!.deleteHTTPProxyAccessPoint = fromPromise(
+        async ({ input }) => await Promise.reject(new Error())
+      )
+      const mockUnconfigurationMachine = unconfiguration.machine.provide(configuration)
+      const flowStates = [
+        'UNCONFIGURED',
+        'ENUMERATE_ETHERNET_PORT_SETTINGS',
+        'PULL_ETHERNET_PORT_SETTINGS',
+        'GET_8021X_PROFILE',
+        'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
+        'PULL_WIFI_ENDPOINT_SETTINGS',
+        'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
+        'PULL_HTTP_PROXY_ACCESS_POINT',
+        'PULL_HTTP_PROXY_ACCESS_POINT', // Second pull after EnumerationContext check
+        'DELETE_HTTP_PROXY_ACCESS_POINT',
+        'FAILURE'
+      ]
+      const service = createActor(mockUnconfigurationMachine, { input: unconfigContext })
+      service.subscribe({
+        next: (state) => {
+          try {
+            const expectedState: any = flowStates[currentStateIndex++]
+            expect(state.matches(expectedState)).toBe(true)
+            if (state.matches('FAILURE') && currentStateIndex === flowStates.length) {
+              resolve()
+            }
+          } catch (err) {
+            reject(err)
+          }
+        },
+        error: (err) => {
+          reject(err)
+        }
+      })
+      service.start()
+      service.send({ type: 'REMOVECONFIG', clientId })
+    }))
+
+  it('should eventually reach FAILURE after ENUMERATE_MANAGEMENT_PRESENCE_REMOTE_SAP', () =>
+    new Promise<void>((resolve, reject) => {
+      configuration.actors!.enumerateManagementPresenceRemoteSAP = fromPromise(
+        async ({ input }) => await Promise.reject(new Error())
+      )
+      const mockUnconfigurationMachine = unconfiguration.machine.provide(configuration)
+      const flowStates = [
+        'UNCONFIGURED',
+        'ENUMERATE_ETHERNET_PORT_SETTINGS',
+        'PULL_ETHERNET_PORT_SETTINGS',
+        'GET_8021X_PROFILE',
+        'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
+        'PULL_WIFI_ENDPOINT_SETTINGS',
+        'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
+        'PULL_HTTP_PROXY_ACCESS_POINT',
+        'REMOVE_REMOTE_ACCESS_POLICY_RULE_USER_INITIATED',
+        'REMOVE_REMOTE_ACCESS_POLICY_RULE_ALERT',
+        'REMOVE_REMOTE_ACCESS_POLICY_RULE_PERIODIC',
+        'ENUMERATE_MANAGEMENT_PRESENCE_REMOTE_SAP',
+        'FAILURE'
+      ]
+      const service = createActor(mockUnconfigurationMachine, { input: unconfigContext })
+      service.subscribe({
+        next: (state) => {
+          try {
+            const expectedState: any = flowStates[currentStateIndex++]
+            expect(state.matches(expectedState)).toBe(true)
+            if (state.matches('FAILURE') && currentStateIndex === flowStates.length) {
+              resolve()
+            }
+          } catch (err) {
+            reject(err)
+          }
+        },
+        error: (err) => {
+          reject(err)
+        }
+      })
+      service.start()
+      service.send({ type: 'REMOVECONFIG', clientId })
+    }))
+
+  it('should eventually reach FAILURE after DELETE_WIFI_ENDPOINT_SETTINGS', () =>
+    new Promise<void>((resolve, reject) => {
+      configuration.guards!.is8021xProfileEnabled = () => true
+      configuration.actors!.pullWifiEndpointSettings = fromPromise(
+        async ({ input }) =>
+          await Promise.resolve({
+            Envelope: {
+              Body: {
+                PullResponse: {
+                  Items: {
+                    CIM_WiFiEndpointSettings: [
+                      { InstanceID: 'testID', Priority: 1 },
+                      { InstanceID: 'testID2', Priority: 2 }
                     ]
                   }
                 }
@@ -214,529 +529,365 @@ describe('Unconfiguration State Machine', () => {
             }
           })
       )
-      configuration.actors.enumerateWifiEndpointSettings = fromPromise(
+      configuration.actors!.deleteWiFiProfileOnAMTDevice = fromPromise(
         async ({ input }) => await Promise.reject(new Error())
       )
-    }
-
-    const mockUnconfigurationMachine = unconfiguration.machine.provide(configuration)
-    const flowStates = [
-      'UNCONFIGURED',
-      'ENUMERATE_ETHERNET_PORT_SETTINGS',
-      'PULL_ETHERNET_PORT_SETTINGS',
-      'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
-      'FAILURE'
-    ]
-    const service = createActor(mockUnconfigurationMachine, { input: unconfigContext })
-    service.subscribe((state) => {
-      const expectedState: any = flowStates[currentStateIndex++]
-      expect(state.matches(expectedState)).toBe(true)
-      if (state.matches('FAILURE') && currentStateIndex === flowStates.length) {
-        done()
-      }
-    })
-    service.start()
-    service.send({ type: 'REMOVECONFIG', clientId })
-  })
-
-  it('should eventually reach FAILURE after ENUMERATE_HTTP_PROXY_ACCESS_POINT', (done) => {
-    configuration.actors!.enumerateHTTPProxyAccessPoint = fromPromise(
-      async ({ input }) => await Promise.reject(new Error())
-    )
-    const mockUnconfigurationMachine = unconfiguration.machine.provide(configuration)
-    const flowStates = [
-      'UNCONFIGURED',
-      'ENUMERATE_ETHERNET_PORT_SETTINGS',
-      'PULL_ETHERNET_PORT_SETTINGS',
-      'GET_8021X_PROFILE',
-      'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
-      'PULL_WIFI_ENDPOINT_SETTINGS',
-      'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
-      'FAILURE'
-    ]
-    const service = createActor(mockUnconfigurationMachine, { input: unconfigContext })
-    service.subscribe((state) => {
-      const expectedState: any = flowStates[currentStateIndex++]
-      expect(state.matches(expectedState)).toBe(true)
-      if (state.matches('FAILURE') && currentStateIndex === flowStates.length) {
-        done()
-      }
-    })
-    service.start()
-    service.send({ type: 'REMOVECONFIG', clientId })
-  })
-
-  it('should eventually reach FAILURE after PULL_HTTP_PROXY_ACCESS_POINT', (done) => {
-    configuration.actors!.pullHTTPProxyAccessPoint = fromPromise(async ({ input }) => await Promise.reject(new Error()))
-    const mockUnconfigurationMachine = unconfiguration.machine.provide(configuration)
-    const flowStates = [
-      'UNCONFIGURED',
-      'ENUMERATE_ETHERNET_PORT_SETTINGS',
-      'PULL_ETHERNET_PORT_SETTINGS',
-      'GET_8021X_PROFILE',
-      'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
-      'PULL_WIFI_ENDPOINT_SETTINGS',
-      'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
-      'PULL_HTTP_PROXY_ACCESS_POINT',
-      'FAILURE'
-    ]
-    const service = createActor(mockUnconfigurationMachine, { input: unconfigContext })
-    service.subscribe((state) => {
-      const expectedState: any = flowStates[currentStateIndex++]
-      expect(state.matches(expectedState)).toBe(true)
-      if (state.matches('FAILURE') && currentStateIndex === flowStates.length) {
-        done()
-      }
-    })
-    service.start()
-    service.send({ type: 'REMOVECONFIG', clientId })
-  })
-
-  it('should eventually reach FAILURE after DELETE_HTTP_PROXY_ACCESS_POINT', (done) => {
-    configuration.guards!.hasHTTPProxyAccessPoints = () => true
-    configuration.actors!.pullHTTPProxyAccessPoint = fromPromise(
-      async ({ input }) =>
-        await Promise.resolve({
-          Envelope: {
-            Body: {
-              PullResponse: {
-                Items: {
-                  IPS_HTTPProxyAccessPoint: [
-                    { Name: 'Intel(r) ME:HTTP Proxy Access Point 0' },
-                    { Name: 'Intel(r) ME:HTTP Proxy Access Point 1' }]
-                },
-                EndOfSequence: ''
-              }
+      const mockUnconfigurationMachine = unconfiguration.machine.provide(configuration)
+      const flowStates = [
+        'UNCONFIGURED',
+        'ENUMERATE_ETHERNET_PORT_SETTINGS',
+        'PULL_ETHERNET_PORT_SETTINGS',
+        'GET_8021X_PROFILE',
+        'DISABLE_IEEE8021X_WIRED',
+        'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
+        'PULL_WIFI_ENDPOINT_SETTINGS',
+        'DELETE_WIFI_ENDPOINT_SETTINGS',
+        'FAILURE'
+      ]
+      const service = createActor(mockUnconfigurationMachine, { input: unconfigContext })
+      service.subscribe({
+        next: (state) => {
+          try {
+            const expectedState: any = flowStates[currentStateIndex++]
+            expect(state.matches(expectedState)).toBe(true)
+            if (state.matches('FAILURE') && currentStateIndex === flowStates.length) {
+              resolve()
             }
+          } catch (err) {
+            reject(err)
           }
-        })
-    )
-    configuration.actors!.deleteHTTPProxyAccessPoint = fromPromise(
-      async ({ input }) => await Promise.reject(new Error())
-    )
-    const mockUnconfigurationMachine = unconfiguration.machine.provide(configuration)
-    const flowStates = [
-      'UNCONFIGURED',
-      'ENUMERATE_ETHERNET_PORT_SETTINGS',
-      'PULL_ETHERNET_PORT_SETTINGS',
-      'GET_8021X_PROFILE',
-      'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
-      'PULL_WIFI_ENDPOINT_SETTINGS',
-      'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
-      'PULL_HTTP_PROXY_ACCESS_POINT',
-      'DELETE_HTTP_PROXY_ACCESS_POINT',
-      'FAILURE'
-    ]
-    const service = createActor(mockUnconfigurationMachine, { input: unconfigContext })
-    service.subscribe((state) => {
-      const expectedState: any = flowStates[currentStateIndex++]
-      expect(state.matches(expectedState)).toBe(true)
-      if (state.matches('FAILURE') && currentStateIndex === flowStates.length) {
-        done()
-      }
-    })
-    service.start()
-    service.send({ type: 'REMOVECONFIG', clientId })
-  })
-
-  it('should handle multiple HTTP Proxy pull operations with EnumerationContext', (done) => {
-    let pullCount = 0
-    configuration.guards!.hasMoreHTTPProxyData = ({ context }) => {
-      // Check if we have EnumerationContext and no EndOfSequence
-      return (
-        context.message.Envelope.Body.PullResponse?.EnumerationContext != null &&
-        context.message.Envelope.Body.PullResponse?.EndOfSequence == null
+        },
+        error: (err) => {
+          reject(err)
+        }
+      })
+      service.start()
+      service.send({ type: 'REMOVECONFIG', clientId })
+    }))
+  it('should eventually reach FAILURE after PULL_MANAGEMENT_PRESENCE_REMOTE_SAP', () =>
+    new Promise<void>((resolve, reject) => {
+      configuration.guards!.is8021xProfileEnabled = () => true
+      configuration.actors!.pullManagementPresenceRemoteSAP = fromPromise(
+        async ({ input }) => await Promise.reject(new Error())
       )
-    }
-    configuration.guards!.hasHTTPProxyAccessPoints = () => true
-    configuration.actors!.pullHTTPProxyAccessPoint = fromPromise(async ({ input }) => {
-      pullCount++
-      if (pullCount === 1) {
-        // First pull response with EnumerationContext
-        return await Promise.resolve({
-          Envelope: {
-            Body: {
-              PullResponse: {
-                EnumerationContext: '50270200-0000-0000-0000-000000000000',
-                Items: {
-                  IPS_HTTPProxyAccessPoint: { Name: 'Intel(r) ME:HTTP Proxy Access Point 0' }
-                }
-              }
+      const mockUnconfigurationMachine = unconfiguration.machine.provide(configuration)
+      const flowStates = [
+        'UNCONFIGURED',
+        'ENUMERATE_ETHERNET_PORT_SETTINGS',
+        'PULL_ETHERNET_PORT_SETTINGS',
+        'GET_8021X_PROFILE',
+        'DISABLE_IEEE8021X_WIRED',
+        'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
+        'PULL_WIFI_ENDPOINT_SETTINGS',
+        'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
+        'PULL_HTTP_PROXY_ACCESS_POINT',
+        'REMOVE_REMOTE_ACCESS_POLICY_RULE_USER_INITIATED',
+        'REMOVE_REMOTE_ACCESS_POLICY_RULE_ALERT',
+        'REMOVE_REMOTE_ACCESS_POLICY_RULE_PERIODIC',
+        'ENUMERATE_MANAGEMENT_PRESENCE_REMOTE_SAP',
+        'PULL_MANAGEMENT_PRESENCE_REMOTE_SAP',
+        'FAILURE'
+      ]
+      const service = createActor(mockUnconfigurationMachine, { input: unconfigContext })
+      service.subscribe({
+        next: (state) => {
+          try {
+            const expectedState: any = flowStates[currentStateIndex++]
+            expect(state.matches(expectedState)).toBe(true)
+            if (state.matches('FAILURE') && currentStateIndex === flowStates.length) {
+              resolve()
             }
+          } catch (err) {
+            reject(err)
           }
-        })
-      } else {
-        // Second pull response with EndOfSequence
-        return await Promise.resolve({
-          Envelope: {
-            Body: {
-              PullResponse: {
-                Items: {
-                  IPS_HTTPProxyAccessPoint: { Name: 'Intel(r) ME:HTTP Proxy Access Point 1' }
-                },
-                EndOfSequence: ''
-              }
+        },
+        error: (err) => {
+          reject(err)
+        }
+      })
+      service.start()
+      service.send({ type: 'REMOVECONFIG', clientId })
+    }))
+
+  it('should eventually reach FAILURE after ENUMERATE_TLS_SETTING_DATA', () =>
+    new Promise<void>((resolve, reject) => {
+      configuration.actors!.enumerateTLSSettingData = fromPromise(
+        async ({ input }) => await Promise.reject(new Error())
+      )
+      const mockUnconfigurationMachine = unconfiguration.machine.provide(configuration)
+      const flowStates = [
+        'UNCONFIGURED',
+        'ENUMERATE_ETHERNET_PORT_SETTINGS',
+        'PULL_ETHERNET_PORT_SETTINGS',
+        'GET_8021X_PROFILE',
+        'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
+        'PULL_WIFI_ENDPOINT_SETTINGS',
+        'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
+        'PULL_HTTP_PROXY_ACCESS_POINT',
+        'REMOVE_REMOTE_ACCESS_POLICY_RULE_USER_INITIATED',
+        'REMOVE_REMOTE_ACCESS_POLICY_RULE_ALERT',
+        'REMOVE_REMOTE_ACCESS_POLICY_RULE_PERIODIC',
+        'ENUMERATE_MANAGEMENT_PRESENCE_REMOTE_SAP',
+        'PULL_MANAGEMENT_PRESENCE_REMOTE_SAP',
+        'ENUMERATE_TLS_SETTING_DATA',
+        'FAILURE'
+      ]
+      const service = createActor(mockUnconfigurationMachine, { input: unconfigContext })
+      service.subscribe({
+        next: (state) => {
+          try {
+            const expectedState: any = flowStates[currentStateIndex++]
+            expect(state.matches(expectedState)).toBe(true)
+            if (state.matches('FAILURE') && currentStateIndex === flowStates.length) {
+              resolve()
             }
+          } catch (err) {
+            reject(err)
           }
-        })
-      }
-    })
-    configuration.actors!.deleteHTTPProxyAccessPoint = fromPromise(
-      async ({ input }) => await Promise.reject(new Error())
-    )
-    const mockUnconfigurationMachine = unconfiguration.machine.provide(configuration)
-    const flowStates = [
-      'UNCONFIGURED',
-      'ENUMERATE_ETHERNET_PORT_SETTINGS',
-      'PULL_ETHERNET_PORT_SETTINGS',
-      'GET_8021X_PROFILE',
-      'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
-      'PULL_WIFI_ENDPOINT_SETTINGS',
-      'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
-      'PULL_HTTP_PROXY_ACCESS_POINT',
-      'PULL_HTTP_PROXY_ACCESS_POINT', // Second pull after EnumerationContext check
-      'DELETE_HTTP_PROXY_ACCESS_POINT',
-      'FAILURE'
-    ]
-    const service = createActor(mockUnconfigurationMachine, { input: unconfigContext })
-    service.subscribe((state) => {
-      const expectedState: any = flowStates[currentStateIndex++]
-      expect(state.matches(expectedState)).toBe(true)
-      if (state.matches('FAILURE') && currentStateIndex === flowStates.length) {
-        done()
-      }
-    })
-    service.start()
-    service.send({ type: 'REMOVECONFIG', clientId })
-  })
+        },
+        error: (err) => {
+          reject(err)
+        }
+      })
+      service.start()
+      service.send({ type: 'REMOVECONFIG', clientId })
+    }))
 
-  it('should eventually reach FAILURE after ENUMERATE_MANAGEMENT_PRESENCE_REMOTE_SAP', (done) => {
-    configuration.actors!.enumerateManagementPresenceRemoteSAP = fromPromise(
-      async ({ input }) => await Promise.reject(new Error())
-    )
-    const mockUnconfigurationMachine = unconfiguration.machine.provide(configuration)
-    const flowStates = [
-      'UNCONFIGURED',
-      'ENUMERATE_ETHERNET_PORT_SETTINGS',
-      'PULL_ETHERNET_PORT_SETTINGS',
-      'GET_8021X_PROFILE',
-      'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
-      'PULL_WIFI_ENDPOINT_SETTINGS',
-      'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
-      'PULL_HTTP_PROXY_ACCESS_POINT',
-      'REMOVE_REMOTE_ACCESS_POLICY_RULE_USER_INITIATED',
-      'REMOVE_REMOTE_ACCESS_POLICY_RULE_ALERT',
-      'REMOVE_REMOTE_ACCESS_POLICY_RULE_PERIODIC',
-      'ENUMERATE_MANAGEMENT_PRESENCE_REMOTE_SAP',
-      'FAILURE'
-    ]
-    const service = createActor(mockUnconfigurationMachine, { input: unconfigContext })
-    service.subscribe((state) => {
-      const expectedState: any = flowStates[currentStateIndex++]
-      expect(state.matches(expectedState)).toBe(true)
-      if (state.matches('FAILURE') && currentStateIndex === flowStates.length) {
-        done()
-      }
-    })
-    service.start()
-    service.send({ type: 'REMOVECONFIG', clientId })
-  })
-
-  it('should eventually reach FAILURE after DELETE_WIFI_ENDPOINT_SETTINGS', (done) => {
-    configuration.guards!.is8021xProfileEnabled = () => true
-    configuration.actors!.pullWifiEndpointSettings = fromPromise(
-      async ({ input }) =>
-        await Promise.resolve({
-          Envelope: {
-            Body: {
-              PullResponse: {
-                Items: {
-                  CIM_WiFiEndpointSettings: [
-                    { InstanceID: 'testID', Priority: 1 },
-                    { InstanceID: 'testID2', Priority: 2 }
-                  ]
-                }
-              }
+  it('should eventually reach FAILURE after PULL_TLS_SETTING_DATA', () =>
+    new Promise<void>((resolve, reject) => {
+      configuration.actors!.pullTLSSettingData = fromPromise(async ({ input }) => await Promise.reject(new Error()))
+      const mockUnconfigurationMachine = unconfiguration.machine.provide(configuration)
+      const flowStates = [
+        'UNCONFIGURED',
+        'ENUMERATE_ETHERNET_PORT_SETTINGS',
+        'PULL_ETHERNET_PORT_SETTINGS',
+        'GET_8021X_PROFILE',
+        'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
+        'PULL_WIFI_ENDPOINT_SETTINGS',
+        'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
+        'PULL_HTTP_PROXY_ACCESS_POINT',
+        'REMOVE_REMOTE_ACCESS_POLICY_RULE_USER_INITIATED',
+        'REMOVE_REMOTE_ACCESS_POLICY_RULE_ALERT',
+        'REMOVE_REMOTE_ACCESS_POLICY_RULE_PERIODIC',
+        'ENUMERATE_MANAGEMENT_PRESENCE_REMOTE_SAP',
+        'PULL_MANAGEMENT_PRESENCE_REMOTE_SAP',
+        'ENUMERATE_TLS_SETTING_DATA',
+        'PULL_TLS_SETTING_DATA',
+        'FAILURE'
+      ]
+      const service = createActor(mockUnconfigurationMachine, { input: unconfigContext })
+      service.subscribe({
+        next: (state) => {
+          try {
+            const expectedState: any = flowStates[currentStateIndex++]
+            expect(state.matches(expectedState)).toBe(true)
+            if (state.matches('FAILURE') && currentStateIndex === flowStates.length) {
+              resolve()
             }
+          } catch (err) {
+            reject(err)
           }
-        })
-    )
-    configuration.actors!.deleteWiFiProfileOnAMTDevice = fromPromise(
-      async ({ input }) => await Promise.reject(new Error())
-    )
-    const mockUnconfigurationMachine = unconfiguration.machine.provide(configuration)
-    const flowStates = [
-      'UNCONFIGURED',
-      'ENUMERATE_ETHERNET_PORT_SETTINGS',
-      'PULL_ETHERNET_PORT_SETTINGS',
-      'GET_8021X_PROFILE',
-      'DISABLE_IEEE8021X_WIRED',
-      'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
-      'PULL_WIFI_ENDPOINT_SETTINGS',
-      'DELETE_WIFI_ENDPOINT_SETTINGS',
-      'FAILURE'
-    ]
-    const service = createActor(mockUnconfigurationMachine, { input: unconfigContext })
-    service.subscribe((state) => {
-      const expectedState: any = flowStates[currentStateIndex++]
-      expect(state.matches(expectedState)).toBe(true)
-      if (state.matches('FAILURE') && currentStateIndex === flowStates.length) {
-        done()
-      }
-    })
-    service.start()
-    service.send({ type: 'REMOVECONFIG', clientId })
-  })
-  it('should eventually reach FAILURE after PULL_MANAGEMENT_PRESENCE_REMOTE_SAP', (done) => {
-    configuration.guards!.is8021xProfileEnabled = () => true
-    configuration.actors!.pullManagementPresenceRemoteSAP = fromPromise(
-      async ({ input }) => await Promise.reject(new Error())
-    )
-    const mockUnconfigurationMachine = unconfiguration.machine.provide(configuration)
-    const flowStates = [
-      'UNCONFIGURED',
-      'ENUMERATE_ETHERNET_PORT_SETTINGS',
-      'PULL_ETHERNET_PORT_SETTINGS',
-      'GET_8021X_PROFILE',
-      'DISABLE_IEEE8021X_WIRED',
-      'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
-      'PULL_WIFI_ENDPOINT_SETTINGS',
-      'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
-      'PULL_HTTP_PROXY_ACCESS_POINT',
-      'REMOVE_REMOTE_ACCESS_POLICY_RULE_USER_INITIATED',
-      'REMOVE_REMOTE_ACCESS_POLICY_RULE_ALERT',
-      'REMOVE_REMOTE_ACCESS_POLICY_RULE_PERIODIC',
-      'ENUMERATE_MANAGEMENT_PRESENCE_REMOTE_SAP',
-      'PULL_MANAGEMENT_PRESENCE_REMOTE_SAP',
-      'FAILURE'
-    ]
-    const service = createActor(mockUnconfigurationMachine, { input: unconfigContext })
-    service.subscribe((state) => {
-      const expectedState: any = flowStates[currentStateIndex++]
-      expect(state.matches(expectedState)).toBe(true)
-      if (state.matches('FAILURE') && currentStateIndex === flowStates.length) {
-        done()
-      }
-    })
-    service.start()
-    service.send({ type: 'REMOVECONFIG', clientId })
-  })
+        },
+        error: (err) => {
+          reject(err)
+        }
+      })
+      service.start()
+      service.send({ type: 'REMOVECONFIG', clientId })
+    }))
 
-  it('should eventually reach FAILURE after ENUMERATE_TLS_SETTING_DATA', (done) => {
-    configuration.actors!.enumerateTLSSettingData = fromPromise(async ({ input }) => await Promise.reject(new Error()))
-    const mockUnconfigurationMachine = unconfiguration.machine.provide(configuration)
-    const flowStates = [
-      'UNCONFIGURED',
-      'ENUMERATE_ETHERNET_PORT_SETTINGS',
-      'PULL_ETHERNET_PORT_SETTINGS',
-      'GET_8021X_PROFILE',
-      'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
-      'PULL_WIFI_ENDPOINT_SETTINGS',
-      'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
-      'PULL_HTTP_PROXY_ACCESS_POINT',
-      'REMOVE_REMOTE_ACCESS_POLICY_RULE_USER_INITIATED',
-      'REMOVE_REMOTE_ACCESS_POLICY_RULE_ALERT',
-      'REMOVE_REMOTE_ACCESS_POLICY_RULE_PERIODIC',
-      'ENUMERATE_MANAGEMENT_PRESENCE_REMOTE_SAP',
-      'PULL_MANAGEMENT_PRESENCE_REMOTE_SAP',
-      'ENUMERATE_TLS_SETTING_DATA',
-      'FAILURE'
-    ]
-    const service = createActor(mockUnconfigurationMachine, { input: unconfigContext })
-    service.subscribe((state) => {
-      const expectedState: any = flowStates[currentStateIndex++]
-      expect(state.matches(expectedState)).toBe(true)
-      if (state.matches('FAILURE') && currentStateIndex === flowStates.length) {
-        done()
-      }
-    })
-    service.start()
-    service.send({ type: 'REMOVECONFIG', clientId })
-  })
+  it('should eventually reach FAILURE after ENUMERATE_PUBLIC_KEY_CERTIFICATE', () =>
+    new Promise<void>((resolve, reject) => {
+      configuration.actors!.enumeratePublicKeyCertificate = fromPromise(
+        async ({ input }) => await Promise.reject(new Error())
+      )
+      const mockUnconfigurationMachine = unconfiguration.machine.provide(configuration)
+      const flowStates = [
+        'UNCONFIGURED',
+        'ENUMERATE_ETHERNET_PORT_SETTINGS',
+        'PULL_ETHERNET_PORT_SETTINGS',
+        'GET_8021X_PROFILE',
+        'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
+        'PULL_WIFI_ENDPOINT_SETTINGS',
+        'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
+        'PULL_HTTP_PROXY_ACCESS_POINT',
+        'REMOVE_REMOTE_ACCESS_POLICY_RULE_USER_INITIATED',
+        'REMOVE_REMOTE_ACCESS_POLICY_RULE_ALERT',
+        'REMOVE_REMOTE_ACCESS_POLICY_RULE_PERIODIC',
+        'ENUMERATE_MANAGEMENT_PRESENCE_REMOTE_SAP',
+        'PULL_MANAGEMENT_PRESENCE_REMOTE_SAP',
+        'ENUMERATE_TLS_SETTING_DATA',
+        'PULL_TLS_SETTING_DATA',
+        'ENUMERATE_PUBLIC_KEY_CERTIFICATE',
+        'FAILURE'
+      ]
+      const service = createActor(mockUnconfigurationMachine, { input: unconfigContext })
+      service.subscribe({
+        next: (state) => {
+          try {
+            const expectedState: any = flowStates[currentStateIndex++]
+            expect(state.matches(expectedState)).toBe(true)
+            if (state.matches('FAILURE') && currentStateIndex === flowStates.length) {
+              resolve()
+            }
+          } catch (err) {
+            reject(err)
+          }
+        },
+        error: (err) => {
+          reject(err)
+        }
+      })
+      service.start()
+      service.send({ type: 'REMOVECONFIG', clientId })
+    }))
 
-  it('should eventually reach FAILURE after PULL_TLS_SETTING_DATA', (done) => {
-    configuration.actors!.pullTLSSettingData = fromPromise(async ({ input }) => await Promise.reject(new Error()))
-    const mockUnconfigurationMachine = unconfiguration.machine.provide(configuration)
-    const flowStates = [
-      'UNCONFIGURED',
-      'ENUMERATE_ETHERNET_PORT_SETTINGS',
-      'PULL_ETHERNET_PORT_SETTINGS',
-      'GET_8021X_PROFILE',
-      'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
-      'PULL_WIFI_ENDPOINT_SETTINGS',
-      'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
-      'PULL_HTTP_PROXY_ACCESS_POINT',
-      'REMOVE_REMOTE_ACCESS_POLICY_RULE_USER_INITIATED',
-      'REMOVE_REMOTE_ACCESS_POLICY_RULE_ALERT',
-      'REMOVE_REMOTE_ACCESS_POLICY_RULE_PERIODIC',
-      'ENUMERATE_MANAGEMENT_PRESENCE_REMOTE_SAP',
-      'PULL_MANAGEMENT_PRESENCE_REMOTE_SAP',
-      'ENUMERATE_TLS_SETTING_DATA',
-      'PULL_TLS_SETTING_DATA',
-      'FAILURE'
-    ]
-    const service = createActor(mockUnconfigurationMachine, { input: unconfigContext })
-    service.subscribe((state) => {
-      const expectedState: any = flowStates[currentStateIndex++]
-      expect(state.matches(expectedState)).toBe(true)
-      if (state.matches('FAILURE') && currentStateIndex === flowStates.length) {
-        done()
-      }
-    })
-    service.start()
-    service.send({ type: 'REMOVECONFIG', clientId })
-  })
+  it('should eventually reach FAILURE after PULL_PUBLIC_KEY_CERTIFICATE', () =>
+    new Promise<void>((resolve, reject) => {
+      configuration.actors!.pullPublicKeyCertificate = fromPromise(
+        async ({ input }) => await Promise.reject(new Error())
+      )
+      const mockUnconfigurationMachine = unconfiguration.machine.provide(configuration)
+      const flowStates = [
+        'UNCONFIGURED',
+        'ENUMERATE_ETHERNET_PORT_SETTINGS',
+        'PULL_ETHERNET_PORT_SETTINGS',
+        'GET_8021X_PROFILE',
+        'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
+        'PULL_WIFI_ENDPOINT_SETTINGS',
+        'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
+        'PULL_HTTP_PROXY_ACCESS_POINT',
+        'REMOVE_REMOTE_ACCESS_POLICY_RULE_USER_INITIATED',
+        'REMOVE_REMOTE_ACCESS_POLICY_RULE_ALERT',
+        'REMOVE_REMOTE_ACCESS_POLICY_RULE_PERIODIC',
+        'ENUMERATE_MANAGEMENT_PRESENCE_REMOTE_SAP',
+        'PULL_MANAGEMENT_PRESENCE_REMOTE_SAP',
+        'ENUMERATE_TLS_SETTING_DATA',
+        'PULL_TLS_SETTING_DATA',
+        'ENUMERATE_PUBLIC_KEY_CERTIFICATE',
+        'PULL_PUBLIC_KEY_CERTIFICATE',
+        'FAILURE'
+      ]
+      const service = createActor(mockUnconfigurationMachine, { input: unconfigContext })
+      service.subscribe({
+        next: (state) => {
+          try {
+            const expectedState: any = flowStates[currentStateIndex++]
+            expect(state.matches(expectedState)).toBe(true)
+            if (state.matches('FAILURE') && currentStateIndex === flowStates.length) {
+              resolve()
+            }
+          } catch (err) {
+            reject(err)
+          }
+        },
+        error: (err) => {
+          reject(err)
+        }
+      })
+      service.start()
+      service.send({ type: 'REMOVECONFIG', clientId })
+    }))
 
-  it('should eventually reach FAILURE after ENUMERATE_PUBLIC_KEY_CERTIFICATE', (done) => {
-    configuration.actors!.enumeratePublicKeyCertificate = fromPromise(
-      async ({ input }) => await Promise.reject(new Error())
-    )
-    const mockUnconfigurationMachine = unconfiguration.machine.provide(configuration)
-    const flowStates = [
-      'UNCONFIGURED',
-      'ENUMERATE_ETHERNET_PORT_SETTINGS',
-      'PULL_ETHERNET_PORT_SETTINGS',
-      'GET_8021X_PROFILE',
-      'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
-      'PULL_WIFI_ENDPOINT_SETTINGS',
-      'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
-      'PULL_HTTP_PROXY_ACCESS_POINT',
-      'REMOVE_REMOTE_ACCESS_POLICY_RULE_USER_INITIATED',
-      'REMOVE_REMOTE_ACCESS_POLICY_RULE_ALERT',
-      'REMOVE_REMOTE_ACCESS_POLICY_RULE_PERIODIC',
-      'ENUMERATE_MANAGEMENT_PRESENCE_REMOTE_SAP',
-      'PULL_MANAGEMENT_PRESENCE_REMOTE_SAP',
-      'ENUMERATE_TLS_SETTING_DATA',
-      'PULL_TLS_SETTING_DATA',
-      'ENUMERATE_PUBLIC_KEY_CERTIFICATE',
-      'FAILURE'
-    ]
-    const service = createActor(mockUnconfigurationMachine, { input: unconfigContext })
-    service.subscribe((state) => {
-      const expectedState: any = flowStates[currentStateIndex++]
-      expect(state.matches(expectedState)).toBe(true)
-      if (state.matches('FAILURE') && currentStateIndex === flowStates.length) {
-        done()
-      }
-    })
-    service.start()
-    service.send({ type: 'REMOVECONFIG', clientId })
-  })
+  it('should eventually reach FAILURE after ENUMERATE_PUBLIC_KEY_CERTIFICATE with 8021x updated', () =>
+    new Promise<void>((resolve, reject) => {
+      unconfigContext.is8021xProfileUpdated = true
+      configuration.actors!.pullPublicPrivateKeyPair = fromPromise(
+        async ({ input }) => await Promise.resolve({ Envelope: { Body: { PullResponse: { Items: {} } } } })
+      )
+      configuration.actors!.enumeratePublicKeyCertificate = fromPromise(
+        async ({ input }) => await Promise.reject(new Error())
+      )
+      const mockUnconfigurationMachine = unconfiguration.machine.provide(configuration)
+      const flowStates = [
+        'UNCONFIGURED',
+        'ENUMERATE_ETHERNET_PORT_SETTINGS',
+        'PULL_ETHERNET_PORT_SETTINGS',
+        'GET_8021X_PROFILE',
+        'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
+        'PULL_WIFI_ENDPOINT_SETTINGS',
+        'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
+        'PULL_HTTP_PROXY_ACCESS_POINT',
+        'REMOVE_REMOTE_ACCESS_POLICY_RULE_USER_INITIATED',
+        'REMOVE_REMOTE_ACCESS_POLICY_RULE_ALERT',
+        'REMOVE_REMOTE_ACCESS_POLICY_RULE_PERIODIC',
+        'ENUMERATE_MANAGEMENT_PRESENCE_REMOTE_SAP',
+        'PULL_MANAGEMENT_PRESENCE_REMOTE_SAP',
+        'ENUMERATE_TLS_SETTING_DATA',
+        'PULL_TLS_SETTING_DATA',
+        'ENUMERATE_PUBLIC_PRIVATE_KEY_PAIR',
+        'PULL_PUBLIC_PRIVATE_KEY_PAIR',
+        'ENUMERATE_PUBLIC_KEY_CERTIFICATE',
+        'FAILURE'
+      ]
+      const service = createActor(mockUnconfigurationMachine, { input: unconfigContext })
+      service.subscribe({
+        next: (state) => {
+          try {
+            const expectedState: any = flowStates[currentStateIndex++]
+            expect(state.matches(expectedState)).toBe(true)
+            if (state.matches('FAILURE') && currentStateIndex === flowStates.length) {
+              resolve()
+            }
+          } catch (err) {
+            reject(err)
+          }
+        },
+        error: (err) => {
+          reject(err)
+        }
+      })
+      service.start()
+      service.send({ type: 'REMOVECONFIG', clientId })
+    }))
 
-  it('should eventually reach FAILURE after PULL_PUBLIC_KEY_CERTIFICATE', (done) => {
-    configuration.actors!.pullPublicKeyCertificate = fromPromise(async ({ input }) => await Promise.reject(new Error()))
-    const mockUnconfigurationMachine = unconfiguration.machine.provide(configuration)
-    const flowStates = [
-      'UNCONFIGURED',
-      'ENUMERATE_ETHERNET_PORT_SETTINGS',
-      'PULL_ETHERNET_PORT_SETTINGS',
-      'GET_8021X_PROFILE',
-      'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
-      'PULL_WIFI_ENDPOINT_SETTINGS',
-      'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
-      'PULL_HTTP_PROXY_ACCESS_POINT',
-      'REMOVE_REMOTE_ACCESS_POLICY_RULE_USER_INITIATED',
-      'REMOVE_REMOTE_ACCESS_POLICY_RULE_ALERT',
-      'REMOVE_REMOTE_ACCESS_POLICY_RULE_PERIODIC',
-      'ENUMERATE_MANAGEMENT_PRESENCE_REMOTE_SAP',
-      'PULL_MANAGEMENT_PRESENCE_REMOTE_SAP',
-      'ENUMERATE_TLS_SETTING_DATA',
-      'PULL_TLS_SETTING_DATA',
-      'ENUMERATE_PUBLIC_KEY_CERTIFICATE',
-      'PULL_PUBLIC_KEY_CERTIFICATE',
-      'FAILURE'
-    ]
-    const service = createActor(mockUnconfigurationMachine, { input: unconfigContext })
-    service.subscribe((state) => {
-      const expectedState: any = flowStates[currentStateIndex++]
-      expect(state.matches(expectedState)).toBe(true)
-      if (state.matches('FAILURE') && currentStateIndex === flowStates.length) {
-        done()
-      }
-    })
-    service.start()
-    service.send({ type: 'REMOVECONFIG', clientId })
-  })
-
-  it('should eventually reach FAILURE after ENUMERATE_PUBLIC_KEY_CERTIFICATE with 8021x updated', (done) => {
-    unconfigContext.is8021xProfileUpdated = true
-    configuration.actors!.pullPublicPrivateKeyPair = fromPromise(
-      async ({ input }) => await Promise.resolve({ Envelope: { Body: { PullResponse: { Items: {} } } } })
-    )
-    configuration.actors!.enumeratePublicKeyCertificate = fromPromise(
-      async ({ input }) => await Promise.reject(new Error())
-    )
-    const mockUnconfigurationMachine = unconfiguration.machine.provide(configuration)
-    const flowStates = [
-      'UNCONFIGURED',
-      'ENUMERATE_ETHERNET_PORT_SETTINGS',
-      'PULL_ETHERNET_PORT_SETTINGS',
-      'GET_8021X_PROFILE',
-      'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
-      'PULL_WIFI_ENDPOINT_SETTINGS',
-      'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
-      'PULL_HTTP_PROXY_ACCESS_POINT',
-      'REMOVE_REMOTE_ACCESS_POLICY_RULE_USER_INITIATED',
-      'REMOVE_REMOTE_ACCESS_POLICY_RULE_ALERT',
-      'REMOVE_REMOTE_ACCESS_POLICY_RULE_PERIODIC',
-      'ENUMERATE_MANAGEMENT_PRESENCE_REMOTE_SAP',
-      'PULL_MANAGEMENT_PRESENCE_REMOTE_SAP',
-      'ENUMERATE_TLS_SETTING_DATA',
-      'PULL_TLS_SETTING_DATA',
-      'ENUMERATE_PUBLIC_PRIVATE_KEY_PAIR',
-      'PULL_PUBLIC_PRIVATE_KEY_PAIR',
-      'ENUMERATE_PUBLIC_KEY_CERTIFICATE',
-      'FAILURE'
-    ]
-    const service = createActor(mockUnconfigurationMachine, { input: unconfigContext })
-    service.subscribe((state) => {
-      const expectedState: any = flowStates[currentStateIndex++]
-      expect(state.matches(expectedState)).toBe(true)
-      if (state.matches('FAILURE') && currentStateIndex === flowStates.length) {
-        done()
-      }
-    })
-    service.start()
-    service.send({ type: 'REMOVECONFIG', clientId })
-  })
-
-  it('should eventually reach FAILURE after GET_ENVIRONMENT_DETECTION_SETTINGS', (done) => {
-    configuration.actors!.getEnvironmentDetectionSettings = fromPromise(
-      async ({ input }) => await Promise.reject(new Error())
-    )
-    const mockUnconfigurationMachine = unconfiguration.machine.provide(configuration)
-    const flowStates = [
-      'UNCONFIGURED',
-      'ENUMERATE_ETHERNET_PORT_SETTINGS',
-      'PULL_ETHERNET_PORT_SETTINGS',
-      'GET_8021X_PROFILE',
-      'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
-      'PULL_WIFI_ENDPOINT_SETTINGS',
-      'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
-      'PULL_HTTP_PROXY_ACCESS_POINT',
-      'REMOVE_REMOTE_ACCESS_POLICY_RULE_USER_INITIATED',
-      'REMOVE_REMOTE_ACCESS_POLICY_RULE_ALERT',
-      'REMOVE_REMOTE_ACCESS_POLICY_RULE_PERIODIC',
-      'ENUMERATE_MANAGEMENT_PRESENCE_REMOTE_SAP',
-      'PULL_MANAGEMENT_PRESENCE_REMOTE_SAP',
-      'ENUMERATE_TLS_SETTING_DATA',
-      'PULL_TLS_SETTING_DATA',
-      'ENUMERATE_PUBLIC_KEY_CERTIFICATE',
-      'PULL_PUBLIC_KEY_CERTIFICATE',
-      'GET_ENVIRONMENT_DETECTION_SETTINGS',
-      'FAILURE'
-    ]
-    const service = createActor(mockUnconfigurationMachine, { input: unconfigContext })
-    service.subscribe((state) => {
-      const expectedState: any = flowStates[currentStateIndex++]
-      expect(state.matches(expectedState)).toBe(true)
-      if (state.matches('FAILURE') && currentStateIndex === flowStates.length) {
-        done()
-      }
-    })
-    service.start()
-    service.send({ type: 'REMOVECONFIG', clientId })
-  })
+  it('should eventually reach FAILURE after GET_ENVIRONMENT_DETECTION_SETTINGS', () =>
+    new Promise<void>((resolve, reject) => {
+      configuration.actors!.getEnvironmentDetectionSettings = fromPromise(
+        async ({ input }) => await Promise.reject(new Error())
+      )
+      const mockUnconfigurationMachine = unconfiguration.machine.provide(configuration)
+      const flowStates = [
+        'UNCONFIGURED',
+        'ENUMERATE_ETHERNET_PORT_SETTINGS',
+        'PULL_ETHERNET_PORT_SETTINGS',
+        'GET_8021X_PROFILE',
+        'ENUMERATE_WIFI_ENDPOINT_SETTINGS',
+        'PULL_WIFI_ENDPOINT_SETTINGS',
+        'ENUMERATE_HTTP_PROXY_ACCESS_POINT',
+        'PULL_HTTP_PROXY_ACCESS_POINT',
+        'REMOVE_REMOTE_ACCESS_POLICY_RULE_USER_INITIATED',
+        'REMOVE_REMOTE_ACCESS_POLICY_RULE_ALERT',
+        'REMOVE_REMOTE_ACCESS_POLICY_RULE_PERIODIC',
+        'ENUMERATE_MANAGEMENT_PRESENCE_REMOTE_SAP',
+        'PULL_MANAGEMENT_PRESENCE_REMOTE_SAP',
+        'ENUMERATE_TLS_SETTING_DATA',
+        'PULL_TLS_SETTING_DATA',
+        'ENUMERATE_PUBLIC_KEY_CERTIFICATE',
+        'PULL_PUBLIC_KEY_CERTIFICATE',
+        'GET_ENVIRONMENT_DETECTION_SETTINGS',
+        'FAILURE'
+      ]
+      const service = createActor(mockUnconfigurationMachine, { input: unconfigContext })
+      service.subscribe({
+        next: (state) => {
+          try {
+            const expectedState: any = flowStates[currentStateIndex++]
+            expect(state.matches(expectedState)).toBe(true)
+            if (state.matches('FAILURE') && currentStateIndex === flowStates.length) {
+              resolve()
+            }
+          } catch (err) {
+            reject(err)
+          }
+        },
+        error: (err) => {
+          reject(err)
+        }
+      })
+      service.start()
+      service.send({ type: 'REMOVECONFIG', clientId })
+    }))
   it('should enum Ethernet Port Settiings', async () => {
     await unconfiguration.enumerateEthernetPortSettings({ input: unconfigContext })
     expect(invokeWsmanCallSpy).toHaveBeenCalled()

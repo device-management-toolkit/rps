@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { createSpyObj } from '../../../test/helper/jest.js'
-import { jest } from '@jest/globals'
-import { type Spied, spyOn } from 'jest-mock'
+import { createSpyObj } from '../../../test/helper/testUtils.js'
+
+import { vi, type MockInstance } from 'vitest'
 import { getProxyProfile } from './get.js'
 import { ProxyConfig } from 'models/RCS.Config.js'
 
@@ -13,7 +13,7 @@ describe('Proxy - Get', () => {
   let resSpy
   let req
   let proxyConfig: ProxyConfig
-  let getSpy: Spied<any>
+  let getSpy: MockInstance
 
   beforeEach(() => {
     resSpy = createSpyObj('Response', [
@@ -24,14 +24,14 @@ describe('Proxy - Get', () => {
     ])
 
     req = {
-      db: { proxyConfigs: { getByName: jest.fn() } },
+      db: { proxyConfigs: { getByName: vi.fn() } },
       query: {},
       params: { name: 'proxyConfigName' },
       tenantId: '',
       method: 'GET'
     }
 
-    getSpy = spyOn(req.db.proxyConfigs, 'getByName').mockResolvedValue(
+    getSpy = vi.spyOn(req.db.proxyConfigs, 'getByName').mockResolvedValue(
       (proxyConfig = {
         name: 'proxyConfigName',
         address: 'intel.com',
@@ -52,12 +52,12 @@ describe('Proxy - Get', () => {
     expect(resSpy.status).toHaveBeenCalledWith(200)
   })
   it('should handle not found', async () => {
-    spyOn(req.db.proxyConfigs, 'getByName').mockResolvedValue(null)
+    vi.spyOn(req.db.proxyConfigs, 'getByName').mockResolvedValue(null)
     await getProxyProfile(req, resSpy)
     expect(resSpy.status).toHaveBeenCalledWith(404)
   })
   it('should handle error', async () => {
-    spyOn(req.db.proxyConfigs, 'getByName').mockRejectedValue(null)
+    vi.spyOn(req.db.proxyConfigs, 'getByName').mockRejectedValue(null)
     await getProxyProfile(req, resSpy)
     expect(getSpy).toHaveBeenCalledWith('proxyConfigName', req.tenantId)
     expect(resSpy.status).toHaveBeenCalledWith(500)

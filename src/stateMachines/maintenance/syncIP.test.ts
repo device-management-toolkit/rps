@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { vi } from 'vitest'
 import { type AMT } from '@device-management-toolkit/wsman-messages'
 import { type DoneResponse, StatusFailed, StatusSuccess } from './doneResponse.js'
 import { runTilDone } from '../../test/helper/xstate.js'
 import { type MachineImplementationsSimplified } from 'xstate'
 import { setupTestClient } from '../../test/helper/Config.js'
-import { jest } from '@jest/globals'
 
 import { HttpResponseError, coalesceMessage } from '../common.js'
 
@@ -21,12 +21,16 @@ import {
   type SyncIP as SyncIPType
 } from './syncIP.js'
 
-const invokeWsmanCallSpy = jest.fn<any>()
-jest.unstable_mockModule('../common.js', () => ({
-  invokeWsmanCall: invokeWsmanCallSpy,
-  HttpResponseError,
-  coalesceMessage
-}))
+const invokeWsmanCallSpy = vi.hoisted(() => vi.fn<any>())
+vi.mock('../common.js', async () => {
+  const actual = await vi.importActual<typeof import('../common.js')>('../common.js')
+  const { HttpResponseError, coalesceMessage } = actual
+  return {
+    invokeWsmanCall: invokeWsmanCallSpy,
+    HttpResponseError,
+    coalesceMessage
+  }
+})
 
 const { MessageAlreadySynchronized, MessageNoWiredSettingsOnDevice, MessageWirelessOnly, SyncIP, SyncIPEventType } =
   await import('./syncIP.js')
@@ -48,7 +52,7 @@ describe('SyncIP State Machine', () => {
   let putRsp: any
 
   beforeEach(() => {
-    jest.resetAllMocks()
+    vi.resetAllMocks()
     clientId = setupTestClient()
     implementation = new SyncIP()
     doneResponse = {
@@ -145,86 +149,85 @@ describe('SyncIP State Machine', () => {
     event = { type: SyncIPEventType, clientId, targetIPConfig }
   })
 
-  const runTheTest = async function (done): Promise<void> {
+  const runTheTest = async function (): Promise<void> {
     invokeWsmanCallSpy.mockResolvedValueOnce(enumerateRsp).mockResolvedValueOnce(pullRsp).mockResolvedValueOnce(putRsp)
-    await runTilDone(implementation.machine.provide(implementationConfig), event, doneResponse, context, done)
+    await runTilDone(implementation.machine.provide(implementationConfig), event, doneResponse, context)
   }
-
-  it('should succeed synchronizing static ip', (done) => {
+  it('should succeed synchronizing static ip', async () => {
     doneResponse.status = StatusSuccess
-    void runTheTest(done)
+    await runTheTest()
   })
-  it('should succeed synchronizing DHCP', (done) => {
+  it('should succeed synchronizing DHCP', async () => {
     wiredPortSettings.DHCPEnabled = true
     doneResponse.status = StatusSuccess
-    void runTheTest(done)
+    await runTheTest()
   })
-  it('should fail missing event.targetIPConfig.ipAddress', (done) => {
+  it('should fail missing event.targetIPConfig.ipAddress', async () => {
     const { ipAddress, ...newTargetIPConfig } = targetIPConfig
     event.targetIPConfig = newTargetIPConfig as any
     doneResponse.status = StatusFailed
-    void runTheTest(done)
+    await runTheTest()
   })
-  it('should fail missing event.targetIPConfig', (done) => {
+  it('should fail missing event.targetIPConfig', async () => {
     // need this twice to hit all the branches in
     delete event.targetIPConfig
     doneResponse.status = StatusFailed
-    void runTheTest(done)
+    await runTheTest()
   })
-  it('should fail missing enumerateRsp.EnumerateResponse', (done) => {
+  it('should fail missing enumerateRsp.EnumerateResponse', async () => {
     // implementationConfig.actors!.enumerateEthernetPortSettings = fromPromise(async ({ input }) => await Promise.reject(new Error()))
     const { EnumerateResponse, ...newEnumRsp } = enumerateRsp.Envelope.Body
     enumerateRsp = newEnumRsp as any
     doneResponse.status = StatusFailed
-    void runTheTest(done)
+    await runTheTest()
   })
-  it('should fail missing pullRsp.PullResponse.Items.AMT_EthernetPortSettings', (done) => {
+  it('should fail missing pullRsp.PullResponse.Items.AMT_EthernetPortSettings', async () => {
     pullRsp.Envelope.Body.PullResponse = { EndOfSequence: 'EOS' } as any
     doneResponse.status = StatusFailed
-    void runTheTest(done)
+    await runTheTest()
   })
-  it('should fail missing pullRsp.PullResponse.Items', (done) => {
+  it('should fail missing pullRsp.PullResponse.Items', async () => {
     const { Items, ...newPullResponse } = pullRsp.Envelope.Body.PullResponse
     pullRsp.Envelope.Body.PullResponse = newPullResponse as any
     doneResponse.status = StatusFailed
-    void runTheTest(done)
+    await runTheTest()
   })
-  it(`should fail on ${MessageNoWiredSettingsOnDevice}`, (done) => {
+  it(`should fail on ${MessageNoWiredSettingsOnDevice}`, async () => {
     pullRsp.Envelope.Body.PullResponse.Items.AMT_EthernetPortSettings = wirelessPortSettings
     doneResponse.status = StatusFailed
-    void runTheTest(done)
+    await runTheTest()
   })
-  it(`should fail on ${MessageWirelessOnly}`, (done) => {
+  it(`should fail on ${MessageWirelessOnly}`, async () => {
     wiredPortSettings.MACAddress = null as any
     doneResponse.status = StatusFailed
-    void runTheTest(done)
+    await runTheTest()
   })
-  it(`should fail on ${MessageAlreadySynchronized}`, (done) => {
+  it(`should fail on ${MessageAlreadySynchronized}`, async () => {
     targetIPConfig.ipAddress = wiredPortSettings.IPAddress as any
     doneResponse.status = StatusFailed
-    void runTheTest(done)
+    await runTheTest()
   })
-  it('should fail on bad put response', (done) => {
+  it('should fail on bad put response', async () => {
     putRsp = null
     doneResponse.status = StatusFailed
-    void runTheTest(done)
+    await runTheTest()
   })
-  it('should fail enumerate response on http response error', (done) => {
+  it('should fail enumerate response on http response error', async () => {
     doneResponse.status = StatusFailed
     invokeWsmanCallSpy.mockRejectedValueOnce(HttpBadRequestError)
-    void runTilDone(implementation.machine, event, doneResponse, context, done)
+    await runTilDone(implementation.machine, event, doneResponse, context)
   })
-  it('should fail pull response on http response error', (done) => {
+  it('should fail pull response on http response error', async () => {
     doneResponse.status = StatusFailed
     invokeWsmanCallSpy.mockResolvedValueOnce(enumerateRsp).mockRejectedValueOnce(HttpBadRequestError)
-    void runTilDone(implementation.machine, event, doneResponse, context, done)
+    await runTilDone(implementation.machine, event, doneResponse, context)
   })
-  it('should fail put response on http response error', (done) => {
+  it('should fail put response on http response error', async () => {
     doneResponse.status = StatusFailed
     invokeWsmanCallSpy
       .mockResolvedValueOnce(enumerateRsp)
       .mockResolvedValueOnce(pullRsp)
       .mockRejectedValueOnce(HttpBadRequestError)
-    void runTilDone(implementation.machine, event, doneResponse, context, done)
+    await runTilDone(implementation.machine, event, doneResponse, context)
   })
 })

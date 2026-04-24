@@ -3,13 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { vi } from 'vitest'
 import { type MachineImplementationsSimplified, createActor, fromPromise } from 'xstate'
 import { HttpHandler } from '../HttpHandler.js'
 import { devices } from '../devices.js'
-import { jest } from '@jest/globals'
+
 import { type TimeSyncContext, type TimeSyncEvent, type TimeSync as TimeSyncType } from './timeMachine.js'
-const invokeWsmanCallSpy = jest.fn<any>()
-jest.unstable_mockModule('./common.js', () => ({
+const invokeWsmanCallSpy = vi.hoisted(() => vi.fn<any>())
+vi.mock('./common.js', () => ({
   invokeWsmanCall: invokeWsmanCallSpy
 }))
 const { TimeSync } = await import('./timeMachine.js')
@@ -25,7 +26,7 @@ describe('TLS State Machine', () => {
     currentStateIndex = 0
     devices[clientId] = {
       status: {},
-      ClientSocket: { send: jest.fn() },
+      ClientSocket: { send: vi.fn() },
       tls: {}
     } as any
     context = {
@@ -58,27 +59,37 @@ describe('TLS State Machine', () => {
       delays: {}
     }
   })
-  it('should sync the time', (done) => {
-    const timeMachineStateMachine = timeMachine.machine.provide(config)
-    const flowStates = [
-      'THE_PAST',
-      'GET_LOW_ACCURACY_TIME_SYNCH',
-      'SET_HIGH_ACCURACY_TIME_SYNCH',
-      'SUCCESS'
-    ]
+  it('should sync the time', () =>
+    new Promise<void>((resolve, reject) => {
+      const timeMachineStateMachine = timeMachine.machine.provide(config)
+      const flowStates = [
+        'THE_PAST',
+        'GET_LOW_ACCURACY_TIME_SYNCH',
+        'SET_HIGH_ACCURACY_TIME_SYNCH',
+        'SUCCESS'
+      ]
 
-    const timeMachineService = createActor(timeMachineStateMachine, { input: context })
-    timeMachineService.subscribe((state) => {
-      const expectedState: any = flowStates[currentStateIndex++]
-      expect(state.matches(expectedState)).toBe(true)
-      if (state.matches('SUCCESS') && currentStateIndex === flowStates.length) {
-        done()
-      }
-    })
+      const timeMachineService = createActor(timeMachineStateMachine, { input: context })
+      timeMachineService.subscribe({
+        next: (state) => {
+          try {
+            const expectedState: any = flowStates[currentStateIndex++]
+            expect(state.matches(expectedState)).toBe(true)
+            if (state.matches('SUCCESS') && currentStateIndex === flowStates.length) {
+              resolve()
+            }
+          } catch (err) {
+            reject(err)
+          }
+        },
+        error: (err) => {
+          reject(err)
+        }
+      })
 
-    timeMachineService.start()
-    timeMachineService.send({ type: 'TIMETRAVEL', clientId, data: null })
-  })
+      timeMachineService.start()
+      timeMachineService.send({ type: 'TIMETRAVEL', clientId, data: null })
+    }))
 
   it('should setHighAccuracyTimeSync', async () => {
     context.message = {

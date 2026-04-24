@@ -3,18 +3,18 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { createSpyObj } from '../../../test/helper/jest.js'
+import { createSpyObj } from '../../../test/helper/testUtils.js'
 import { exportProfile } from './export.js'
 import { Environment } from '../../../utils/Environment.js'
-import { jest } from '@jest/globals'
-import { type Spied, spyOn } from 'jest-mock'
+
+import { vi, type MockInstance } from 'vitest'
 import yaml from 'js-yaml'
 import crypto from 'crypto'
 
 describe('Profiles - Export', () => {
   let resSpy
   let req
-  let getByNameSpy: Spied<any>
+  let getByNameSpy: MockInstance
 
   const baseProfile = {
     profileName: 'testProfile',
@@ -53,21 +53,21 @@ describe('Profiles - Export', () => {
     ])
     req = {
       db: {
-        profiles: { getByName: jest.fn() },
-        ciraConfigs: { getByName: jest.fn() },
-        wirelessProfiles: { getByName: jest.fn() },
-        ieee8021xProfiles: { getByName: jest.fn() },
-        domains: { getByName: jest.fn() }
+        profiles: { getByName: vi.fn() },
+        ciraConfigs: { getByName: vi.fn() },
+        wirelessProfiles: { getByName: vi.fn() },
+        ieee8021xProfiles: { getByName: vi.fn() },
+        domains: { getByName: vi.fn() }
       },
       secretsManager: {
-        getSecretFromKey: jest.fn<any>().mockResolvedValue(''),
-        getSecretAtPath: jest.fn<any>().mockResolvedValue({})
+        getSecretFromKey: vi.fn<any>().mockResolvedValue(''),
+        getSecretAtPath: vi.fn<any>().mockResolvedValue({})
       },
       params: { profileName: 'testProfile' },
       query: {},
       tenantId: ''
     }
-    getByNameSpy = spyOn(req.db.profiles, 'getByName')
+    getByNameSpy = vi.spyOn(req.db.profiles, 'getByName')
     resSpy.status.mockReturnThis()
     resSpy.json.mockReturnThis()
     resSpy.send.mockReturnThis()

@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { vi } from 'vitest'
 import {
   type FeatureContext,
   type FeaturesConfiguration as FeaturesConfigurationType,
@@ -20,10 +21,9 @@ import { devices } from '../devices.js'
 import { HttpHandler } from '../HttpHandler.js'
 import { type MachineImplementationsSimplified, createActor, fromPromise } from 'xstate'
 import { AMT, CIM, IPS } from '@device-management-toolkit/wsman-messages'
-import { jest } from '@jest/globals'
 
-const invokeWsmanCallSpy = jest.fn<any>()
-jest.unstable_mockModule('./common.js', () => ({
+const invokeWsmanCallSpy = vi.hoisted(() => vi.fn<any>())
+vi.mock('./common.js', () => ({
   invokeWsmanCall: invokeWsmanCallSpy
 }))
 
@@ -44,7 +44,7 @@ describe('Features State Machine', () => {
     devices[clientId] = {
       unauthCount: 0,
       ClientId: clientId,
-      ClientSocket: { send: jest.fn() } as any,
+      ClientSocket: { send: vi.fn() } as any,
       ClientData: {},
       status: {},
       uuid: '4bac9510-04a6-4321-bae2-d45ddf07b684',
@@ -119,109 +119,149 @@ describe('Features State Machine', () => {
     }
   })
 
-  it('Should configure AMT features when default', (done) => {
-    const mockFeaturesMachine = featuresConfiguration.machine.provide(machineConfig)
-    const flowStates = [
-      'DEFAULT_FEATURES',
-      'GET_AMT_REDIRECTION_SERVICE',
-      'GET_IPS_OPT_IN_SERVICE',
-      'GET_CIM_KVM_REDIRECTION_SAP',
-      'SET_REDIRECTION_SERVICE',
-      'SET_KVM_REDIRECTION_SAP',
-      'PUT_REDIRECTION_SERVICE',
-      'PUT_IPS_OPT_IN_SERVICE',
-      'SUCCESS'
-    ]
-    const featuresService = createActor(mockFeaturesMachine, { input: context })
-    featuresService.subscribe((state) => {
-      const expectedState: any = flowStates[currentStateIndex++]
-      expect(state.matches(expectedState)).toBe(true)
-      if (state.matches('SUCCESS') && currentStateIndex === flowStates.length) {
-        done()
-      }
-    })
+  it('Should configure AMT features when default', () =>
+    new Promise<void>((resolve, reject) => {
+      const mockFeaturesMachine = featuresConfiguration.machine.provide(machineConfig)
+      const flowStates = [
+        'DEFAULT_FEATURES',
+        'GET_AMT_REDIRECTION_SERVICE',
+        'GET_IPS_OPT_IN_SERVICE',
+        'GET_CIM_KVM_REDIRECTION_SAP',
+        'SET_REDIRECTION_SERVICE',
+        'SET_KVM_REDIRECTION_SAP',
+        'PUT_REDIRECTION_SERVICE',
+        'PUT_IPS_OPT_IN_SERVICE',
+        'SUCCESS'
+      ]
+      const featuresService = createActor(mockFeaturesMachine, { input: context })
+      featuresService.subscribe({
+        next: (state) => {
+          try {
+            const expectedState: any = flowStates[currentStateIndex++]
+            expect(state.matches(expectedState)).toBe(true)
+            if (state.matches('SUCCESS') && currentStateIndex === flowStates.length) {
+              resolve()
+            }
+          } catch (err) {
+            reject(err)
+          }
+        },
+        error: (err) => {
+          reject(err)
+        }
+      })
 
-    featuresService.start()
-    featuresService.send({ type: 'CONFIGURE_FEATURES', clientId })
-  })
-  it('Should configure AMT features when ONLY_IDER', (done) => {
-    amtRedirectionSvcJson.EnabledState = AMTRedirectionServiceEnabledStates.ONLY_IDER
-    context.amtConfiguration.solEnabled = false
+      featuresService.start()
+      featuresService.send({ type: 'CONFIGURE_FEATURES', clientId })
+    }))
+  it('Should configure AMT features when ONLY_IDER', () =>
+    new Promise<void>((resolve, reject) => {
+      amtRedirectionSvcJson.EnabledState = AMTRedirectionServiceEnabledStates.ONLY_IDER
+      context.amtConfiguration.solEnabled = false
 
-    const mockFeaturesMachine = featuresConfiguration.machine.provide(machineConfig)
-    const flowStates = [
-      'DEFAULT_FEATURES',
-      'GET_AMT_REDIRECTION_SERVICE',
-      'GET_IPS_OPT_IN_SERVICE',
-      'GET_CIM_KVM_REDIRECTION_SAP',
-      'SET_REDIRECTION_SERVICE',
-      'SET_KVM_REDIRECTION_SAP',
-      'PUT_REDIRECTION_SERVICE',
-      'PUT_IPS_OPT_IN_SERVICE',
-      'SUCCESS'
-    ]
-    const featuresService = createActor(mockFeaturesMachine, { input: context })
-    featuresService.subscribe((state) => {
-      const expectedState: any = flowStates[currentStateIndex++]
-      expect(state.matches(expectedState)).toBe(true)
-      if (state.matches('SUCCESS') && currentStateIndex === flowStates.length) {
-        done()
-      }
-    })
+      const mockFeaturesMachine = featuresConfiguration.machine.provide(machineConfig)
+      const flowStates = [
+        'DEFAULT_FEATURES',
+        'GET_AMT_REDIRECTION_SERVICE',
+        'GET_IPS_OPT_IN_SERVICE',
+        'GET_CIM_KVM_REDIRECTION_SAP',
+        'SET_REDIRECTION_SERVICE',
+        'SET_KVM_REDIRECTION_SAP',
+        'PUT_REDIRECTION_SERVICE',
+        'PUT_IPS_OPT_IN_SERVICE',
+        'SUCCESS'
+      ]
+      const featuresService = createActor(mockFeaturesMachine, { input: context })
+      featuresService.subscribe({
+        next: (state) => {
+          try {
+            const expectedState: any = flowStates[currentStateIndex++]
+            expect(state.matches(expectedState)).toBe(true)
+            if (state.matches('SUCCESS') && currentStateIndex === flowStates.length) {
+              resolve()
+            }
+          } catch (err) {
+            reject(err)
+          }
+        },
+        error: (err) => {
+          reject(err)
+        }
+      })
 
-    featuresService.start()
-    featuresService.send({ type: 'CONFIGURE_FEATURES', clientId })
-  })
-  it('Should configure AMT features when ONLY_SOL', (done) => {
-    amtRedirectionSvcJson.EnabledState = AMTRedirectionServiceEnabledStates.ONLY_SOL
-    context.amtConfiguration.iderEnabled = false
-    const mockFeaturesMachine = featuresConfiguration.machine.provide(machineConfig)
-    const flowStates = [
-      'DEFAULT_FEATURES',
-      'GET_AMT_REDIRECTION_SERVICE',
-      'GET_IPS_OPT_IN_SERVICE',
-      'GET_CIM_KVM_REDIRECTION_SAP',
-      'SET_REDIRECTION_SERVICE',
-      'SET_KVM_REDIRECTION_SAP',
-      'PUT_REDIRECTION_SERVICE',
-      'PUT_IPS_OPT_IN_SERVICE',
-      'SUCCESS'
-    ]
-    const featuresService = createActor(mockFeaturesMachine, { input: context })
-    featuresService.subscribe((state) => {
-      const expectedState: any = flowStates[currentStateIndex++]
-      expect(state.matches(expectedState)).toBe(true)
-      if (state.matches('SUCCESS') && currentStateIndex === flowStates.length) {
-        done()
-      }
-    })
+      featuresService.start()
+      featuresService.send({ type: 'CONFIGURE_FEATURES', clientId })
+    }))
+  it('Should configure AMT features when ONLY_SOL', () =>
+    new Promise<void>((resolve, reject) => {
+      amtRedirectionSvcJson.EnabledState = AMTRedirectionServiceEnabledStates.ONLY_SOL
+      context.amtConfiguration.iderEnabled = false
+      const mockFeaturesMachine = featuresConfiguration.machine.provide(machineConfig)
+      const flowStates = [
+        'DEFAULT_FEATURES',
+        'GET_AMT_REDIRECTION_SERVICE',
+        'GET_IPS_OPT_IN_SERVICE',
+        'GET_CIM_KVM_REDIRECTION_SAP',
+        'SET_REDIRECTION_SERVICE',
+        'SET_KVM_REDIRECTION_SAP',
+        'PUT_REDIRECTION_SERVICE',
+        'PUT_IPS_OPT_IN_SERVICE',
+        'SUCCESS'
+      ]
+      const featuresService = createActor(mockFeaturesMachine, { input: context })
+      featuresService.subscribe({
+        next: (state) => {
+          try {
+            const expectedState: any = flowStates[currentStateIndex++]
+            expect(state.matches(expectedState)).toBe(true)
+            if (state.matches('SUCCESS') && currentStateIndex === flowStates.length) {
+              resolve()
+            }
+          } catch (err) {
+            reject(err)
+          }
+        },
+        error: (err) => {
+          reject(err)
+        }
+      })
 
-    featuresService.start()
-    featuresService.send({ type: 'CONFIGURE_FEATURES', clientId })
-  })
+      featuresService.start()
+      featuresService.send({ type: 'CONFIGURE_FEATURES', clientId })
+    }))
 
-  it('Should NOT configure AMT features when failure', (done) => {
-    machineConfig.actors!.getAmtRedirectionService = fromPromise(
-      async ({ input }) => await Promise.reject(new Error('FAILURE'))
-    )
-    const mockFeaturesMachine = featuresConfiguration.machine.provide(machineConfig)
-    const flowStates = [
-      'DEFAULT_FEATURES',
-      'GET_AMT_REDIRECTION_SERVICE',
-      'FAILED'
-    ]
-    const featuresService = createActor(mockFeaturesMachine, { input: context })
-    featuresService.subscribe((state) => {
-      const expectedState: any = flowStates[currentStateIndex++]
-      expect(state.matches(expectedState)).toBe(true)
-      if (state.matches('FAILED') && currentStateIndex === flowStates.length) {
-        done()
-      }
-    })
+  it('Should NOT configure AMT features when failure', () =>
+    new Promise<void>((resolve, reject) => {
+      machineConfig.actors!.getAmtRedirectionService = fromPromise(
+        async ({ input }) => await Promise.reject(new Error('FAILURE'))
+      )
+      const mockFeaturesMachine = featuresConfiguration.machine.provide(machineConfig)
+      const flowStates = [
+        'DEFAULT_FEATURES',
+        'GET_AMT_REDIRECTION_SERVICE',
+        'FAILED'
+      ]
+      const featuresService = createActor(mockFeaturesMachine, { input: context })
+      featuresService.subscribe({
+        next: (state) => {
+          try {
+            const expectedState: any = flowStates[currentStateIndex++]
+            expect(state.matches(expectedState)).toBe(true)
+            if (state.matches('FAILED') && currentStateIndex === flowStates.length) {
+              resolve()
+            }
+          } catch (err) {
+            reject(err)
+          }
+        },
+        error: (err) => {
+          reject(err)
+        }
+      })
 
-    featuresService.start()
-    featuresService.send({ type: 'CONFIGURE_FEATURES', clientId })
-  })
+      featuresService.start()
+      featuresService.send({ type: 'CONFIGURE_FEATURES', clientId })
+    }))
   it('getAmtRedirectionService', async () => {
     await featuresConfiguration.getAmtRedirectionService({ input: context })
     expect(invokeWsmanCallSpy).toHaveBeenCalled()

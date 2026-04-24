@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { createSpyObj } from '../../../test/helper/jest.js'
+import { vi } from 'vitest'
+import { createSpyObj } from '../../../test/helper/testUtils.js'
 import { allCiraConfigs } from './all.js'
-import { jest } from '@jest/globals'
 
 describe('CIRA Config - All', () => {
   let resSpy
@@ -20,8 +20,8 @@ describe('CIRA Config - All', () => {
     req = {
       db: {
         ciraConfigs: {
-          get: jest.fn<() => Promise<any>>().mockImplementation(async () => await Promise.resolve([])),
-          getCount: jest.fn<() => Promise<number>>().mockImplementation(async () => await Promise.resolve(123))
+          get: vi.fn<() => Promise<any>>().mockImplementation(async () => await Promise.resolve([])),
+          getCount: vi.fn<() => Promise<number>>().mockImplementation(async () => await Promise.resolve(123))
         }
       },
       query: {}
@@ -47,7 +47,7 @@ describe('CIRA Config - All', () => {
   })
 
   it('should set status to 500 if error occurs', async () => {
-    req.db.ciraConfigs.getCount = jest.fn().mockImplementation(() => {
+    req.db.ciraConfigs.getCount = vi.fn().mockImplementation(() => {
       throw new TypeError('fake error')
     })
     req.query.$count = true

@@ -8,8 +8,7 @@ import { NodeForge } from './NodeForge.js'
 import { type AMTKeyUsage, type CertAttributes, type CertificateObject } from './models/index.js'
 import Logger from './Logger.js'
 import { TEST_PFXCERT, EXPECTED_CERT } from './test/helper/certs.js'
-import { spyOn } from 'jest-mock'
-
+import { vi } from 'vitest'
 describe('certManager tests', () => {
   describe('sortCertificate tests', () => {
     test('issuer is from root', () => {
@@ -70,7 +69,7 @@ describe('certManager tests', () => {
       const certBagOid = nodeForge.pkiOidsCertBag
       const keyBagOid = nodeForge.pkcs8ShroudedKeyBag
 
-      spyOn(nodeForge, 'pkcs12FromAsn1').mockReturnValue({
+      vi.spyOn(nodeForge, 'pkcs12FromAsn1').mockReturnValue({
         getBags: (opts: any) => {
           if (opts.bagType === certBagOid) {
             return { [certBagOid]: [{ cert: null }, { cert: null }] }
@@ -156,7 +155,7 @@ describe('certManager tests', () => {
         ST: 'stateOrProvince',
         O: 'organization'
       }
-      const leafSpy = spyOn(certManager, 'generateLeafCertificate')
+      const leafSpy = vi.spyOn(certManager, 'generateLeafCertificate')
 
       const rootCert = certManager.createCertificate(certAttr)
       const leafCert = certManager.createCertificate(certAttr, rootCert.key, null, certAttr, keyUsage)
@@ -204,7 +203,7 @@ describe('certManager tests', () => {
     test('should generate root certificate', () => {
       const nodeForge = new NodeForge()
       const certManager = new CertManager(new Logger('CertManager'), nodeForge)
-      const rootSpy = spyOn(certManager, 'generateRootCertificate')
+      const rootSpy = vi.spyOn(certManager, 'generateRootCertificate')
       const certAttr: CertAttributes = {
         CN: 'commonName',
         C: 'country',
@@ -243,8 +242,8 @@ describe('certManager tests', () => {
       const nodeForge = new NodeForge()
       const certManager = new CertManager(new Logger('CertManager'), nodeForge)
       const keys = nodeForge.rsaGenerateKeyPair(2048)
-      const createCertificateSpy = spyOn(certManager, 'createCertificate')
-      const generateLeafCertificateSpy = spyOn(certManager, 'generateLeafCertificate')
+      const createCertificateSpy = vi.spyOn(certManager, 'createCertificate')
+      const generateLeafCertificateSpy = vi.spyOn(certManager, 'generateLeafCertificate')
 
       const certAttr: CertAttributes = { CN: 'AMT', O: 'None', ST: 'None', C: 'None' }
       const issuerAttr: CertAttributes = { CN: 'Untrusted Root Certificate' }
@@ -263,8 +262,8 @@ describe('certManager tests', () => {
     test('should set caPrivateKey to certAndKey.key if caPrivateKey is null', () => {
       const nodeForge = new NodeForge()
       const certManager = new CertManager(new Logger('CertManager'), nodeForge)
-      const createCertificateSpy = spyOn(certManager, 'createCertificate')
-      const generateLeafCertificateSpy = spyOn(certManager, 'generateLeafCertificate')
+      const createCertificateSpy = vi.spyOn(certManager, 'createCertificate')
+      const generateLeafCertificateSpy = vi.spyOn(certManager, 'generateLeafCertificate')
 
       const certAttr: CertAttributes = { CN: 'AMT', O: 'None', ST: 'None', C: 'None' }
       const issuerAttr: CertAttributes = { CN: 'Untrusted Root Certificate' }

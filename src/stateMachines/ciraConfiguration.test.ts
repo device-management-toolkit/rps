@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { vi } from 'vitest'
 import { AMT } from '@device-management-toolkit/wsman-messages'
 import {
   type CIRAConfigContext,
@@ -17,19 +18,22 @@ import { type CIRAConfig } from '../models/RCS.Config.js'
 import { HttpHandler } from '../HttpHandler.js'
 import { type MachineImplementationsSimplified, createActor, fromPromise } from 'xstate'
 import { HttpResponseError, coalesceMessage, isDigestRealmValid } from './common.js'
-import { jest } from '@jest/globals'
 
 Environment.Config = config
 
-const invokeWsmanCallSpy = jest.fn<any>()
-jest.unstable_mockModule('./common.js', () => ({
-  invokeWsmanCall: invokeWsmanCallSpy,
-  invokeEnterpriseAssistantCall: jest.fn(),
-  processTLSTunnelResponse: jest.fn(),
-  HttpResponseError,
-  isDigestRealmValid,
-  coalesceMessage
-}))
+const invokeWsmanCallSpy = vi.hoisted(() => vi.fn<any>())
+vi.mock('./common.js', async () => {
+  const actual = await vi.importActual<typeof import('./common.js')>('./common.js')
+  const { HttpResponseError, coalesceMessage, isDigestRealmValid } = actual
+  return {
+    invokeWsmanCall: invokeWsmanCallSpy,
+    invokeEnterpriseAssistantCall: vi.fn(),
+    processTLSTunnelResponse: vi.fn(),
+    HttpResponseError,
+    isDigestRealmValid,
+    coalesceMessage
+  }
+})
 
 const { CIRAConfiguration, MPSType } = await import('./ciraConfiguration.js')
 
@@ -70,7 +74,7 @@ describe('CIRA Configuration State Machine', () => {
   let machineContext
   let ciraConfig: CIRAConfig
   beforeEach(() => {
-    jest.clearAllMocks()
+    vi.clearAllMocks()
     ciraStateMachineImpl = new CIRAConfiguration()
     devices[clientId] = {
       ClientId: clientId,
@@ -140,67 +144,87 @@ describe('CIRA Configuration State Machine', () => {
     }
   })
 
-  it('should succeed for happy path', (done) => {
-    const mockCiraConfigurationMachine = ciraStateMachineImpl.machine.provide(machineConfig)
-    const flowStates = [
-      'CIRACONFIGURED',
-      'GET_CIRA_CONFIG',
-      'SET_MPS_PASSWORD',
-      'ADD_TRUSTED_ROOT_CERTIFICATE',
-      'SAVE_MPS_PASSWORD_TO_SECRET_PROVIDER',
-      'SAVE_DEVICE_TO_MPS',
-      'ADD_MPS',
-      'ENUMERATE_MANAGEMENT_PRESENCE_REMOTE_SAP',
-      'PULL_MANAGEMENT_PRESENCE_REMOTE_SAP',
-      'ADD_REMOTE_ACCESS_POLICY_RULE',
-      'ADD_USER_INITIATED_REMOTE_ACCESS_POLICY_RULE',
-      'ENUMERATE_REMOTE_ACCESS_POLICY_APPLIESTOMPS',
-      'PULL_REMOTE_ACCESS_POLICY_APPLIESTOMPS',
-      'PUT_REMOTE_ACCESS_POLICY_APPLIESTOMPS',
-      'USER_INITIATED_CONNECTION_SERVICE',
-      'GET_ENVIRONMENT_DETECTION_SETTINGS',
-      'PUT_ENVIRONMENT_DETECTION_SETTINGS',
-      'SUCCESS'
-    ]
-    let currentStateIndex = 0
-    const machineContext = {
-      message: null,
-      clientId
-    }
-    const ciraConfigurationService = createActor(mockCiraConfigurationMachine, { input: machineContext })
-    ciraConfigurationService.subscribe((state) => {
-      if (state.value) {
-        const expected = flowStates[currentStateIndex++]
-        const actual = state.value as string
-        expect(actual).toEqual(expected)
-        if (state.matches('SUCCESS') || state.matches('FAILURE') || currentStateIndex === flowStates.length) {
-          const status = devices[clientId].status.CIRAConnection
-          expect(status).toEqual('Configured')
-          done()
+  it('should succeed for happy path', () =>
+    new Promise<void>((resolve, reject) => {
+      const mockCiraConfigurationMachine = ciraStateMachineImpl.machine.provide(machineConfig)
+      const flowStates = [
+        'CIRACONFIGURED',
+        'GET_CIRA_CONFIG',
+        'SET_MPS_PASSWORD',
+        'ADD_TRUSTED_ROOT_CERTIFICATE',
+        'SAVE_MPS_PASSWORD_TO_SECRET_PROVIDER',
+        'SAVE_DEVICE_TO_MPS',
+        'ADD_MPS',
+        'ENUMERATE_MANAGEMENT_PRESENCE_REMOTE_SAP',
+        'PULL_MANAGEMENT_PRESENCE_REMOTE_SAP',
+        'ADD_REMOTE_ACCESS_POLICY_RULE',
+        'ADD_USER_INITIATED_REMOTE_ACCESS_POLICY_RULE',
+        'ENUMERATE_REMOTE_ACCESS_POLICY_APPLIESTOMPS',
+        'PULL_REMOTE_ACCESS_POLICY_APPLIESTOMPS',
+        'PUT_REMOTE_ACCESS_POLICY_APPLIESTOMPS',
+        'USER_INITIATED_CONNECTION_SERVICE',
+        'GET_ENVIRONMENT_DETECTION_SETTINGS',
+        'PUT_ENVIRONMENT_DETECTION_SETTINGS',
+        'SUCCESS'
+      ]
+      let currentStateIndex = 0
+      const machineContext = {
+        message: null,
+        clientId
+      }
+      const ciraConfigurationService = createActor(mockCiraConfigurationMachine, { input: machineContext })
+      ciraConfigurationService.subscribe({
+        next: (state) => {
+          try {
+            if (state.value) {
+              const expected = flowStates[currentStateIndex++]
+              const actual = state.value as string
+              expect(actual).toEqual(expected)
+              if (state.matches('SUCCESS') || state.matches('FAILURE') || currentStateIndex === flowStates.length) {
+                const status = devices[clientId].status.CIRAConnection
+                expect(status).toEqual('Configured')
+                resolve()
+              }
+            }
+          } catch (err) {
+            reject(err)
+          }
+        },
+        error: (err) => {
+          reject(err)
         }
-      }
-    })
-    ciraConfigurationService.start()
-    ciraConfigurationService.send(initialEvent)
-  })
+      })
+      ciraConfigurationService.start()
+      ciraConfigurationService.send(initialEvent)
+    }))
 
-  it('should fail on error response for user-initiated-connection-service', (done) => {
-    const failedResponse = { Envelope: { Body: { RequestStateChange_OUTPUT: { ReturnValue: 1 } } } }
-    machineConfig.actors!.userInitiatedConnectionService = fromPromise(
-      async ({ input }) => await Promise.resolve(failedResponse)
-    )
-    const mockCiraConfigurationMachine = ciraStateMachineImpl.machine.provide(machineConfig)
+  it('should fail on error response for user-initiated-connection-service', () =>
+    new Promise<void>((resolve, reject) => {
+      const failedResponse = { Envelope: { Body: { RequestStateChange_OUTPUT: { ReturnValue: 1 } } } }
+      machineConfig.actors!.userInitiatedConnectionService = fromPromise(
+        async ({ input }) => await Promise.resolve(failedResponse)
+      )
+      const mockCiraConfigurationMachine = ciraStateMachineImpl.machine.provide(machineConfig)
 
-    const ciraConfigurationService = createActor(mockCiraConfigurationMachine, { input: machineContext })
-    ciraConfigurationService.subscribe((state) => {
-      if (state.matches('SUCCESS') || state.matches('FAILURE')) {
-        expect(state.matches('FAILURE')).toBeTruthy()
-        done()
-      }
-    })
-    ciraConfigurationService.start()
-    ciraConfigurationService.send(initialEvent)
-  })
+      const ciraConfigurationService = createActor(mockCiraConfigurationMachine, { input: machineContext })
+      ciraConfigurationService.subscribe({
+        next: (state) => {
+          try {
+            if (state.matches('SUCCESS') || state.matches('FAILURE')) {
+              expect(state.matches('FAILURE')).toBeTruthy()
+              resolve()
+            }
+          } catch (err) {
+            reject(err)
+          }
+        },
+        error: (err) => {
+          reject(err)
+        }
+      })
+      ciraConfigurationService.start()
+      ciraConfigurationService.send(initialEvent)
+    }))
 
   describe('send wsman message with Management Presence Remote SAP', () => {
     it('should send wsman message to enumerate ManagementPresenceRemoteSAP', async () => {
@@ -224,19 +248,19 @@ describe('CIRA Configuration State Machine', () => {
     })
     it('should log error on call to enumerateManagementPresenceRemoteSAP', async () => {
       machineContext.amt = null as any
-      const loggerSpy = jest.spyOn(ciraStateMachineImpl.logger, 'error')
+      const loggerSpy = vi.spyOn(ciraStateMachineImpl.logger, 'error')
       await ciraStateMachineImpl.enumerateManagementPresenceRemoteSAP({ input: machineContext })
       expect(loggerSpy).toHaveBeenCalled()
     })
     it('should log error on call to pullManagementPresenceRemoteSAP', async () => {
       machineContext.amt = null as any
-      const loggerSpy = jest.spyOn(ciraStateMachineImpl.logger, 'error')
+      const loggerSpy = vi.spyOn(ciraStateMachineImpl.logger, 'error')
       await ciraStateMachineImpl.pullManagementPresenceRemoteSAP({ input: machineContext })
       expect(loggerSpy).toHaveBeenCalled()
     })
     it('should log error on call to addRemoteAccessPolicyRule', async () => {
       machineContext.amt = null as any
-      const loggerSpy = jest.spyOn(ciraStateMachineImpl.logger, 'error')
+      const loggerSpy = vi.spyOn(ciraStateMachineImpl.logger, 'error')
       await ciraStateMachineImpl.addRemoteAccessPolicyRule({ input: machineContext })
       expect(loggerSpy).toHaveBeenCalled()
     })
@@ -260,13 +284,13 @@ describe('CIRA Configuration State Machine', () => {
     })
     it('should log error on call to getEnvironmentDetectionSettings', async () => {
       machineContext.amt = null as any
-      const loggerSpy = jest.spyOn(ciraStateMachineImpl.logger, 'error')
+      const loggerSpy = vi.spyOn(ciraStateMachineImpl.logger, 'error')
       await ciraStateMachineImpl.getEnvironmentDetectionSettings({ input: machineContext })
       expect(loggerSpy).toHaveBeenCalled()
     })
     it('should log error on call to putEnvironmentDetectionSettings', async () => {
       machineContext.amt = null as any
-      const loggerSpy = jest.spyOn(ciraStateMachineImpl.logger, 'error')
+      const loggerSpy = vi.spyOn(ciraStateMachineImpl.logger, 'error')
       await ciraStateMachineImpl.putEnvironmentDetectionSettings({ input: machineContext })
       expect(loggerSpy).toHaveBeenCalled()
     })
@@ -290,13 +314,13 @@ describe('CIRA Configuration State Machine', () => {
     })
     it('should log error on call to enumerateRemoteAccessPolicyAppliesToMPS', async () => {
       machineContext.amt = null as any
-      const loggerSpy = jest.spyOn(ciraStateMachineImpl.logger, 'error')
+      const loggerSpy = vi.spyOn(ciraStateMachineImpl.logger, 'error')
       await ciraStateMachineImpl.enumerateRemoteAccessPolicyAppliesToMPS({ input: machineContext })
       expect(loggerSpy).toHaveBeenCalled()
     })
     it('should log error on call to pullRemoteAccessPolicyAppliesToMPS', async () => {
       machineContext.amt = null as any
-      const loggerSpy = jest.spyOn(ciraStateMachineImpl.logger, 'error')
+      const loggerSpy = vi.spyOn(ciraStateMachineImpl.logger, 'error')
       await ciraStateMachineImpl.pullRemoteAccessPolicyAppliesToMPS({ input: machineContext })
       expect(loggerSpy).toHaveBeenCalled()
     })
@@ -309,13 +333,13 @@ describe('CIRA Configuration State Machine', () => {
     })
     it('should log error on call to putRemoteAccessPolicyAppliesToMPS', async () => {
       machineContext.amt = null as any
-      const loggerSpy = jest.spyOn(ciraStateMachineImpl.logger, 'error')
+      const loggerSpy = vi.spyOn(ciraStateMachineImpl.logger, 'error')
       await ciraStateMachineImpl.putRemoteAccessPolicyAppliesToMPS({ input: machineContext })
       expect(loggerSpy).toHaveBeenCalled()
     })
     it('should log error on call to userInitiatedConnectionService', async () => {
       machineContext.amt = null as any
-      const loggerSpy = jest.spyOn(ciraStateMachineImpl.logger, 'error')
+      const loggerSpy = vi.spyOn(ciraStateMachineImpl.logger, 'error')
       await ciraStateMachineImpl.userInitiatedConnectionService({ input: machineContext })
       expect(loggerSpy).toHaveBeenCalled()
     })
@@ -335,13 +359,13 @@ describe('CIRA Configuration State Machine', () => {
     })
     it('should log error on call to addTrustedRootCertificate', async () => {
       machineContext.amt = null as any
-      const loggerSpy = jest.spyOn(ciraStateMachineImpl.logger, 'error')
+      const loggerSpy = vi.spyOn(ciraStateMachineImpl.logger, 'error')
       await ciraStateMachineImpl.addTrustedRootCertificate({ input: machineContext })
       expect(loggerSpy).toHaveBeenCalled()
     })
     it('should log error on call to addMPS', async () => {
       machineContext.amt = null as any
-      const loggerSpy = jest.spyOn(ciraStateMachineImpl.logger, 'error')
+      const loggerSpy = vi.spyOn(ciraStateMachineImpl.logger, 'error')
       await ciraStateMachineImpl.addMPS({ input: machineContext })
       expect(loggerSpy).toHaveBeenCalled()
     })

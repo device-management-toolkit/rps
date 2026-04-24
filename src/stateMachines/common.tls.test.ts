@@ -8,8 +8,8 @@ import { devices } from '../devices.js'
 import { HttpHandler } from '../HttpHandler.js'
 import { Environment } from '../utils/Environment.js'
 import { config } from '../test/helper/Config.js'
-import { jest } from '@jest/globals'
-import { spyOn } from 'jest-mock'
+
+import { vi, type Mock } from 'vitest'
 import { GATEWAY_TIMEOUT_ERROR, UNEXPECTED_PARSE_ERROR } from '../utils/constants.js'
 import { processTLSTunnelResponse, invokeWsmanCall } from './common.js'
 
@@ -18,15 +18,15 @@ Environment.Config = config
 describe('processTLSTunnelResponse', () => {
   const clientId = randomUUID()
   let httpHandler: HttpHandler
-  let resolveSpy: jest.Mock
-  let rejectSpy: jest.Mock
+  let resolveSpy: Mock
+  let rejectSpy: Mock
 
   beforeEach(() => {
     httpHandler = new HttpHandler()
-    resolveSpy = jest.fn()
-    rejectSpy = jest.fn()
+    resolveSpy = vi.fn()
+    rejectSpy = vi.fn()
     devices[clientId] = {
-      ClientSocket: { send: jest.fn() } as any,
+      ClientSocket: { send: vi.fn() } as any,
       pendingPromise: Promise.resolve(),
       resolve: resolveSpy,
       reject: rejectSpy,
@@ -77,7 +77,7 @@ describe('processTLSTunnelResponse', () => {
     const xmlBody =
       '<?xml version="1.0" encoding="UTF-8"?><a:Envelope xmlns:a="http://www.w3.org/2003/05/soap-envelope"><a:Header><a:Action>http://schemas.xmlsoap.org/ws/2004/09/transfer/GetResponse</a:Action></a:Header><a:Body><AMT_GeneralSettings><DigestRealm>Digest:realm</DigestRealm></AMT_GeneralSettings></a:Body></a:Envelope>'
     const httpResponse = `HTTP/1.1 200 OK\r\nContent-Type: application/soap+xml; charset=UTF-8\r\nContent-Length: ${xmlBody.length}\r\n\r\n${xmlBody}`
-    const parseXMLSpy = spyOn(httpHandler, 'parseXML').mockReturnValue({ parsed: true } as any)
+    const parseXMLSpy = vi.spyOn(httpHandler, 'parseXML').mockReturnValue({ parsed: true } as any)
 
     processTLSTunnelResponse(clientId, Buffer.from(httpResponse), httpHandler)
     expect(parseXMLSpy).toHaveBeenCalled()
@@ -91,7 +91,7 @@ describe('processTLSTunnelResponse', () => {
     const chunkSize = Buffer.byteLength(xmlBody)
     const chunkedBody = `${chunkSize.toString(16)}\r\n${xmlBody}\r\n0\r\n\r\n`
     const httpResponse = `HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n${chunkedBody}`
-    const parseXMLSpy = spyOn(httpHandler, 'parseXML').mockReturnValue({ parsed: true } as any)
+    const parseXMLSpy = vi.spyOn(httpHandler, 'parseXML').mockReturnValue({ parsed: true } as any)
 
     processTLSTunnelResponse(clientId, Buffer.from(httpResponse), httpHandler)
     expect(parseXMLSpy).toHaveBeenCalled()
@@ -110,7 +110,7 @@ describe('processTLSTunnelResponse', () => {
   it('should reject with UNEXPECTED_PARSE_ERROR when XML parse returns null', () => {
     const xmlBody = 'not valid xml at all'
     const httpResponse = `HTTP/1.1 200 OK\r\nContent-Length: ${xmlBody.length}\r\n\r\n${xmlBody}`
-    spyOn(httpHandler, 'parseXML').mockReturnValue(null as any)
+    vi.spyOn(httpHandler, 'parseXML').mockReturnValue(null as any)
 
     processTLSTunnelResponse(clientId, Buffer.from(httpResponse), httpHandler)
     expect(rejectSpy).toHaveBeenCalled()
@@ -130,16 +130,16 @@ describe('invokeWsmanCall TLS error cleanup', () => {
   let context: any
 
   beforeEach(() => {
-    jest.useFakeTimers()
+    vi.useFakeTimers()
     const mockTunnelManager = {
-      close: jest.fn(),
-      connect: jest.fn(),
-      send: jest.fn(),
-      onData: jest.fn(),
+      close: vi.fn(),
+      connect: vi.fn(),
+      send: vi.fn(),
+      onData: vi.fn(),
       getSessionId: () => 'test-session'
     }
     devices[clientId] = {
-      ClientSocket: { send: jest.fn() } as any,
+      ClientSocket: { send: vi.fn() } as any,
       connectionParams: { guid: clientId, port: 16992, digestChallenge: null },
       tlsEnforced: true,
       tlsTunnelManager: mockTunnelManager as any,
@@ -154,18 +154,18 @@ describe('invokeWsmanCall TLS error cleanup', () => {
   })
 
   afterEach(() => {
-    jest.runAllTicks()
-    jest.useRealTimers()
+    vi.runAllTicks()
+    vi.useRealTimers()
     delete devices[clientId]
   })
 
   it('should clean up TLS tunnel on timeout for TLS-enforced device', async () => {
     const tunnelManager = devices[clientId].tlsTunnelManager!
-    const closeSpy = spyOn(tunnelManager, 'close')
+    const closeSpy = vi.spyOn(tunnelManager, 'close')
 
     // The invokeWsmanCall will timeout because nothing resolves the pending promise
     const promise = invokeWsmanCall(context)
-    jest.advanceTimersByTime(Environment.Config.delay_timer * 1000 + 100)
+    vi.advanceTimersByTime(Environment.Config.delay_timer * 1000 + 100)
     try {
       await promise
     } catch (err) {
@@ -183,10 +183,10 @@ describe('invokeWsmanCall TLS error cleanup', () => {
   it('should NOT clean up TLS tunnel on timeout for non-TLS device', async () => {
     devices[clientId].tlsEnforced = false
     const tunnelManager = devices[clientId].tlsTunnelManager!
-    const closeSpy = spyOn(tunnelManager, 'close')
+    const closeSpy = vi.spyOn(tunnelManager, 'close')
 
     const promise = invokeWsmanCall(context)
-    jest.advanceTimersByTime(Environment.Config.delay_timer * 1000 + 100)
+    vi.advanceTimersByTime(Environment.Config.delay_timer * 1000 + 100)
     try {
       await promise
     } catch (err) {

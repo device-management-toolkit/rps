@@ -3,15 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { createSpyObj } from '../../../test/helper/jest.js'
+import { createSpyObj } from '../../../test/helper/testUtils.js'
 import { createProxyProfile } from './create.js'
-import { jest } from '@jest/globals'
-import { type Spied, spyOn } from 'jest-mock'
 
+import { vi, type MockInstance } from 'vitest'
 describe('Proxy - Create', () => {
   let resSpy
   let req
-  let insertSpy: Spied<any>
+  let insertSpy: MockInstance
 
   beforeEach(() => {
     resSpy = createSpyObj('Response', [
@@ -21,13 +20,13 @@ describe('Proxy - Create', () => {
       'send'
     ])
     req = {
-      db: { proxyConfigs: { insert: jest.fn() } },
+      db: { proxyConfigs: { insert: vi.fn() } },
       body: {
         address: '192.168.1.1' // IPv4 address for testing auto-detection
       },
       query: {}
     }
-    insertSpy = spyOn(req.db.proxyConfigs, 'insert').mockResolvedValue({})
+    insertSpy = vi.spyOn(req.db.proxyConfigs, 'insert').mockResolvedValue({})
     resSpy.status.mockReturnThis()
     resSpy.json.mockReturnThis()
     resSpy.send.mockReturnThis()
@@ -57,7 +56,7 @@ describe('Proxy - Create', () => {
     expect(resSpy.status).toHaveBeenCalledWith(201)
   })
   it('should handle error', async () => {
-    spyOn(req.db.proxyConfigs, 'insert').mockRejectedValue(null)
+    vi.spyOn(req.db.proxyConfigs, 'insert').mockRejectedValue(null)
     await createProxyProfile(req, resSpy)
     expect(insertSpy).toHaveBeenCalledTimes(1)
     expect(resSpy.status).toHaveBeenCalledWith(500)

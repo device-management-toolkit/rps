@@ -7,13 +7,12 @@ import PostgresDb from '../index.js'
 import { API_UNEXPECTED_EXCEPTION } from '../../../utils/constants.js'
 import { type ProfileWifiConfigs } from '../../../models/RCS.Config.js'
 import { ProfilesWifiConfigsTable } from './profileWifiConfigs.js'
-import { jest } from '@jest/globals'
-import { type Spied, spyOn } from 'jest-mock'
 
+import { vi, type MockInstance } from 'vitest'
 describe('profilewificonfig tests', () => {
   let db: PostgresDb
   let profilesWifiConfigsTable: ProfilesWifiConfigsTable
-  let querySpy: Spied<any>
+  let querySpy: MockInstance
   const wifiConfigs: ProfileWifiConfigs[] = [{ profileName: 'wirelessConfig', priority: 1 } as any]
   const profileName = 'profileName'
   const tenantId = 'tenantId'
@@ -21,10 +20,10 @@ describe('profilewificonfig tests', () => {
   beforeEach(() => {
     db = new PostgresDb('')
     profilesWifiConfigsTable = new ProfilesWifiConfigsTable(db)
-    querySpy = spyOn(profilesWifiConfigsTable.db, 'query')
+    querySpy = vi.spyOn(profilesWifiConfigsTable.db, 'query')
   })
   afterEach(() => {
-    jest.clearAllMocks()
+    vi.clearAllMocks()
   })
   describe('Get', () => {
     test('should Get', async () => {

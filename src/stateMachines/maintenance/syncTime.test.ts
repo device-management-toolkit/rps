@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { vi } from 'vitest'
 import { type DoneResponse, StatusFailed } from './doneResponse.js'
 import { setupTestClient } from '../../test/helper/Config.js'
 import { PTStatus } from '../../utils/PTStatus.js'
 import { runTilDone } from '../../test/helper/xstate.js'
 import { type MachineImplementationsSimplified } from 'xstate'
-import { jest } from '@jest/globals'
 
 import { HttpResponseError, coalesceMessage } from '../common.js'
 
@@ -20,12 +20,16 @@ import {
   type SyncTime as SyncTimeType
 } from './syncTime.js'
 
-const invokeWsmanCallSpy = jest.fn<any>()
-jest.unstable_mockModule('../common.js', () => ({
-  invokeWsmanCall: invokeWsmanCallSpy,
-  HttpResponseError,
-  coalesceMessage
-}))
+const invokeWsmanCallSpy = vi.hoisted(() => vi.fn<any>())
+vi.mock('../common.js', async () => {
+  const actual = await vi.importActual<typeof import('../common.js')>('../common.js')
+  const { HttpResponseError, coalesceMessage } = actual
+  return {
+    invokeWsmanCall: invokeWsmanCallSpy,
+    HttpResponseError,
+    coalesceMessage
+  }
+})
 
 const { SyncTime, SyncTimeEventType } = await import('./syncTime.js')
 
@@ -40,7 +44,7 @@ describe('SyncTime State Machine', () => {
   let highAccuracyRsp: SetHighAccuracyTimeSynchResponse
 
   beforeEach(() => {
-    jest.resetAllMocks()
+    vi.resetAllMocks()
     clientId = setupTestClient()
     implementation = new SyncTime()
     doneResponse = {
@@ -84,22 +88,21 @@ describe('SyncTime State Machine', () => {
     event = { type: SyncTimeEventType, clientId }
   })
 
-  const runTheTest = async function (done): Promise<void> {
+  const runTheTest = async function (): Promise<void> {
     invokeWsmanCallSpy.mockResolvedValueOnce(lowAccuracyRsp).mockResolvedValueOnce(highAccuracyRsp)
-    await runTilDone(implementation.machine.provide(implementationConfig), event, doneResponse, context, done)
+    await runTilDone(implementation.machine.provide(implementationConfig), event, doneResponse, context)
   }
-
-  it('should succeed synchronizing time', (done) => {
-    void runTheTest(done)
+  it('should succeed synchronizing time', async () => {
+    await runTheTest()
   })
-  it('should fail getting low accuracy time sync on bad return value', (done) => {
+  it('should fail getting low accuracy time sync on bad return value', async () => {
     doneResponse.status = StatusFailed
     lowAccuracyRsp.Envelope.Body.GetLowAccuracyTimeSynch_OUTPUT.ReturnValue = PTStatus.INTERNAL_ERROR.value
-    void runTheTest(done)
+    await runTheTest()
   })
-  it('should fail setting high accuracy time sync on bad return value', (done) => {
+  it('should fail setting high accuracy time sync on bad return value', async () => {
     doneResponse.status = StatusFailed
     highAccuracyRsp.Envelope.Body.SetHighAccuracyTimeSynch_OUTPUT.ReturnValue = PTStatus.INTERNAL_ERROR.value
-    void runTheTest(done)
+    await runTheTest()
   })
 })
