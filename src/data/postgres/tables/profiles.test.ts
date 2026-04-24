@@ -16,13 +16,12 @@ import {
 } from '../../../utils/constants.js'
 import { RPSError } from '../../../utils/RPSError.js'
 import { ProfilesTable } from './profiles.js'
-import { jest } from '@jest/globals'
-import { type Spied, spyOn } from 'jest-mock'
 
+import { vi, type MockInstance } from 'vitest'
 describe('profiles tests', () => {
   let db: PostgresDb
   let profilesTable: ProfilesTable
-  let querySpy: Spied<any>
+  let querySpy: MockInstance
   let amtConfig: AMTConfiguration
   const profileName = 'profileName'
   const tenantId = 'tenantId'
@@ -51,10 +50,10 @@ describe('profiles tests', () => {
     } as any
     db = new PostgresDb('')
     profilesTable = new ProfilesTable(db)
-    querySpy = spyOn(profilesTable.db, 'query')
+    querySpy = vi.spyOn(profilesTable.db, 'query')
   })
   afterEach(() => {
-    jest.clearAllMocks()
+    vi.clearAllMocks()
   })
   describe('Get', () => {
     test('should get expected count', async () => {
@@ -227,14 +226,14 @@ describe('profiles tests', () => {
       expect(result).toBeNull()
     })
     test('should get ciraconfig for profile', async () => {
-      const ciraConfigSpy = spyOn(db.ciraConfigs, 'getByName')
+      const ciraConfigSpy = vi.spyOn(db.ciraConfigs, 'getByName')
       ciraConfigSpy.mockResolvedValue({} as any)
       const result = await profilesTable.getCiraConfigForProfile(profileName, '')
       expect(result).toStrictEqual({})
       expect(ciraConfigSpy).toHaveBeenCalledWith(profileName, '')
     })
     test('should get 8021X config for profile', async () => {
-      const ciraConfigSpy = spyOn(db.ieee8021xProfiles, 'getByName')
+      const ciraConfigSpy = vi.spyOn(db.ieee8021xProfiles, 'getByName')
       ciraConfigSpy.mockResolvedValue({} as any)
       const result = await profilesTable.get8021XConfigForProfile(profileName, '')
       expect(result).toStrictEqual({})
@@ -244,9 +243,9 @@ describe('profiles tests', () => {
   describe('Delete', () => {
     test('should delete', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 1 })
-      const wirelessConfigSpy = spyOn(db.profileWirelessConfigs, 'deleteProfileWifiConfigs')
+      const wirelessConfigSpy = vi.spyOn(db.profileWirelessConfigs, 'deleteProfileWifiConfigs')
       wirelessConfigSpy.mockResolvedValue(true)
-      const profileProxyConfigsSpy = spyOn(db.profileProxyConfigs, 'deleteProfileProxyConfigs')
+      const profileProxyConfigsSpy = vi.spyOn(db.profileProxyConfigs, 'deleteProfileProxyConfigs')
       profileProxyConfigsSpy.mockResolvedValue(true)
       const result = await profilesTable.delete(profileName, tenantId)
       expect(result).toBeTruthy()
@@ -263,18 +262,18 @@ describe('profiles tests', () => {
     })
     test('should NOT delete', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 0 })
-      const wirelessConfigSpy = spyOn(db.profileWirelessConfigs, 'deleteProfileWifiConfigs')
+      const wirelessConfigSpy = vi.spyOn(db.profileWirelessConfigs, 'deleteProfileWifiConfigs')
       wirelessConfigSpy.mockResolvedValue(false)
-      const profileProxyConfigsSpy = spyOn(db.profileProxyConfigs, 'deleteProfileProxyConfigs')
+      const profileProxyConfigsSpy = vi.spyOn(db.profileProxyConfigs, 'deleteProfileProxyConfigs')
       profileProxyConfigsSpy.mockResolvedValue(true)
       const result = await profilesTable.delete(profileName)
       expect(result).toBe(false)
     })
     test('should NOT delete when cannot delete proxy configs', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 0 })
-      const wirelessConfigSpy = spyOn(db.profileWirelessConfigs, 'deleteProfileWifiConfigs')
+      const wirelessConfigSpy = vi.spyOn(db.profileWirelessConfigs, 'deleteProfileWifiConfigs')
       wirelessConfigSpy.mockResolvedValue(true)
-      const profileProxyConfigsSpy = spyOn(db.profileProxyConfigs, 'deleteProfileProxyConfigs')
+      const profileProxyConfigsSpy = vi.spyOn(db.profileProxyConfigs, 'deleteProfileProxyConfigs')
       profileProxyConfigsSpy.mockResolvedValue(false)
       const result = await profilesTable.delete(profileName)
       expect(result).toBe(false)
@@ -288,10 +287,10 @@ describe('profiles tests', () => {
     })
     test('should insert with wifi configs', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 1 })
-      const profileWirelessConfigsSpy = spyOn(db.profileWirelessConfigs, 'createProfileWifiConfigs')
+      const profileWirelessConfigsSpy = vi.spyOn(db.profileWirelessConfigs, 'createProfileWifiConfigs')
       profileWirelessConfigsSpy.mockResolvedValue(true)
 
-      const getByNameSpy = spyOn(profilesTable, 'getByName')
+      const getByNameSpy = vi.spyOn(profilesTable, 'getByName')
       amtConfig.wifiConfigs = [{} as any]
       getByNameSpy.mockResolvedValue(amtConfig)
       const result = await profilesTable.insert(amtConfig)
@@ -342,9 +341,9 @@ describe('profiles tests', () => {
     })
     test('should insert without wificonfigs', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 1 })
-      const profileWirelessConfigsSpy = spyOn(db.profileWirelessConfigs, 'createProfileWifiConfigs')
+      const profileWirelessConfigsSpy = vi.spyOn(db.profileWirelessConfigs, 'createProfileWifiConfigs')
       profileWirelessConfigsSpy.mockResolvedValue(true)
-      const getByNameSpy = spyOn(profilesTable, 'getByName')
+      const getByNameSpy = vi.spyOn(profilesTable, 'getByName')
       getByNameSpy.mockResolvedValue(amtConfig)
       const result = await profilesTable.insert(amtConfig)
 
@@ -415,7 +414,7 @@ describe('profiles tests', () => {
   describe('Update', () => {
     test('should update', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 1 })
-      const getByNameSpy = spyOn(profilesTable, 'getByName')
+      const getByNameSpy = vi.spyOn(profilesTable, 'getByName')
       getByNameSpy.mockResolvedValue(amtConfig)
 
       const result = await profilesTable.update(amtConfig)
@@ -458,9 +457,9 @@ describe('profiles tests', () => {
     })
     test('should update with wificonfigs', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 1 })
-      const profileWirelessConfigsSpy = spyOn(db.profileWirelessConfigs, 'createProfileWifiConfigs')
+      const profileWirelessConfigsSpy = vi.spyOn(db.profileWirelessConfigs, 'createProfileWifiConfigs')
       profileWirelessConfigsSpy.mockResolvedValue(true)
-      const getByNameSpy = spyOn(profilesTable, 'getByName')
+      const getByNameSpy = vi.spyOn(profilesTable, 'getByName')
       amtConfig.wifiConfigs = [{} as any]
       getByNameSpy.mockResolvedValue(amtConfig)
 
@@ -518,17 +517,17 @@ describe('profiles tests', () => {
     })
     test('should NOT update when concurrency error', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 0 })
-      const getByNameSpy = spyOn(profilesTable, 'getByName')
+      const getByNameSpy = vi.spyOn(profilesTable, 'getByName')
       getByNameSpy.mockResolvedValue(amtConfig)
       await expect(profilesTable.update(amtConfig)).rejects.toThrow(CONCURRENCY_MESSAGE)
     })
     test('should insert with proxy configs', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 1 })
 
-      const profileProxyConfigsSpy = spyOn(db.profileProxyConfigs, 'createProfileProxyConfigs')
+      const profileProxyConfigsSpy = vi.spyOn(db.profileProxyConfigs, 'createProfileProxyConfigs')
       profileProxyConfigsSpy.mockResolvedValue(true)
 
-      const getByNameSpy = spyOn(profilesTable, 'getByName')
+      const getByNameSpy = vi.spyOn(profilesTable, 'getByName')
       amtConfig.proxyConfigs = [{} as any]
       getByNameSpy.mockResolvedValue(amtConfig)
       const result = await profilesTable.insert(amtConfig)
@@ -580,9 +579,9 @@ describe('profiles tests', () => {
     })
     test('should insert without proxy configs', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 1 })
-      const profileProxyConfigsSpy = spyOn(db.profileProxyConfigs, 'createProfileProxyConfigs')
+      const profileProxyConfigsSpy = vi.spyOn(db.profileProxyConfigs, 'createProfileProxyConfigs')
       profileProxyConfigsSpy.mockResolvedValue(true)
-      const getByNameSpy = spyOn(profilesTable, 'getByName')
+      const getByNameSpy = vi.spyOn(profilesTable, 'getByName')
       getByNameSpy.mockResolvedValue(amtConfig)
       const result = await profilesTable.insert(amtConfig)
 
@@ -631,9 +630,9 @@ describe('profiles tests', () => {
     })
     test('should update with proxy configs', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 1 })
-      const profileProxyConfigsSpy = spyOn(db.profileProxyConfigs, 'createProfileProxyConfigs')
+      const profileProxyConfigsSpy = vi.spyOn(db.profileProxyConfigs, 'createProfileProxyConfigs')
       profileProxyConfigsSpy.mockResolvedValue(true)
-      const getByNameSpy = spyOn(profilesTable, 'getByName')
+      const getByNameSpy = vi.spyOn(profilesTable, 'getByName')
       amtConfig.proxyConfigs = [{} as any]
       getByNameSpy.mockResolvedValue(amtConfig)
 

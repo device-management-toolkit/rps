@@ -7,7 +7,7 @@ import { validationResult } from 'express-validator'
 import { ClientAction, TlsMode, TlsSigningAuthority } from '../../../models/RCS.Config.js'
 import { AMTUserConsent } from '../../../models/index.js'
 import { amtProfileValidator, profileUpdateValidator } from './amtProfileValidator.js'
-import { createSpyObj } from '../../../test/helper/jest.js'
+import { createSpyObj } from '../../../test/helper/testUtils.js'
 
 describe('AMT Profile Validation', () => {
   const testExpressValidatorMiddleware = async (req: Request, res: Response, middlewares): Promise<void> => {

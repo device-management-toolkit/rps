@@ -16,13 +16,12 @@ import {
 } from '../../../utils/constants.js'
 import { ProxyConfigsTable } from './proxyConfigs.js'
 import { RPSError } from '../../../utils/RPSError.js'
-import { jest } from '@jest/globals'
-import { type Spied, spyOn } from 'jest-mock'
 
+import { vi, type MockInstance } from 'vitest'
 describe('proxy configs tests', () => {
   let db: PostgresDb
   let proxyConfigsTable: ProxyConfigsTable
-  let querySpy: Spied<any>
+  let querySpy: MockInstance
   let proxyConfig: ProxyConfig
   const profileName = 'name'
   beforeEach(() => {
@@ -36,10 +35,10 @@ describe('proxy configs tests', () => {
     }
     db = new PostgresDb('')
     proxyConfigsTable = new ProxyConfigsTable(db)
-    querySpy = spyOn(proxyConfigsTable.db, 'query')
+    querySpy = vi.spyOn(proxyConfigsTable.db, 'query')
   })
   afterEach(() => {
-    jest.clearAllMocks()
+    vi.clearAllMocks()
   })
   describe('Get', () => {
     test('should get expected count', async () => {
@@ -221,7 +220,7 @@ describe('proxy configs tests', () => {
   describe('Insert', () => {
     test('should insert', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 1 })
-      const getByNameSpy = spyOn(proxyConfigsTable, 'getByName')
+      const getByNameSpy = vi.spyOn(proxyConfigsTable, 'getByName')
       getByNameSpy.mockResolvedValue(proxyConfig)
       const result = await proxyConfigsTable.insert(proxyConfig)
 
@@ -269,7 +268,7 @@ describe('proxy configs tests', () => {
   describe('Update', () => {
     test('should Update', async () => {
       querySpy.mockResolvedValueOnce({ rows: [{}], rowCount: 1 })
-      const getByNameSpy = spyOn(proxyConfigsTable, 'getByName')
+      const getByNameSpy = vi.spyOn(proxyConfigsTable, 'getByName')
       getByNameSpy.mockResolvedValue(proxyConfig)
       const result = await proxyConfigsTable.update(proxyConfig)
       expect(result).toBe(proxyConfig)
@@ -292,19 +291,19 @@ describe('proxy configs tests', () => {
     })
     test('should throw RPSError with no results from update query', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 0 })
-      const getByNameSpy = spyOn(proxyConfigsTable, 'getByName')
+      const getByNameSpy = vi.spyOn(proxyConfigsTable, 'getByName')
       getByNameSpy.mockResolvedValue(proxyConfig)
       await expect(proxyConfigsTable.update(proxyConfig)).rejects.toBeInstanceOf(RPSError)
     })
     test('should throw RPSError with return from update query', async () => {
       querySpy.mockResolvedValueOnce(null)
-      const getByNameSpy = spyOn(proxyConfigsTable, 'getByName')
+      const getByNameSpy = vi.spyOn(proxyConfigsTable, 'getByName')
       getByNameSpy.mockResolvedValue(proxyConfig)
       await expect(proxyConfigsTable.update(proxyConfig)).rejects.toBeInstanceOf(RPSError)
     })
     test('should NOT update when unexpected error', async () => {
       querySpy.mockRejectedValueOnce('unknown')
-      const getByNameSpy = spyOn(proxyConfigsTable, 'getByName')
+      const getByNameSpy = vi.spyOn(proxyConfigsTable, 'getByName')
       getByNameSpy.mockResolvedValue(proxyConfig)
       await expect(proxyConfigsTable.update(proxyConfig)).rejects.toThrow(
         NETWORK_CONFIG_ERROR('Proxy', proxyConfig.name)
@@ -313,7 +312,7 @@ describe('proxy configs tests', () => {
 
     test('should NOT update when concurrency issue', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 0 })
-      const getByNameSpy = spyOn(proxyConfigsTable, 'getByName')
+      const getByNameSpy = vi.spyOn(proxyConfigsTable, 'getByName')
       getByNameSpy.mockResolvedValue(proxyConfig)
       await expect(proxyConfigsTable.update(proxyConfig)).rejects.toThrow(CONCURRENCY_MESSAGE)
       expect(getByNameSpy).toHaveBeenCalledWith(proxyConfig.name, proxyConfig.tenantId)

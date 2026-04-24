@@ -3,15 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { createSpyObj } from '../../../test/helper/jest.js'
+import { createSpyObj } from '../../../test/helper/testUtils.js'
 import { getCiraConfig } from './get.js'
-import { jest } from '@jest/globals'
-import { type Spied, spyOn } from 'jest-mock'
 
+import { vi, type MockInstance } from 'vitest'
 describe('CIRA Config - Get', () => {
   let resSpy
   let req
-  let getByNameSpy: Spied<any>
+  let getByNameSpy: MockInstance
 
   beforeEach(() => {
     resSpy = createSpyObj('Response', [
@@ -21,12 +20,12 @@ describe('CIRA Config - Get', () => {
       'send'
     ])
     req = {
-      db: { ciraConfigs: { getByName: jest.fn() } },
+      db: { ciraConfigs: { getByName: vi.fn() } },
       query: {},
       params: { ciraConfigName: 'ciraConfig' },
       tenantId: ''
     }
-    getByNameSpy = spyOn(req.db.ciraConfigs, 'getByName').mockResolvedValue({})
+    getByNameSpy = vi.spyOn(req.db.ciraConfigs, 'getByName').mockResolvedValue({})
 
     resSpy.status.mockReturnThis()
     resSpy.json.mockReturnThis()
@@ -38,7 +37,7 @@ describe('CIRA Config - Get', () => {
     expect(resSpy.status).toHaveBeenCalledWith(200)
   })
   it('should handle error', async () => {
-    spyOn(req.db.ciraConfigs, 'getByName').mockRejectedValue(null)
+    vi.spyOn(req.db.ciraConfigs, 'getByName').mockRejectedValue(null)
     await getCiraConfig(req, resSpy)
     expect(getByNameSpy).toHaveBeenCalledWith('ciraConfig', req.tenantId)
     expect(resSpy.status).toHaveBeenCalledWith(500)

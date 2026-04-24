@@ -16,13 +16,12 @@ import {
 } from '../../../utils/constants.js'
 import { WirelessProfilesTable } from './wirelessProfiles.js'
 import { RPSError } from '../../../utils/RPSError.js'
-import { jest } from '@jest/globals'
-import { type Spied, spyOn } from 'jest-mock'
 
+import { vi, type MockInstance } from 'vitest'
 describe('wireless profiles tests', () => {
   let db: PostgresDb
   let wirelessProfilesTable: WirelessProfilesTable
-  let querySpy: Spied<any>
+  let querySpy: MockInstance
   let wirelessConfig: WirelessConfig
   const profileName = 'profileName'
   beforeEach(() => {
@@ -39,10 +38,10 @@ describe('wireless profiles tests', () => {
     }
     db = new PostgresDb('')
     wirelessProfilesTable = new WirelessProfilesTable(db)
-    querySpy = spyOn(wirelessProfilesTable.db, 'query')
+    querySpy = vi.spyOn(wirelessProfilesTable.db, 'query')
   })
   afterEach(() => {
-    jest.clearAllMocks()
+    vi.clearAllMocks()
   })
   describe('Get', () => {
     test('should get expected count', async () => {
@@ -227,7 +226,7 @@ describe('wireless profiles tests', () => {
   describe('Insert', () => {
     test('should insert', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 1 })
-      const getByNameSpy = spyOn(wirelessProfilesTable, 'getByName')
+      const getByNameSpy = vi.spyOn(wirelessProfilesTable, 'getByName')
       getByNameSpy.mockResolvedValue(wirelessConfig)
       const result = await wirelessProfilesTable.insert(wirelessConfig)
 
@@ -278,7 +277,7 @@ describe('wireless profiles tests', () => {
   describe('Update', () => {
     test('should Update', async () => {
       querySpy.mockResolvedValueOnce({ rows: [{}], rowCount: 1 })
-      const getByNameSpy = spyOn(wirelessProfilesTable, 'getByName')
+      const getByNameSpy = vi.spyOn(wirelessProfilesTable, 'getByName')
       getByNameSpy.mockResolvedValue(wirelessConfig)
       const result = await wirelessProfilesTable.update(wirelessConfig)
       expect(result).toBe(wirelessConfig)
@@ -305,19 +304,19 @@ describe('wireless profiles tests', () => {
     })
     test('should throw RPSError with no results from update query', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 0 })
-      const getByNameSpy = spyOn(wirelessProfilesTable, 'getByName')
+      const getByNameSpy = vi.spyOn(wirelessProfilesTable, 'getByName')
       getByNameSpy.mockResolvedValue(wirelessConfig)
       await expect(wirelessProfilesTable.update(wirelessConfig)).rejects.toBeInstanceOf(RPSError)
     })
     test('should throw RPSError with return from update query', async () => {
       querySpy.mockResolvedValueOnce(null)
-      const getByNameSpy = spyOn(wirelessProfilesTable, 'getByName')
+      const getByNameSpy = vi.spyOn(wirelessProfilesTable, 'getByName')
       getByNameSpy.mockResolvedValue(wirelessConfig)
       await expect(wirelessProfilesTable.update(wirelessConfig)).rejects.toBeInstanceOf(RPSError)
     })
     test('should NOT update when unexpected error', async () => {
       querySpy.mockRejectedValueOnce('unknown')
-      const getByNameSpy = spyOn(wirelessProfilesTable, 'getByName')
+      const getByNameSpy = vi.spyOn(wirelessProfilesTable, 'getByName')
       getByNameSpy.mockResolvedValue(wirelessConfig)
       await expect(wirelessProfilesTable.update(wirelessConfig)).rejects.toThrow(
         NETWORK_CONFIG_ERROR('Wireless', wirelessConfig.profileName)
@@ -326,7 +325,7 @@ describe('wireless profiles tests', () => {
 
     test('should NOT update when concurrency issue', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 0 })
-      const getByNameSpy = spyOn(wirelessProfilesTable, 'getByName')
+      const getByNameSpy = vi.spyOn(wirelessProfilesTable, 'getByName')
       getByNameSpy.mockResolvedValue(wirelessConfig)
       await expect(wirelessProfilesTable.update(wirelessConfig)).rejects.toThrow(CONCURRENCY_MESSAGE)
       expect(getByNameSpy).toHaveBeenCalledWith(wirelessConfig.profileName, wirelessConfig.tenantId)

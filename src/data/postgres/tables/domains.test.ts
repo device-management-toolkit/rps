@@ -13,13 +13,12 @@ import {
 } from '../../../utils/constants.js'
 import { type AMTDomain } from '../../../models/index.js'
 import PostgresDb from '../index.js'
-import { jest } from '@jest/globals'
-import { type Spied, spyOn } from 'jest-mock'
 
+import { vi, type MockInstance } from 'vitest'
 describe('domains tests', () => {
   let db: PostgresDb
   let domainsTable: DomainsTable
-  let querySpy: Spied<any>
+  let querySpy: MockInstance
   let amtDomain: AMTDomain
   const profileName = 'profileName'
   beforeEach(() => {
@@ -36,10 +35,10 @@ describe('domains tests', () => {
 
     db = new PostgresDb('')
     domainsTable = new DomainsTable(db)
-    querySpy = spyOn(domainsTable.db, 'query')
+    querySpy = vi.spyOn(domainsTable.db, 'query')
   })
   afterEach(() => {
-    jest.clearAllMocks()
+    vi.clearAllMocks()
   })
   describe('Get', () => {
     test('should get expected count', async () => {
@@ -180,7 +179,7 @@ describe('domains tests', () => {
   })
   describe('Insert', () => {
     test('should return ciraconfig when successfully inserted', async () => {
-      const getByName = spyOn(domainsTable, 'getByName')
+      const getByName = vi.spyOn(domainsTable, 'getByName')
       querySpy.mockResolvedValueOnce({ rows: [{ amtDomain }], command: '', fields: null, rowCount: 1, oid: 0 })
       getByName.mockResolvedValueOnce(amtDomain)
       const result = await domainsTable.insert(amtDomain)
@@ -204,7 +203,7 @@ describe('domains tests', () => {
     })
 
     test('should return null when insert fails', async () => {
-      const getByName = spyOn(domainsTable, 'getByName')
+      const getByName = vi.spyOn(domainsTable, 'getByName')
       querySpy.mockResolvedValueOnce({ rows: [{ amtDomain }], command: '', fields: null, rowCount: 0, oid: 0 })
       getByName.mockResolvedValueOnce(amtDomain)
       const result = await domainsTable.insert(amtDomain)
@@ -240,7 +239,7 @@ describe('domains tests', () => {
 
   describe('Update', () => {
     test('should get a domain when device updates with change', async () => {
-      const getByName = spyOn(domainsTable, 'getByName')
+      const getByName = vi.spyOn(domainsTable, 'getByName')
       querySpy.mockResolvedValueOnce({ rows: [{ amtDomain }], command: '', fields: null, rowCount: 1, oid: 0 })
       getByName.mockResolvedValueOnce(amtDomain)
       const result = await domainsTable.update(amtDomain)
@@ -274,7 +273,7 @@ describe('domains tests', () => {
     })
     test('should NOT update when concurrency error', async () => {
       querySpy.mockResolvedValueOnce({ rows: [], rowCount: 0 })
-      const getByNameSpy = spyOn(domainsTable, 'getByName')
+      const getByNameSpy = vi.spyOn(domainsTable, 'getByName')
       getByNameSpy.mockResolvedValue(amtDomain)
       await expect(domainsTable.update(amtDomain)).rejects.toThrow(CONCURRENCY_MESSAGE)
     })

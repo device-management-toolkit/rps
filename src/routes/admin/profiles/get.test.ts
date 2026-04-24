@@ -3,15 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { createSpyObj } from '../../../test/helper/jest.js'
+import { createSpyObj } from '../../../test/helper/testUtils.js'
 import { getProfile } from './get.js'
-import { jest } from '@jest/globals'
-import { type Spied, spyOn } from 'jest-mock'
 
+import { vi, type MockInstance } from 'vitest'
 describe('Profiles - Get', () => {
   let resSpy
   let req
-  let getByNameSpy: Spied<any>
+  let getByNameSpy: MockInstance
 
   beforeEach(() => {
     resSpy = createSpyObj('Response', [
@@ -21,12 +20,12 @@ describe('Profiles - Get', () => {
       'send'
     ])
     req = {
-      db: { profiles: { getByName: jest.fn() } },
+      db: { profiles: { getByName: vi.fn() } },
       query: {},
       params: { profileName: 'profileName' },
       tenantId: ''
     }
-    getByNameSpy = spyOn(req.db.profiles, 'getByName').mockResolvedValue({})
+    getByNameSpy = vi.spyOn(req.db.profiles, 'getByName').mockResolvedValue({})
 
     resSpy.status.mockReturnThis()
     resSpy.json.mockReturnThis()
@@ -38,7 +37,7 @@ describe('Profiles - Get', () => {
     expect(resSpy.status).toHaveBeenCalledWith(200)
   })
   it('should handle error', async () => {
-    spyOn(req.db.profiles, 'getByName').mockRejectedValue(null)
+    vi.spyOn(req.db.profiles, 'getByName').mockRejectedValue(null)
     await getProfile(req, resSpy)
     expect(getByNameSpy).toHaveBeenCalledWith('profileName', req.tenantId)
     expect(resSpy.status).toHaveBeenCalledWith(500)

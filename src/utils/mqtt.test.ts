@@ -7,10 +7,8 @@ import { MqttProvider } from './MqttProvider.js'
 import { Environment } from './Environment.js'
 import { config } from '../test/helper/Config.js'
 import { type MqttClient } from 'mqtt'
-import { jest } from '@jest/globals'
-import { spyOn } from 'jest-mock'
 
-jest.mock('mqtt', () => ({ ...(jest.requireActual('mqtt') as object) }))
+import { vi } from 'vitest'
 
 describe('MQTT Turned ON Tests', () => {
   beforeEach(() => {
@@ -30,7 +28,7 @@ describe('MQTT Turned ON Tests', () => {
     expect(MqttProvider.instance.options.clientId).toBeDefined()
   })
   // it('Checks Connection', () => {
-  //   spyOn(mqtt1, 'connect').mockImplementation(() => ({
+  //   vi.spyOn(mqtt1, 'connect').mockImplementation(() => ({
   //     connected: true
   //   } as any))
 
@@ -43,12 +41,12 @@ describe('MQTT Turned ON Tests', () => {
     MqttProvider.instance.client = {
       publish: (topic, message, opts, callback) => 'unknown'
     } as any
-    const spy = spyOn(MqttProvider.instance.client, 'publish').mockImplementation(
-      (topic, message, opts, callback: () => 'unknown') => {
+    const spy = vi
+      .spyOn(MqttProvider.instance.client, 'publish')
+      .mockImplementation((topic, message, opts, callback: () => 'unknown') => {
         callback()
         return {} as MqttClient
-      }
-    )
+      })
     MqttProvider.instance.turnedOn = true
     try {
       await MqttProvider.publishEvent('success', ['testMethod'], 'Test Message')
@@ -99,9 +97,9 @@ describe('MQTT Turned OFF Tests', () => {
     MqttProvider.instance.client = {
       publish: (topic, message, callback) => ({}) as any
     } as any
-    const spy = spyOn(MqttProvider.instance.client, 'publish').mockImplementation(
-      (topic, message, callback) => ({}) as any
-    )
+    const spy = vi
+      .spyOn(MqttProvider.instance.client, 'publish')
+      .mockImplementation((topic, message, callback) => ({}) as any)
     MqttProvider.instance.turnedOn = false
     MqttProvider.publishEvent('success', ['testMethod'], 'Test Message')
     expect(spy).not.toHaveBeenCalled()

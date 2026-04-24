@@ -3,30 +3,33 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { vi, type Mock } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { devices } from '../devices.js'
 import { HttpHandler } from '../HttpHandler.js'
 import { Environment } from '../utils/Environment.js'
 import { config } from '../test/helper/Config.js'
-import { jest } from '@jest/globals'
+
 import { CONNECTION_RESET_ERROR } from '../utils/constants.js'
 
 Environment.Config = config
 
 // Mock TLSTunnelManager so retry path can create a new tunnel
-const mockConnect = jest.fn<any>().mockResolvedValue(undefined)
-const mockOnData = jest.fn()
-const mockClose = jest.fn()
-let mockSend = jest.fn<any>().mockResolvedValue(undefined)
+const mockConnect = vi.hoisted(() => vi.fn<any>().mockResolvedValue(undefined))
+const mockOnData = vi.hoisted(() => vi.fn())
+const mockClose = vi.hoisted(() => vi.fn())
+let mockSend = vi.fn<any>().mockResolvedValue(undefined)
 
-jest.unstable_mockModule('../TLSTunnelManager.js', () => ({
-  TLSTunnelManager: jest.fn().mockImplementation(() => ({
-    connect: mockConnect,
-    send: (data: any) => mockSend(data),
-    onData: mockOnData,
-    close: mockClose,
-    getSessionId: () => 'mock-session'
-  }))
+vi.mock('../TLSTunnelManager.js', () => ({
+  TLSTunnelManager: vi.fn().mockImplementation(function () {
+    return {
+      connect: mockConnect,
+      send: (data: any) => mockSend(data),
+      onData: mockOnData,
+      close: mockClose,
+      getSessionId: () => 'mock-session'
+    }
+  })
 }))
 
 const { invokeWsmanCall } = await import('./common.js')
@@ -46,15 +49,15 @@ describe('invokeWsmanCall CONNECTION_RESET_ERROR retry', () => {
     mockClose.mockClear()
 
     const initialTunnelManager = {
-      close: jest.fn(),
-      connect: jest.fn<any>().mockResolvedValue(undefined),
-      send: jest.fn<any>().mockResolvedValue(undefined),
-      onData: jest.fn(),
+      close: vi.fn(),
+      connect: vi.fn<any>().mockResolvedValue(undefined),
+      send: vi.fn<any>().mockResolvedValue(undefined),
+      onData: vi.fn(),
       getSessionId: () => 'initial-session'
     }
 
     devices[clientId] = {
-      ClientSocket: { send: jest.fn() } as any,
+      ClientSocket: { send: vi.fn() } as any,
       connectionParams: { guid: clientId, port: 16992, digestChallenge: null },
       tlsEnforced: true,
       tlsTunnelManager: initialTunnelManager as any,
@@ -77,14 +80,14 @@ describe('invokeWsmanCall CONNECTION_RESET_ERROR retry', () => {
   it('should retry once on CONNECTION_RESET_ERROR and succeed', async () => {
     // First call: initial tunnel's send triggers CONNECTION_RESET_ERROR
     const initialTunnel = devices[clientId].tlsTunnelManager!
-    ;(initialTunnel.send as jest.Mock).mockImplementation(async () => {
+    ;(initialTunnel.send as Mock).mockImplementation(async () => {
       queueMicrotask(() => {
         devices[clientId].reject(new CONNECTION_RESET_ERROR())
       })
     })
 
     // Retry call: mocked TLSTunnelManager's send triggers success
-    mockSend = jest.fn<any>().mockImplementation(async () => {
+    mockSend = vi.fn<any>().mockImplementation(async () => {
       queueMicrotask(() => {
         devices[clientId].resolve({ retried: true })
       })
@@ -98,13 +101,13 @@ describe('invokeWsmanCall CONNECTION_RESET_ERROR retry', () => {
   it('should throw CONNECTION_RESET_ERROR on second consecutive reset', async () => {
     // Both calls trigger CONNECTION_RESET_ERROR
     const initialTunnel = devices[clientId].tlsTunnelManager!
-    ;(initialTunnel.send as jest.Mock).mockImplementation(async () => {
+    ;(initialTunnel.send as Mock).mockImplementation(async () => {
       queueMicrotask(() => {
         devices[clientId].reject(new CONNECTION_RESET_ERROR())
       })
     })
 
-    mockSend = jest.fn<any>().mockImplementation(async () => {
+    mockSend = vi.fn<any>().mockImplementation(async () => {
       queueMicrotask(() => {
         devices[clientId].reject(new CONNECTION_RESET_ERROR())
       })
@@ -115,15 +118,15 @@ describe('invokeWsmanCall CONNECTION_RESET_ERROR retry', () => {
 
   it('should clean up TLS tunnel before retrying on CONNECTION_RESET_ERROR', async () => {
     const initialTunnel = devices[clientId].tlsTunnelManager!
-    const initialCloseSpy = initialTunnel.close as jest.Mock
-    ;(initialTunnel.send as jest.Mock).mockImplementation(async () => {
+    const initialCloseSpy = initialTunnel.close as Mock
+    ;(initialTunnel.send as Mock).mockImplementation(async () => {
       queueMicrotask(() => {
         devices[clientId].reject(new CONNECTION_RESET_ERROR())
       })
     })
 
     // Retry succeeds
-    mockSend = jest.fn<any>().mockImplementation(async () => {
+    mockSend = vi.fn<any>().mockImplementation(async () => {
       queueMicrotask(() => {
         devices[clientId].resolve({ success: true })
       })

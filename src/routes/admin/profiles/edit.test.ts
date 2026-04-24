@@ -4,7 +4,7 @@
  **********************************************************************/
 
 import { type AMTConfiguration, AMTUserConsent } from '../../../models/index.js'
-import { createSpyObj } from '../../../test/helper/jest.js'
+import { createSpyObj } from '../../../test/helper/testUtils.js'
 import {
   editProfile,
   getUpdatedData,
@@ -16,14 +16,13 @@ import {
   handleProxyConfigs
 } from './edit.js'
 import { ClientAction, TlsMode, TlsSigningAuthority } from '../../../models/RCS.Config.js'
-import { jest } from '@jest/globals'
-import { type Spied } from 'jest-mock'
 
+import { vi, type MockInstance } from 'vitest'
 describe('AMT Profile - Edit', () => {
   let resSpy
   let req
-  let getByNameSpy: Spied<any>
-  let writeSecretWithObjectSpy: Spied<any>
+  let getByNameSpy: MockInstance
+  let writeSecretWithObjectSpy: MockInstance
 
   beforeEach(() => {
     resSpy = createSpyObj('Response', [
@@ -34,18 +33,18 @@ describe('AMT Profile - Edit', () => {
     ])
     req = {
       db: {
-        profiles: { getByName: jest.fn(), update: jest.fn() },
-        profileWirelessConfigs: { deleteProfileWifiConfigs: jest.fn() },
-        profileProxyConfigs: { deleteProfileProxyConfigs: jest.fn() }
+        profiles: { getByName: vi.fn(), update: vi.fn() },
+        profileWirelessConfigs: { deleteProfileWifiConfigs: vi.fn() },
+        profileProxyConfigs: { deleteProfileProxyConfigs: vi.fn() }
       },
       body: { profileName: 'profileName' },
       query: {},
       tenantId: ''
     }
-    getByNameSpy = jest.spyOn(req.db.profiles, 'getByName').mockResolvedValue({})
-    jest.spyOn(req.db.profiles, 'update').mockResolvedValue({})
-    jest.spyOn(req.db.profileWirelessConfigs, 'deleteProfileWifiConfigs').mockResolvedValue(true)
-    jest.spyOn(req.db.profileProxyConfigs, 'deleteProfileProxyConfigs').mockResolvedValue(true)
+    getByNameSpy = vi.spyOn(req.db.profiles, 'getByName').mockResolvedValue({})
+    vi.spyOn(req.db.profiles, 'update').mockResolvedValue({})
+    vi.spyOn(req.db.profileWirelessConfigs, 'deleteProfileWifiConfigs').mockResolvedValue(true)
+    vi.spyOn(req.db.profileProxyConfigs, 'deleteProfileProxyConfigs').mockResolvedValue(true)
 
     resSpy.status.mockReturnThis()
     resSpy.json.mockReturnThis()
@@ -60,11 +59,11 @@ describe('AMT Profile - Edit', () => {
     // these should be global and checked if called
     // but not enought time in the sprint to do it correctly
     req.secretsManager = {
-      writeSecretWithObject: jest.fn(),
-      getSecretAtPath: jest.fn(),
-      deleteSecretAtPath: jest.fn()
+      writeSecretWithObject: vi.fn(),
+      getSecretAtPath: vi.fn(),
+      deleteSecretAtPath: vi.fn()
     }
-    writeSecretWithObjectSpy = jest.spyOn(req.secretsManager, 'getSecretAtPath').mockResolvedValue({})
+    writeSecretWithObjectSpy = vi.spyOn(req.secretsManager, 'getSecretAtPath').mockResolvedValue({})
     req.body = {
       profileName: 'acm',
       activation: ClientAction.ADMINCTLMODE,
@@ -82,7 +81,7 @@ describe('AMT Profile - Edit', () => {
       kvmEnabled: true,
       solEnabled: true
     }
-    jest.spyOn(req.db.profiles, 'getByName').mockResolvedValue({
+    vi.spyOn(req.db.profiles, 'getByName').mockResolvedValue({
       profileName: 'acm',
       activation: ClientAction.ADMINCTLMODE,
       tags: ['acm'],
@@ -102,20 +101,20 @@ describe('AMT Profile - Edit', () => {
     expect(resSpy.status).toHaveBeenCalledWith(200)
   })
   it('should handle not found', async () => {
-    jest.spyOn(req.db.profiles, 'getByName').mockResolvedValue(null)
+    vi.spyOn(req.db.profiles, 'getByName').mockResolvedValue(null)
     await editProfile(req, resSpy)
     expect(getByNameSpy).toHaveBeenCalledWith('profileName', req.tenantId)
     expect(resSpy.status).toHaveBeenCalledWith(404)
   })
   it('should handle error', async () => {
-    jest.spyOn(req.db.profiles, 'getByName').mockRejectedValue(null)
+    vi.spyOn(req.db.profiles, 'getByName').mockRejectedValue(null)
     await editProfile(req, resSpy)
     expect(getByNameSpy).toHaveBeenCalledWith('profileName', req.tenantId)
     expect(resSpy.status).toHaveBeenCalledWith(500)
   })
   it('test editProfile when CIRA profile is changed to TLS profile', async () => {
-    req.secretsManager = { writeSecretWithObject: jest.fn(), getSecretAtPath: jest.fn() }
-    writeSecretWithObjectSpy = jest.spyOn(req.secretsManager, 'writeSecretWithObject').mockResolvedValue({})
+    req.secretsManager = { writeSecretWithObject: vi.fn(), getSecretAtPath: vi.fn() }
+    writeSecretWithObjectSpy = vi.spyOn(req.secretsManager, 'writeSecretWithObject').mockResolvedValue({})
     req.body = {
       profileName: 'testTLS',
       activation: ClientAction.ADMINCTLMODE,
@@ -138,7 +137,7 @@ describe('AMT Profile - Edit', () => {
       userConsent: 'None',
       version: '1'
     }
-    jest.spyOn(req.db.profiles, 'getByName').mockResolvedValue({
+    vi.spyOn(req.db.profiles, 'getByName').mockResolvedValue({
       profileName: 'testTLS',
       activation: ClientAction.ADMINCTLMODE,
       amtPassword: null,
@@ -159,7 +158,7 @@ describe('AMT Profile - Edit', () => {
       userConsent: 'None',
       version: '1'
     })
-    jest.spyOn(req.db.profiles, 'update').mockResolvedValue({
+    vi.spyOn(req.db.profiles, 'update').mockResolvedValue({
       profileName: 'testTLS',
       activation: ClientAction.ADMINCTLMODE,
       amtPassword: null,
@@ -461,9 +460,9 @@ describe('handleWifiConfigs tests', () => {
   let oldConfig: AMTConfiguration
 
   const profileWifiConfigsDb = {
-    deleteProfileWifiConfigs: jest.fn().mockReturnValue(null),
-    createProfileWifiConfigs: jest.fn().mockReturnValue(null),
-    getProfileWifiConfigs: jest.fn().mockReturnValue(null)
+    deleteProfileWifiConfigs: vi.fn().mockReturnValue(null),
+    createProfileWifiConfigs: vi.fn().mockReturnValue(null),
+    getProfileWifiConfigs: vi.fn().mockReturnValue(null)
   }
 
   beforeEach(() => {
@@ -507,10 +506,10 @@ describe('handleWifiConfigs tests', () => {
     } as any
   })
 
-  const deleteProfileWifiConfigsSpy = jest.spyOn(profileWifiConfigsDb, 'deleteProfileWifiConfigs')
+  const deleteProfileWifiConfigsSpy = vi.spyOn(profileWifiConfigsDb, 'deleteProfileWifiConfigs')
 
   afterEach(() => {
-    jest.clearAllMocks()
+    vi.clearAllMocks()
   })
 
   it('should delete profile wifi configs if oldConfig has dhcp enabled and newConfig does not have dhcp enabled', async () => {

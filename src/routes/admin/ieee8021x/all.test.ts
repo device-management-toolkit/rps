@@ -3,11 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { createSpyObj } from '../../../test/helper/jest.js'
+import { createSpyObj } from '../../../test/helper/testUtils.js'
 import { getAllIEEE8021xConfigs } from './all.js'
-import { jest } from '@jest/globals'
-import { spyOn } from 'jest-mock'
 
+import { vi } from 'vitest'
 describe('IEEE8021xConfigs - All', () => {
   let resSpy
   let req
@@ -21,8 +20,8 @@ describe('IEEE8021xConfigs - All', () => {
     req = {
       db: {
         ieee8021xProfiles: {
-          get: jest.fn<() => Promise<any>>().mockImplementation(async () => await Promise.resolve([])),
-          getCount: jest.fn<() => Promise<number>>().mockImplementation(async () => await Promise.resolve(123))
+          get: vi.fn<() => Promise<any>>().mockImplementation(async () => await Promise.resolve([])),
+          getCount: vi.fn<() => Promise<number>>().mockImplementation(async () => await Promise.resolve(123))
         }
       },
       query: {}
@@ -40,7 +39,7 @@ describe('IEEE8021xConfigs - All', () => {
 
   it('should get all IEEE8021x Profiles length > 0', async () => {
     req.query.$count = true
-    spyOn(req.db.ieee8021xProfiles, 'get').mockResolvedValue(['abc'])
+    vi.spyOn(req.db.ieee8021xProfiles, 'get').mockResolvedValue(['abc'])
     await getAllIEEE8021xConfigs(req, resSpy)
     expect(req.db.ieee8021xProfiles.get).toHaveBeenCalled()
     expect(resSpy.status).toHaveBeenCalledWith(200)
@@ -55,7 +54,7 @@ describe('IEEE8021xConfigs - All', () => {
   })
 
   it('should set status to 500 if error occurs', async () => {
-    req.db.ieee8021xProfiles.getCount = jest.fn().mockImplementation(() => {
+    req.db.ieee8021xProfiles.getCount = vi.fn().mockImplementation(() => {
       throw new TypeError('fake error')
     })
     req.query.$count = true

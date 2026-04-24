@@ -3,14 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { HttpHandler } from '../HttpHandler.js'
 import { AMT, IPS } from '@device-management-toolkit/wsman-messages'
 import { devices } from '../devices.js'
-import { jest } from '@jest/globals'
 
-const invokeEnterpriseAssistantCallSpy = jest.fn<any>()
-jest.unstable_mockModule('./common.js', () => ({
+const invokeEnterpriseAssistantCallSpy = vi.hoisted(() => vi.fn<any>())
+vi.mock('./common.js', () => ({
   invokeEnterpriseAssistantCall: invokeEnterpriseAssistantCallSpy
 }))
 
@@ -56,7 +56,7 @@ describe('Enterprise Assistant', () => {
     devices[clientId] = {
       unauthCount: 0,
       ClientId: clientId,
-      ClientSocket: { send: jest.fn() } as any,
+      ClientSocket: { send: vi.fn() } as any,
       ciraconfig: {
         TLSSettingData: { Enabled: true, AcceptNonSecureConnections: true, MutualAuthentication: true, TrustedCN: null }
       },

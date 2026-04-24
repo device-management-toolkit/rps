@@ -3,16 +3,17 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { type RPSConfig } from '../../models/index.js'
-import { jest } from '@jest/globals'
+
 import { devices } from '../../devices.js'
 
 export function setupTestClient(): string {
   const clientId = randomUUID()
   devices[clientId] = {
     ClientId: clientId,
-    ClientSocket: { send: jest.fn() } as any,
+    ClientSocket: { send: vi.fn() } as any,
     unauthCount: 0
   } as any
   return clientId

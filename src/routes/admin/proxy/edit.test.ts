@@ -3,16 +3,16 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { createSpyObj } from '../../../test/helper/jest.js'
-import { jest } from '@jest/globals'
-import { type Spied, spyOn } from 'jest-mock'
+import { createSpyObj } from '../../../test/helper/testUtils.js'
+
+import { vi, type MockInstance } from 'vitest'
 import { editProxyProfile } from './edit.js'
 
 describe('Proxy - Edit', () => {
   let resSpy
   let req
-  let updateSpy: Spied<any>
-  let getSpy: Spied<any>
+  let updateSpy: MockInstance
+  let getSpy: MockInstance
 
   beforeEach(() => {
     resSpy = createSpyObj('Response', [
@@ -22,7 +22,7 @@ describe('Proxy - Edit', () => {
       'send'
     ])
     req = {
-      db: { proxyConfigs: { update: jest.fn(), getByName: jest.fn() } },
+      db: { proxyConfigs: { update: vi.fn(), getByName: vi.fn() } },
       query: {},
       params: { proxyConfigAddress: 'proxyConfigAddress' },
       tenantId: '',
@@ -34,28 +34,28 @@ describe('Proxy - Edit', () => {
         tenantId: 'foo'
       }
     }
-    updateSpy = spyOn(req.db.proxyConfigs, 'update').mockResolvedValue({})
-    getSpy = spyOn(req.db.proxyConfigs, 'getByName').mockResolvedValue({})
+    updateSpy = vi.spyOn(req.db.proxyConfigs, 'update').mockResolvedValue({})
+    getSpy = vi.spyOn(req.db.proxyConfigs, 'getByName').mockResolvedValue({})
 
     resSpy.status.mockReturnThis()
     resSpy.json.mockReturnThis()
     resSpy.send.mockReturnThis()
   })
   it('should update', async () => {
-    getSpy = spyOn(req.db.proxyConfigs, 'getByName').mockResolvedValue({})
+    getSpy = vi.spyOn(req.db.proxyConfigs, 'getByName').mockResolvedValue({})
     await editProxyProfile(req, resSpy)
     expect(getSpy).toHaveBeenCalledWith(req.body.proxyName, req.tenantId)
     expect(resSpy.status).toHaveBeenCalledWith(200)
   })
   it('should handle not found', async () => {
-    getSpy = spyOn(req.db.proxyConfigs, 'getByName').mockResolvedValue(null)
+    getSpy = vi.spyOn(req.db.proxyConfigs, 'getByName').mockResolvedValue(null)
     await editProxyProfile(req, resSpy)
     expect(getSpy).toHaveBeenCalledWith(req.body.proxyName, req.tenantId)
     expect(resSpy.status).toHaveBeenCalledWith(404)
   })
   it('should handle error', async () => {
-    getSpy = spyOn(req.db.proxyConfigs, 'getByName').mockResolvedValue({})
-    spyOn(req.db.proxyConfigs, 'update').mockRejectedValue(null)
+    getSpy = vi.spyOn(req.db.proxyConfigs, 'getByName').mockResolvedValue({})
+    vi.spyOn(req.db.proxyConfigs, 'update').mockRejectedValue(null)
     await editProxyProfile(req, resSpy)
     expect(getSpy).toHaveBeenCalledWith(req.body.proxyName, req.tenantId)
     expect(resSpy.status).toHaveBeenCalledWith(500)

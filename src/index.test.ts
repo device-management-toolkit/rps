@@ -3,52 +3,52 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { vi } from 'vitest'
 import { type ISecretManagerService } from './interfaces/ISecretManagerService.js'
 import { type IDB } from './interfaces/database/IDb.js'
 import { config } from './test/helper/Config.js'
-import { jest } from '@jest/globals'
 
-const backOffSpy = jest.fn()
-const processServiceConfigsSpy = jest.fn().mockReturnValue(Promise.resolve())
-const waitForServiceManagerSpy = jest.fn().mockReturnValue(Promise.resolve(true))
-jest.unstable_mockModule('exponential-backoff', () => ({
+const backOffSpy = vi.hoisted(() => vi.fn())
+const processServiceConfigsSpy = vi.hoisted(() => vi.fn().mockReturnValue(Promise.resolve()))
+const waitForServiceManagerSpy = vi.hoisted(() => vi.fn().mockReturnValue(Promise.resolve(true)))
+vi.mock('exponential-backoff', () => ({
   backOff: backOffSpy
 }))
-jest.unstable_mockModule('./serviceManager.js', () => ({
+vi.mock('./serviceManager.js', () => ({
   processServiceConfigs: processServiceConfigsSpy,
   waitForServiceManager: waitForServiceManagerSpy
 }))
-jest.unstable_mockModule('./Configurator.js', () => ({
-  Configurator: jest.fn().mockImplementation(() => ({
-    ready: Promise.resolve()
-  }))
+vi.mock('./Configurator.js', () => ({
+  Configurator: vi.fn().mockImplementation(function () {
+    return { ready: Promise.resolve() }
+  })
 }))
 const indexFile = await import('./Index.js')
 
 describe('Index', () => {
   // const env = process.env
   afterEach(() => {
-    jest.clearAllMocks()
-    jest.restoreAllMocks()
-    jest.resetAllMocks()
+    vi.clearAllMocks()
+    vi.restoreAllMocks()
+    vi.resetAllMocks()
     // process.env = env
   })
   beforeEach(() => {
-    jest.clearAllMocks()
-    jest.restoreAllMocks()
-    jest.resetAllMocks()
-    jest.resetModules()
+    vi.clearAllMocks()
+    vi.restoreAllMocks()
+    vi.resetAllMocks()
+    vi.resetModules()
     config.consul_enabled = false
     // process.env = { ...env }
     process.env.NODE_ENV = 'test'
     /*
-    jest.mock('fs', () => ({
-      existsSync: jest.fn(() => true),
-      lstatSync: jest.fn(() => ({ isDirectory: () => true })),
-      readdirSync: jest.fn(() => ['example.js'] as any)
+    vi.mock('fs', () => ({
+      existsSync: vi.fn(() => true),
+      lstatSync: vi.fn(() => ({ isDirectory: () => true })),
+      readdirSync: vi.fn(() => ['example.js'] as any)
     }))
     */
-    // jest.mock('./middleware/custom/example', () => function (req, res, next) {})
+    // vi.mock('./middleware/custom/example', () => function (req, res, next) {})
   })
 
   /*
@@ -67,7 +67,7 @@ describe('Index', () => {
   it('should wait for db', async () => {
     let shouldBeOk = false
     const dbMock: IDB = {
-      query: jest.fn(() => {
+      query: vi.fn(() => {
         if (shouldBeOk) return null
         shouldBeOk = true
         throw new Error('error')
@@ -80,7 +80,7 @@ describe('Index', () => {
   it('should wait for secret provider', async () => {
     let shouldBeOk = false
     const secretMock: ISecretManagerService = {
-      health: jest.fn(() => {
+      health: vi.fn(() => {
         if (shouldBeOk) return null
         shouldBeOk = true
         throw new Error('error')

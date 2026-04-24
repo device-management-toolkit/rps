@@ -12,8 +12,8 @@ import { type DoneResponse, StatusFailed, StatusSuccess } from './doneResponse.j
 import { runTilDone } from '../../test/helper/xstate.js'
 import { config, setupTestClient } from '../../test/helper/Config.js'
 import { Environment } from '../../utils/Environment.js'
-import { jest } from '@jest/globals'
-import { type Spied, spyOn } from 'jest-mock'
+
+import { vi, type MockInstance } from 'vitest'
 import got from 'got'
 import { type MachineImplementationsSimplified, fromPromise } from 'xstate'
 
@@ -24,13 +24,17 @@ import {
   type ChangePasswordContext
 } from './changePassword.js'
 
-const invokeWsmanCallSpy = jest.fn<any>()
-jest.unstable_mockModule('../common.js', () => ({
-  invokeWsmanCall: invokeWsmanCallSpy,
-  isDigestRealmValid,
-  HttpResponseError,
-  coalesceMessage
-}))
+const invokeWsmanCallSpy = vi.hoisted(() => vi.fn<any>())
+vi.mock('../common.js', async () => {
+  const actual = await vi.importActual<typeof import('../common.js')>('../common.js')
+  const { isDigestRealmValid, HttpResponseError, coalesceMessage } = actual
+  return {
+    invokeWsmanCall: invokeWsmanCallSpy,
+    isDigestRealmValid,
+    HttpResponseError,
+    coalesceMessage
+  }
+})
 
 const { ChangePassword } = await import('./changePassword.js')
 
@@ -48,14 +52,14 @@ describe('ChangePassword State Machine', () => {
   let implementation: ChangePasswordType
   let implementationConfig: MachineImplementationsSimplified<ChangePasswordContext, ChangePasswordEvent>
   let setAdminACLEntryExResponse: SetAdminACLEntryExResponse
-  let secretWriterSpy: Spied<any>
-  let secretGetterSpy: Spied<any>
+  let secretWriterSpy: MockInstance
+  let secretGetterSpy: MockInstance
   let mpsRsp
-  let deleteSpy: Spied<any>
+  let deleteSpy: MockInstance
   let context: ChangePasswordContext
 
   beforeEach(() => {
-    jest.resetAllMocks()
+    vi.resetAllMocks()
     clientId = setupTestClient()
     implementation = new ChangePassword()
 
@@ -112,65 +116,65 @@ describe('ChangePassword State Machine', () => {
       delays: {}
     }
     const mockSecretsManager: ISecretManagerService = {
-      deleteSecretAtPath: jest.fn<any>(),
-      getSecretFromKey: jest.fn<any>(),
-      health: jest.fn<any>(),
-      writeSecretWithObject: jest.fn<any>(),
-      getSecretAtPath: jest.fn<any>()
+      deleteSecretAtPath: vi.fn<any>(),
+      getSecretFromKey: vi.fn<any>(),
+      health: vi.fn<any>(),
+      writeSecretWithObject: vi.fn<any>(),
+      getSecretAtPath: vi.fn<any>()
     }
-    spyOn(SecretManagerCreatorFactory.prototype, 'getSecretManager').mockResolvedValue(mockSecretsManager)
-    secretGetterSpy = spyOn(mockSecretsManager, 'getSecretAtPath').mockResolvedValue(deviceCredentials)
-    secretWriterSpy = spyOn(mockSecretsManager, 'writeSecretWithObject').mockResolvedValue(deviceCredentials)
+    vi.spyOn(SecretManagerCreatorFactory.prototype, 'getSecretManager').mockResolvedValue(mockSecretsManager)
+    secretGetterSpy = vi.spyOn(mockSecretsManager, 'getSecretAtPath').mockResolvedValue(deviceCredentials)
+    secretWriterSpy = vi.spyOn(mockSecretsManager, 'writeSecretWithObject').mockResolvedValue(deviceCredentials)
 
-    deleteSpy = spyOn(got, 'delete')
+    deleteSpy = vi.spyOn(got, 'delete')
   })
 
-  const runTheTest = async function (done?): Promise<void> {
+  const runTheTest = async function (): Promise<void> {
     invokeWsmanCallSpy.mockResolvedValueOnce(generalSettingsRsp).mockResolvedValueOnce(setAdminACLEntryExResponse)
     deleteSpy.mockResolvedValue(mpsRsp)
-    await runTilDone(implementation.machine.provide(implementationConfig), event, doneResponse, context, done)
+    await runTilDone(implementation.machine.provide(implementationConfig), event, doneResponse, context)
   }
-  it('should succeed changing password to the newStaticPassword', (done) => {
-    void runTheTest(done)
+  it('should succeed changing password to the newStaticPassword', async () => {
+    await runTheTest()
   })
-  it('should succeed changing password to something random on empty newStaticPassword', (done) => {
+  it('should succeed changing password to something random on empty newStaticPassword', async () => {
     event.newStaticPassword = null as any
-    void runTheTest(done)
+    await runTheTest()
   })
-  it('should fail on failed general settings response', (done) => {
+  it('should fail on failed general settings response', async () => {
     generalSettingsRsp = {} as any
     doneResponse.status = StatusFailed
-    void runTheTest(done)
+    await runTheTest()
   })
-  it('should fail on bad SetAdminAclEntryEx_OUTPUT', (done) => {
+  it('should fail on bad SetAdminAclEntryEx_OUTPUT', async () => {
     delete (setAdminACLEntryExResponse as any).Envelope.Body.SetAdminAclEntryEx_OUTPUT
     doneResponse.status = StatusFailed
-    void runTheTest(done)
+    await runTheTest()
   })
-  it('should fail on failed SaveToSecretProvider', (done) => {
+  it('should fail on failed SaveToSecretProvider', async () => {
     implementationConfig.actors!.saveToSecretProvider = fromPromise(
       async ({ input }) => await Promise.reject(new Error())
     )
     doneResponse.status = StatusFailed
-    void runTheTest(done)
+    await runTheTest()
   })
-  it('should fail on failed refreshMPS', (done) => {
+  it('should fail on failed refreshMPS', async () => {
     implementationConfig.actors!.refreshMPS = fromPromise(async ({ input }) => await Promise.reject(new Error()))
     doneResponse.status = StatusFailed
-    void runTheTest(done)
+    await runTheTest()
   })
-  it('should fail getting general settings on http response error', (done) => {
+  it('should fail getting general settings on http response error', async () => {
     doneResponse.status = StatusFailed
     invokeWsmanCallSpy.mockRejectedValueOnce(HttpBadRequestError)
-    void runTilDone(implementation.machine, event, doneResponse, context, done)
+    await runTilDone(implementation.machine, event, doneResponse, context)
   })
-  it('should fail on invalid next state response', (done) => {
+  it('should fail on invalid next state response', async () => {
     implementationConfig.guards!.isGeneralSettings = () => false
     doneResponse.status = StatusFailed
     invokeWsmanCallSpy.mockRejectedValueOnce(HttpUnauthorizedError)
-    void runTilDone(implementation.machine.provide(implementationConfig), event, doneResponse, context, done)
+    await runTilDone(implementation.machine.provide(implementationConfig), event, doneResponse, context)
   })
-  it('should pass on empty credentials in secret manager', (done) => {
+  it('should pass on empty credentials in secret manager', async () => {
     const expectedCredentials: DeviceCredentials = {
       AMT_PASSWORD: event.newStaticPassword,
       MEBX_PASSWORD: ''
@@ -178,7 +182,7 @@ describe('ChangePassword State Machine', () => {
     secretGetterSpy.mockResolvedValue(null)
     secretWriterSpy.mockResolvedValue(expectedCredentials)
     doneResponse.status = StatusSuccess
-    void runTheTest(done)
+    await runTheTest()
   })
   it('should fail on save to Secret Provider', async () => {
     const x = await implementation.saveToSecretProvider({ input: context })
@@ -196,7 +200,7 @@ describe('ChangePassword State Machine', () => {
     expect(x).toBeTruthy()
   })
   it('should save to MPS', async () => {
-    jest.spyOn(got, 'delete').mockImplementation(() => ({}) as any)
+    vi.spyOn(got, 'delete').mockImplementation(() => ({}) as any)
     const x = await implementation.refreshMPS({ input: context })
     expect(x).toBeTruthy()
   })

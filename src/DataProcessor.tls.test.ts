@@ -8,9 +8,8 @@ import { devices } from './devices.js'
 import { DataProcessor } from './DataProcessor.js'
 import { type ClientMsg } from './models/RCS.Config.js'
 import { CONNECTION_RESET_ERROR } from './utils/constants.js'
-import { jest } from '@jest/globals'
-import { spyOn } from 'jest-mock'
 
+import { vi } from 'vitest'
 describe('DataProcessor TLS methods', () => {
   const clientId = randomUUID()
   let dataProcessor: DataProcessor
@@ -18,12 +17,12 @@ describe('DataProcessor TLS methods', () => {
   beforeEach(() => {
     dataProcessor = new DataProcessor(
       {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warn: jest.fn(),
-        error: jest.fn(),
-        verbose: jest.fn(),
-        silly: jest.fn()
+        debug: vi.fn(),
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        verbose: vi.fn(),
+        silly: vi.fn()
       } as any,
       {} as any
     )
@@ -35,7 +34,7 @@ describe('DataProcessor TLS methods', () => {
 
   describe('handleTLSData', () => {
     it('should return early when tunnel needs reset', async () => {
-      const injectDataSpy = jest.fn()
+      const injectDataSpy = vi.fn()
       devices[clientId] = {
         tlsTunnelNeedsReset: true,
         tlsTunnelManager: { injectData: injectDataSpy } as any
@@ -56,7 +55,7 @@ describe('DataProcessor TLS methods', () => {
     })
 
     it('should inject base64-decoded data into tunnel manager', async () => {
-      const injectDataSpy = jest.fn()
+      const injectDataSpy = vi.fn()
       devices[clientId] = {
         tlsTunnelNeedsReset: false,
         tlsTunnelManager: { injectData: injectDataSpy } as any
@@ -99,7 +98,7 @@ describe('DataProcessor TLS methods', () => {
     })
 
     it('should do nothing when payload is null', async () => {
-      const injectDataSpy = jest.fn()
+      const injectDataSpy = vi.fn()
       devices[clientId] = {
         tlsTunnelNeedsReset: false,
         tlsTunnelManager: { injectData: injectDataSpy } as any
@@ -122,7 +121,7 @@ describe('DataProcessor TLS methods', () => {
 
   describe('handleConnectionReset', () => {
     it('should close tunnel manager and set reset flags', async () => {
-      const closeSpy = jest.fn()
+      const closeSpy = vi.fn()
       devices[clientId] = {
         tlsTunnelManager: { close: closeSpy } as any,
         tlsTunnelSessionId: 'session-123',
@@ -152,7 +151,7 @@ describe('DataProcessor TLS methods', () => {
     })
 
     it('should reject pending promise with CONNECTION_RESET_ERROR', async () => {
-      const rejectSpy = jest.fn()
+      const rejectSpy = vi.fn()
       devices[clientId] = {
         tlsTunnelManager: undefined,
         pendingPromise: Promise.resolve(),

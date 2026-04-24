@@ -7,8 +7,8 @@ import { type DoneResponse, StatusFailed } from './doneResponse.js'
 import { config, setupTestClient } from '../../test/helper/Config.js'
 import { runTilDone } from '../../test/helper/xstate.js'
 import { Environment } from '../../utils/Environment.js'
-import { jest } from '@jest/globals'
-import { type Spied, spyOn } from 'jest-mock'
+
+import { vi, type MockInstance } from 'vitest'
 import { type MachineImplementationsSimplified } from 'xstate'
 import got from 'got'
 
@@ -21,16 +21,20 @@ import {
   type SyncDeviceInfo as SyncDeviceInfoType
 } from './syncDeviceInfo.js'
 
-const invokeWsmanCallSpy = jest.fn<any>()
-jest.unstable_mockModule('../common.js', () => ({
-  invokeWsmanCall: invokeWsmanCallSpy,
-  coalesceMessage,
-  HttpResponseError
-}))
+const invokeWsmanCallSpy = vi.hoisted(() => vi.fn<any>())
+vi.mock('../common.js', async () => {
+  const actual = await vi.importActual<typeof import('../common.js')>('../common.js')
+  const { coalesceMessage, HttpResponseError } = actual
+  return {
+    invokeWsmanCall: invokeWsmanCallSpy,
+    coalesceMessage,
+    HttpResponseError
+  }
+})
 
 const { SyncDeviceInfo, SyncDeviceInfoEventType } = await import('./syncDeviceInfo.js')
 
-jest.mock('got')
+vi.mock('got')
 
 Environment.Config = config
 
@@ -43,10 +47,10 @@ describe('SyncDeviceInfo State Machine', () => {
   let implementationConfig: MachineImplementationsSimplified<SyncDeviceInfoContext, SyncDeviceInfoEvent>
   let deviceInfo: DeviceInfo
   let mpsRsp: any
-  let gotSpy: Spied<any>
+  let gotSpy: MockInstance
 
   beforeEach(() => {
-    jest.resetAllMocks()
+    vi.resetAllMocks()
     clientId = setupTestClient()
     implementation = new SyncDeviceInfo()
     doneResponse = {
@@ -80,26 +84,25 @@ describe('SyncDeviceInfo State Machine', () => {
       delays: {}
     }
 
-    gotSpy = spyOn(got, 'patch')
+    gotSpy = vi.spyOn(got, 'patch')
   })
 
-  const runTheTest = async function (done): Promise<void> {
+  const runTheTest = async function (): Promise<void> {
     gotSpy.mockResolvedValue(mpsRsp)
-    await runTilDone(implementation.machine.provide(implementationConfig), event, doneResponse, context, done)
+    await runTilDone(implementation.machine.provide(implementationConfig), event, doneResponse, context)
   }
-
-  it('should succeed synchronizing device info', (done) => {
-    void runTheTest(done)
+  it('should succeed synchronizing device info', async () => {
+    await runTheTest()
   })
   it('should save to MPS', async () => {
-    gotSpy = spyOn(got, 'patch').mockImplementation(() => mpsRsp)
+    gotSpy = vi.spyOn(got, 'patch').mockImplementation(() => mpsRsp)
     await implementation.saveToMPS({ input: context })
     expect(gotSpy).toHaveBeenCalled()
   })
-  it('should fail on bad response from MPS', (done) => {
+  it('should fail on bad response from MPS', async () => {
     mpsRsp.statusCode = 404
     mpsRsp.statusMessage = 'Device not found'
     doneResponse.status = StatusFailed
-    void runTheTest(done)
+    await runTheTest()
   })
 })

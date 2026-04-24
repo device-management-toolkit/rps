@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { createSpyObj } from '../../../test/helper/jest.js'
+import { createSpyObj } from '../../../test/helper/testUtils.js'
 import { getVersion } from './get.js'
 import { ProtocolVersion } from '../../../utils/constants.js'
 import { version } from '../../../utils/version.js'
