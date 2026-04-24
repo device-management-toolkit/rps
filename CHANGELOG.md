@@ -1,3 +1,10 @@
+# [2.35.0](https://github.com/device-management-toolkit/rps/compare/v2.34.3...v2.35.0) (2026-04-24)
+
+
+### Features
+
+* add provisioning certificate validation checks ([#2686](https://github.com/device-management-toolkit/rps/issues/2686)) ([e473dda](https://github.com/device-management-toolkit/rps/commit/e473dda72429879f536aa6584287c7ee4917c8b0))
+
 ## [2.34.3](https://github.com/device-management-toolkit/rps/compare/v2.34.2...v2.34.3) (2026-04-22)
 
 
