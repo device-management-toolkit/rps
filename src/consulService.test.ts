@@ -27,9 +27,9 @@ describe('consul', () => {
   describe('ConsulService', () => {
     it('get Consul health', async () => {
       const healthPayload = [{ Service: { Service: 'consul' } }]
-      const spyGet = vi.spyOn(consul.gotClient, 'get').mockImplementation(
-        () => ({ json: vi.fn(async () => healthPayload) }) as any
-      )
+      const spyGet = vi
+        .spyOn(consul.gotClient, 'get')
+        .mockImplementation(() => ({ json: vi.fn(async () => healthPayload) }) as any)
       const result = await consul.health(serviceName)
       expect(spyGet).toHaveBeenCalledWith('health/service/consul', { searchParams: { passing: true } })
       expect(result).toEqual(healthPayload)
@@ -57,9 +57,9 @@ describe('consul', () => {
 
     it('get from Consul success', async () => {
       const encoded = Buffer.from('{"web_port": 8081}', 'utf-8').toString('base64')
-      const spyGet = vi.spyOn(consul.gotClient, 'get').mockImplementation(
-        () => ({ json: vi.fn(async () => [{ Key: 'RPS/Config.js', Value: encoded }]) }) as any
-      )
+      const spyGet = vi
+        .spyOn(consul.gotClient, 'get')
+        .mockImplementation(() => ({ json: vi.fn(async () => [{ Key: 'RPS/Config.js', Value: encoded }]) }) as any)
       const result = await consul.get(componentName)
       expect(spyGet).toHaveBeenCalledWith('kv/RPS/', { searchParams: { recurse: true } })
       expect(result).toEqual([{ Key: 'RPS/Config.js', Value: '{"web_port": 8081}' }])
