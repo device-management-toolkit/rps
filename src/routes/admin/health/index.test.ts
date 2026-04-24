@@ -7,7 +7,8 @@ import router from './index.js'
 
 describe('', () => {
   const routes = [
-    { path: '/', method: 'get' }]
+    { path: '/', method: 'get' }
+  ]
 
   it('should have routes', () => {
     routes.forEach((route) => {

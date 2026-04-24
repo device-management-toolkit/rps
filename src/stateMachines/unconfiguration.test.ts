@@ -341,7 +341,8 @@ describe('Unconfiguration State Machine', () => {
                   Items: {
                     IPS_HTTPProxyAccessPoint: [
                       { Name: 'Intel(r) ME:HTTP Proxy Access Point 0' },
-                      { Name: 'Intel(r) ME:HTTP Proxy Access Point 1' }]
+                      { Name: 'Intel(r) ME:HTTP Proxy Access Point 1' }
+                    ]
                   },
                   EndOfSequence: ''
                 }
