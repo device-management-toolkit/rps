@@ -40,6 +40,16 @@ export class CertManager {
     this.nodeForge = nodeForge
   }
 
+  private parseCertificateFlexible(certData: string): pki.Certificate {
+    if (certData.includes('-----BEGIN CERTIFICATE-----')) {
+      return this.nodeForge.certificateFromPem(certData)
+    }
+
+    const derBytes = Buffer.from(certData.replace(/\s+/g, ''), 'base64').toString('binary')
+    const asn1 = this.nodeForge.asn1FromDer(derBytes)
+    return this.nodeForge.certificateFromAsn1(asn1)
+  }
+
   /**
    * @description Sorts the intermediate certificates to properly order the certificate chain
    * @param {CertificateObject} intermediate
@@ -300,22 +310,25 @@ export class CertManager {
     caPrivateKey: pki.PrivateKey | null,
     certAttributes: CertAttributes,
     issuerAttributes: CertAttributes,
-    extKeyUsage: AMTKeyUsage
+    extKeyUsage: AMTKeyUsage,
+    rootCertPem?: string
   ): CertCreationResult {
     if (!caPrivateKey || caPrivateKey == null) {
       const certAndKey = this.createCertificate(issuerAttributes)
       caPrivateKey = certAndKey.key
     }
-    return this.createCertificate(certAttributes, caPrivateKey, DERKey, issuerAttributes, extKeyUsage)
+    return this.createCertificate(certAttributes, caPrivateKey, DERKey, issuerAttributes, extKeyUsage, rootCertPem)
   }
 
   // Generate a certificate with a set of attributes signed by a rootCert. If the rootCert is omitted, the generated certificate is self-signed.
+  // If rootCertPem is provided, the leaf cert validity will be set to start 1 minute after root's notBefore and expire 1 minute before root's notAfter.
   createCertificate(
     certAttributes: CertAttributes,
     caPrivateKey: pki.PrivateKey | null = null,
     DERKey: string | null = null,
     issuerAttributes: CertAttributes | null = null,
-    extKeyUsage: AMTKeyUsage | null = null
+    extKeyUsage: AMTKeyUsage | null = null,
+    rootCertPem?: string
   ): CertCreationResult {
     // Generate a keypair and create an X.509v3 certificate
     let keys
@@ -327,8 +340,25 @@ export class CertManager {
       cert.publicKey = this.nodeForge.publicKeyFromPem(`-----BEGIN PUBLIC KEY-----${DERKey}-----END PUBLIC KEY-----`)
     }
     cert.serialNumber = Math.floor(Math.random() * 100000 + 1).toString()
-    cert.validity.notBefore = new Date(2018, 0, 1)
-    cert.validity.notAfter = new Date(2049, 11, 31)
+
+    // If creating a leaf cert with MPS root cert provided, base validity on root cert validity dates.
+    // Accept both PEM and base64 DER to avoid silently falling back to legacy dates.
+    if (caPrivateKey && rootCertPem) {
+      try {
+        const rootCert = this.parseCertificateFlexible(rootCertPem)
+        const oneMinuteMs = 1 * 60 * 1000
+        cert.validity.notBefore = new Date(rootCert.validity.notBefore.getTime() + oneMinuteMs)
+        cert.validity.notAfter = new Date(rootCert.validity.notAfter.getTime() - oneMinuteMs)
+      } catch (err) {
+        // Fallback to default dates if root cert parsing fails
+        cert.validity.notBefore = new Date(2018, 0, 1)
+        cert.validity.notAfter = new Date(2049, 11, 31)
+      }
+    } else {
+      // Default dates for self-signed or when no root cert provided
+      cert.validity.notBefore = new Date(2018, 0, 1)
+      cert.validity.notAfter = new Date(2049, 11, 31)
+    }
 
     const attrs: Attribute[] = []
     if (certAttributes.CN) attrs.push({ name: 'commonName', value: certAttributes.CN })

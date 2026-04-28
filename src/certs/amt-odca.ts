@@ -31,12 +31,3 @@ yE3p7ezu9haLE/lPLh5hFQfmTi1nm/sG3JEXMQIwNpKfHoDmUTrUyezhhfv3GG+1
 CqBXstmCYH40buj9jKW3pHWc71s9arEmPWli7I8U
 -----END CERTIFICATE-----`
 ]
-
-/**
- * Allowed issuer common names for AMT certificates.
- * Used to validate that certificates are issued by Intel AMT ODCA.
- */
-export const AMT_ALLOWED_ISSUERS = [
-  'OnDie CA Root Cert Signing',
-  'Intel Corporation'
-]

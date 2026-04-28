@@ -38,6 +38,7 @@ export class Deactivation {
 
   invokeUnprovision = async ({ input }: { input: DeactivationContext }): Promise<any> => {
     input.xmlMessage = this.amt.SetupAndConfigurationService.Unprovision(1)
+    input.skipTlsVerification = true
     return await invokeWsmanCall(input)
   }
 

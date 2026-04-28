@@ -68,9 +68,14 @@ export class CIRAConfiguration {
       MEBX_PASSWORD: input.profile?.activation === ClientAction.ADMINCTLMODE ? clientObj.mebxPassword : null
     }
 
-    // Preserve TLS leaf cert from --tls-tunnel activation so it isn't overwritten
+    // Preserve TLS leaf cert so it isn't overwritten by this full-replace vault write
     if (clientObj.tls?.issuedCertPEM) {
       secretData.TLS_ISSUED_CERTIFICATE = clientObj.tls.issuedCertPEM
+    } else {
+      const existing: any = await this.configurator.secretsManager.getSecretAtPath(`devices/${clientObj.uuid}`)
+      if (existing?.TLS_ISSUED_CERTIFICATE) {
+        secretData.TLS_ISSUED_CERTIFICATE = existing.TLS_ISSUED_CERTIFICATE
+      }
     }
 
     const data = await this.configurator.secretsManager.writeSecretWithObject(`devices/${clientObj.uuid}`, secretData)

@@ -75,4 +75,8 @@ export class NodeForge {
   certificateFromPem(pem: string): forge.pki.Certificate {
     return forge.pki.certificateFromPem(pem)
   }
+
+  certificateFromAsn1(obj: forge.asn1.Asn1): forge.pki.Certificate {
+    return forge.pki.certificateFromAsn1(obj)
+  }
 }
