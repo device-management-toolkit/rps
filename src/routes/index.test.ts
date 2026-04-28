@@ -17,7 +17,8 @@ describe('Check index from admin', () => {
     })
   })
   const routers = [
-    { path: '/admin', method: 'use' }]
+    { path: '/admin', method: 'use' }
+  ]
 
   it('should have routers', () => {
     routers.forEach((route) => {

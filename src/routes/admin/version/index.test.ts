@@ -7,7 +7,8 @@ import router from './index.js'
 
 describe('Check index from routes/version', () => {
   const routes = [
-    { path: '/', method: 'get' }]
+    { path: '/', method: 'get' }
+  ]
   it('should have routes', () => {
     routes.forEach((route) => {
       const match = router.stack.find((s) => s.route?.path === route.path && s.route?.methods[route.method])
