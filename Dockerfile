@@ -7,10 +7,10 @@ FROM node:25-bullseye-slim@sha256:7ec50c1867732dc73facf8b318e029764dab970271691b
 WORKDIR /rps
 
 # Copy needed files
-COPY package*.json ./
+COPY package*.json .npmrc ./
 
 # Install dependencies
-RUN npm ci
+RUN npm ci --ignore-scripts
 
 COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src/
