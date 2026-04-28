@@ -16,6 +16,7 @@ import { TlsSigningAuthority } from '../models/RCS.Config.js'
 import { UNEXPECTED_PARSE_ERROR } from '../utils/constants.js'
 import { parseChunkedMessage } from '../utils/parseChunkedMessage.js'
 import { Environment } from '../utils/Environment.js'
+import { ensurePemCertificate } from '../utils/certHelpers.js'
 import {
   getCertFromEnterpriseAssistant,
   initiateCertRequest,
@@ -89,7 +90,7 @@ export class TLS {
       // For MPS root cert flow, extract issuer attributes from the MPS root cert
       let issuerAttributes: CertAttributes
       if (clientObj.tls?.mpsRootCertPEM) {
-        const mpsRootCert = this.nodeForge.certificateFromPem(clientObj.tls.mpsRootCertPEM)
+        const mpsRootCert = this.nodeForge.certificateFromPem(ensurePemCertificate(clientObj.tls.mpsRootCertPEM))
         const subject = mpsRootCert.subject
         issuerAttributes = {
           CN: subject.getField('CN')?.value ?? 'MPSRoot',
@@ -126,7 +127,8 @@ export class TLS {
         rootKey,
         certAttributes,
         issuerAttributes,
-        keyUsages
+        keyUsages,
+        clientObj.tls?.mpsRootCertPEM
       )
       cert = certResult.pem.substring(27, certResult.pem.length - 25)
 
@@ -155,16 +157,19 @@ export class TLS {
     let certbin: string
 
     if (tlsCerts?.ROOT_CERTIFICATE?.certbin) {
-      // Normal flow: use pre-configured root cert from profile/vault
+      // Profile has a pre-configured root cert
       certbin = tlsCerts.ROOT_CERTIFICATE.certbin
-    } else if (clientObj.tls?.rootCertKey) {
-      // --tls-tunnel flow: use MPS root cert (key was pre-fetched by activation machine)
-      const mpsRootCert = clientObj.ClientData?.payload?.profile?.ciraConfigObject?.mpsRootCertificate
-      if (!mpsRootCert) {
-        throw new globalThis.Error('MPS root certificate not found on CIRA config for TLS tunnel activation')
-      }
-      certbin = mpsRootCert
-      this.logger.info(`Using MPS root cert for TLS tunnel activation on device ${clientObj.uuid}`)
+    } else if (clientObj.tls?.mpsRootCertPEM) {
+      // MPS root cert PEM from vault (fetchMPSRootKey stores this)
+      certbin = clientObj.tls.mpsRootCertPEM
+        .replace(/-----BEGIN CERTIFICATE-----/g, '')
+        .replace(/-----END CERTIFICATE-----/g, '')
+        .replace(/\s/g, '')
+      this.logger.info(`Using MPS root cert for TLS on device ${clientObj.uuid}`)
+    } else if (clientObj.ClientData?.payload?.profile?.ciraConfigObject?.mpsRootCertificate) {
+      // MPS root cert from profile — used by --tls-tunnel when vault doesn't have the CA PEM
+      certbin = clientObj.ClientData.payload.profile.ciraConfigObject.mpsRootCertificate
+      this.logger.info(`Using MPS root cert from profile for TLS on device ${clientObj.uuid}`)
     } else {
       throw new globalThis.Error('No root certificate available for TLS activation')
     }

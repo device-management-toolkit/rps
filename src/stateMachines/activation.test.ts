@@ -134,8 +134,8 @@ describe('Activation State Machine', () => {
       generalSettings: {},
       tenantId: '',
       canActivate: true,
-      shbcCCMComplete: false,
-      shbcACMComplete: false,
+      tlsCCMComplete: false,
+      tlsACMComplete: false,
       tlsTunnelCCMComplete: false,
       message: '',
       clientId,
@@ -147,7 +147,8 @@ describe('Activation State Machine', () => {
       ips: new IPS.Messages(),
       cim: new CIM.Messages(),
       certChainPfx: null,
-      friendlyName: null
+      friendlyName: null,
+      tlsNeedsProvisioning: false
     }
 
     getPasswordSpy = vi.spyOn(activation, 'getPassword').mockResolvedValue('abcdef')
@@ -260,10 +261,19 @@ describe('Activation State Machine', () => {
         unconfiguration: fromPromise(async ({ input }) => await Promise.resolve({ clientId })),
         networkConfiguration: fromPromise(async ({ input }) => await Promise.resolve({ clientId })),
         featuresConfiguration: fromPromise(async ({ input }) => await Promise.resolve({ clientId })),
-        tls: fromPromise(async ({ input }) => await Promise.resolve({ clientId })),
+        tls: fromPromise(async ({ input }) => {
+          // Simulate TLS state machine setting the issued cert (like addCertificate does)
+          const clientObj = devices[clientId]
+          if (!clientObj.tls) {
+            clientObj.tls = {} as any
+          }
+          clientObj.tls.issuedCertPEM = 'mock-issued-cert-pem'
+          return await Promise.resolve({ clientId, status: 'success' })
+        }),
         cira: fromPromise(async ({ input }) => await Promise.resolve({ clientId })),
         setMEBxPassword: fromPromise(async ({ input }) => await Promise.resolve({ clientId })),
         initializeTLSTunnel: fromPromise(async () => await Promise.resolve(true)),
+        fetchMPSRootKey: fromPromise(async () => await Promise.resolve(true)),
         saveTlsTunnelCerts: fromPromise(async () => await Promise.resolve(true)),
         signalPortSwitch: fromPromise(async () => await Promise.resolve(true)),
         initializeTlsTunnelConnection: fromPromise(async () => await Promise.resolve(true)),
@@ -570,6 +580,7 @@ describe('Activation State Machine', () => {
       clientObj.amtPassword = 'testPw'
       clientObj.mebxPassword = 'testPw'
 
+      vi.spyOn(activation.configurator.secretsManager, 'getSecretAtPath').mockResolvedValueOnce(null)
       const insertSpy = vi
         .spyOn(activation.configurator.secretsManager, 'writeSecretWithObject')
         .mockImplementation(async () => true)
@@ -578,6 +589,7 @@ describe('Activation State Machine', () => {
       expect(response).toBe(true)
     })
     it(`should return true if saved for ${ClientAction.CLIENTCTLMODE}`, async () => {
+      vi.spyOn(activation.configurator.secretsManager, 'getSecretAtPath').mockResolvedValueOnce(null)
       const insertSpy = vi
         .spyOn(activation.configurator.secretsManager, 'writeSecretWithObject')
         .mockImplementation(async () => true)
@@ -594,6 +606,7 @@ describe('Activation State Machine', () => {
       const clientObj: any = devices[clientId]
       clientObj.amtPassword = 'testPw'
       clientObj.mebxPassword = 'testPw'
+      vi.spyOn(activation.configurator.secretsManager, 'getSecretAtPath').mockResolvedValueOnce(null)
       vi.spyOn(activation.configurator.secretsManager, 'writeSecretWithObject').mockRejectedValueOnce(err)
       await expect(activation.saveDeviceInfoToSecretProvider({ input: context })).rejects.toBe(err)
     })
@@ -601,16 +614,18 @@ describe('Activation State Machine', () => {
       const clientObj: any = devices[clientId]
       clientObj.amtPassword = null
       clientObj.mebxPassword = 'testPw'
+      vi.spyOn(activation.configurator.secretsManager, 'getSecretAtPath').mockResolvedValueOnce(null)
       const response = await activation.saveDeviceInfoToSecretProvider({ input: context })
       expect(response).toBe(false)
     })
-    it('should save MEBX_PASSWORD for SHBC (action=CCM, profile=ACM)', async () => {
+    it('should save MEBX_PASSWORD for TLS activation (action=CCM, profile=ACM)', async () => {
       const clientObj = devices[clientId]
       clientObj.amtPassword = 'testAMTpw'
       clientObj.mebxPassword = 'testMEBXpw'
-      // SHBC Phase 1 sets action to CCM, but profile activation is ACM
+      // TLS activation Phase 1 sets action to CCM, but profile activation is ACM
       clientObj.action = ClientAction.CLIENTCTLMODE as any
 
+      vi.spyOn(activation.configurator.secretsManager, 'getSecretAtPath').mockResolvedValueOnce(null)
       const insertSpy = vi
         .spyOn(activation.configurator.secretsManager, 'writeSecretWithObject')
         .mockImplementation(async () => true)
@@ -636,6 +651,7 @@ describe('Activation State Machine', () => {
         profile: { ...context.profile, activation: ClientAction.CLIENTCTLMODE }
       }
 
+      vi.spyOn(activation.configurator.secretsManager, 'getSecretAtPath').mockResolvedValueOnce(null)
       const insertSpy = vi
         .spyOn(activation.configurator.secretsManager, 'writeSecretWithObject')
         .mockImplementation(async () => true)
@@ -646,6 +662,47 @@ describe('Activation State Machine', () => {
         expect.objectContaining({
           AMT_PASSWORD: 'testAMTpw',
           MEBX_PASSWORD: null
+        })
+      )
+    })
+    it('should preserve TLS_ISSUED_CERTIFICATE from vault when not set on client', async () => {
+      const clientObj = devices[clientId]
+      clientObj.amtPassword = 'testAMTpw'
+      clientObj.mebxPassword = 'testMEBXpw'
+      clientObj.tls = undefined as any
+
+      vi.spyOn(activation.configurator.secretsManager, 'getSecretAtPath').mockResolvedValueOnce({
+        AMT_PASSWORD: 'oldPw',
+        TLS_ISSUED_CERTIFICATE: 'existing-cert-pem'
+      })
+      const insertSpy = vi
+        .spyOn(activation.configurator.secretsManager, 'writeSecretWithObject')
+        .mockImplementation(async () => true)
+      const response = await activation.saveDeviceInfoToSecretProvider({ input: context })
+      expect(response).toBe(true)
+      expect(insertSpy).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          AMT_PASSWORD: 'testAMTpw',
+          TLS_ISSUED_CERTIFICATE: 'existing-cert-pem'
+        })
+      )
+    })
+    it('should prefer in-memory issuedCertPEM over vault value', async () => {
+      const clientObj = devices[clientId]
+      clientObj.amtPassword = 'testAMTpw'
+      clientObj.mebxPassword = 'testMEBXpw'
+      clientObj.tls = { issuedCertPEM: 'fresh-cert' } as any
+
+      const insertSpy = vi
+        .spyOn(activation.configurator.secretsManager, 'writeSecretWithObject')
+        .mockImplementation(async () => true)
+      const response = await activation.saveDeviceInfoToSecretProvider({ input: context })
+      expect(response).toBe(true)
+      expect(insertSpy).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          TLS_ISSUED_CERTIFICATE: 'fresh-cert'
         })
       )
     })
@@ -751,24 +808,26 @@ describe('Activation State Machine', () => {
     afterEach(() => {
       vi.useRealTimers()
     })
-    it('should eventually reach PROVISIONED for ccm activation TLS', () =>
+    it('should eventually reach PROVISIONED for ccm activation (AMT <19 without --tls-tunnel skips TLS)', () =>
       new Promise<void>((resolve, reject) => {
         vi.useFakeTimers()
 
-        context.shbcCCMComplete = false
-        context.shbcACMComplete = false
+        context.tlsCCMComplete = false
+        context.tlsACMComplete = false
         context.profile.activation = 'ccmactivate'
         devices[clientId].ClientData.payload.ver = '12.0.92'
         devices[clientId].ClientData.payload.action = ClientAction.CLIENTCTLMODE
 
         config.guards = {
           isAdminMode: () => false,
-          isSHBC: () => false,
+          isTlsActivation: () => false,
           isDeviceClientModeActivated: () => true,
           hasCIRAProfile: () => false,
           isDigestRealmInvalid: () => false,
           canActivate: () => true,
-          isActivated: () => false
+          isActivated: () => false,
+          isAMT19OrNewer: () => false,
+          isTLSEnforced: () => false
         }
 
         config.actors!.getAMTProfile = fromPromise(
@@ -784,9 +843,11 @@ describe('Activation State Machine', () => {
         )
 
         const mockActivationMachine = activation.machine.provide(config)
+        // AMT <19 without --tls-tunnel: no post-provisioning TLS, skip to PROVISIONED
         const flowStates = [
           'UNPROVISIONED',
           'GET_AMT_PROFILE',
+          'RESOLVE_LOCAL_TLS_ROUTING',
           'INIT_TLS_TUNNEL',
           'GET_GENERAL_SETTINGS',
           'SETUP',
@@ -796,26 +857,16 @@ describe('Activation State Machine', () => {
           'UNCONFIGURATION',
           'NETWORK_CONFIGURATION',
           'FEATURES_CONFIGURATION',
-          'TLS',
           'PROVISIONED'
         ]
         const ccmActivationService = createActor(mockActivationMachine, { input: context })
-        ccmActivationService.subscribe({
-          next: (state) => {
-            try {
-              const expectedState: any = flowStates[currentStateIndex++]
-              expect(state.matches(expectedState)).toBe(true)
-              if (state.matches('DELAYED_TRANSITION')) {
-                vi.advanceTimersByTime(10000)
-              } else if (state.matches('PROVISIONED') && currentStateIndex === flowStates.length) {
-                resolve()
-              }
-            } catch (err) {
-              reject(err)
-            }
-          },
-          error: (err) => {
-            reject(err)
+        ccmActivationService.subscribe((state) => {
+          const expectedState: any = flowStates[currentStateIndex++]
+          expect(state.matches(expectedState)).toBe(true)
+          if (state.matches('DELAYED_TRANSITION')) {
+            vi.advanceTimersByTime(10000)
+          } else if (state.matches('PROVISIONED') && currentStateIndex === flowStates.length) {
+            resolve()
           }
         })
 
@@ -824,7 +875,7 @@ describe('Activation State Machine', () => {
         vi.runAllTicks()
       }))
 
-    it('should eventually reach PROVISIONED in Admin mode', () =>
+    it('should eventually reach PROVISIONED in Admin mode (AMT <19 without --tls-tunnel skips TLS)', () =>
       new Promise<void>((resolve, reject) => {
         vi.useFakeTimers()
         context.certChainPfx = { provisioningCertificateObj: { certChain: [
@@ -837,12 +888,16 @@ describe('Activation State Machine', () => {
 
         config.guards = {
           isAdminMode: () => true,
-          maxCertLength: () => false
+          maxCertLength: () => false,
+          isAMT19OrNewer: () => false,
+          isTLSEnforced: () => false
         }
         const mockActivationMachine = activation.machine.provide(config)
+        // AMT <19 without --tls-tunnel: no post-provisioning TLS, skip to PROVISIONED
         const flowStates = [
           'UNPROVISIONED',
           'GET_AMT_PROFILE',
+          'RESOLVE_LOCAL_TLS_ROUTING',
           'GET_AMT_DOMAIN_CERT',
           'INIT_TLS_TUNNEL',
           'GET_GENERAL_SETTINGS',
@@ -856,26 +911,16 @@ describe('Activation State Machine', () => {
           'UNCONFIGURATION',
           'NETWORK_CONFIGURATION',
           'FEATURES_CONFIGURATION',
-          'TLS',
           'PROVISIONED'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
-        acmActivationService.subscribe({
-          next: (state) => {
-            try {
-              const expectedState: any = flowStates[currentStateIndex++]
-              expect(state.matches(expectedState)).toBe(true)
-              if (state.matches('DELAYED_TRANSITION')) {
-                vi.advanceTimersByTime(10000)
-              } else if (state.matches('PROVISIONED') && currentStateIndex === flowStates.length) {
-                resolve()
-              }
-            } catch (err) {
-              reject(err)
-            }
-          },
-          error: (err) => {
-            reject(err)
+        acmActivationService.subscribe((state) => {
+          const expectedState: any = flowStates[currentStateIndex++]
+          expect(state.matches(expectedState)).toBe(true)
+          if (state.matches('DELAYED_TRANSITION')) {
+            vi.advanceTimersByTime(10000)
+          } else if (state.matches('PROVISIONED') && currentStateIndex === flowStates.length) {
+            resolve()
           }
         })
 
@@ -910,6 +955,7 @@ describe('Activation State Machine', () => {
         const flowStates = [
           'UNPROVISIONED',
           'GET_AMT_PROFILE',
+          'RESOLVE_LOCAL_TLS_ROUTING',
           'GET_AMT_DOMAIN_CERT',
           'INIT_TLS_TUNNEL',
           'GET_GENERAL_SETTINGS',
@@ -927,22 +973,13 @@ describe('Activation State Machine', () => {
           'PROVISIONED'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
-        acmActivationService.subscribe({
-          next: (state) => {
-            try {
-              const expectedState: any = flowStates[currentStateIndex++]
-              expect(state.matches(expectedState)).toBe(true)
-              if (state.matches('DELAYED_TRANSITION')) {
-                vi.advanceTimersByTime(10000)
-              } else if (state.matches('PROVISIONED') && currentStateIndex === flowStates.length) {
-                resolve()
-              }
-            } catch (err) {
-              reject(err)
-            }
-          },
-          error: (err) => {
-            reject(err)
+        acmActivationService.subscribe((state) => {
+          const expectedState: any = flowStates[currentStateIndex++]
+          expect(state.matches(expectedState)).toBe(true)
+          if (state.matches('DELAYED_TRANSITION')) {
+            vi.advanceTimersByTime(10000)
+          } else if (state.matches('PROVISIONED') && currentStateIndex === flowStates.length) {
+            resolve()
           }
         })
 
@@ -968,7 +1005,7 @@ describe('Activation State Machine', () => {
           maxCertLength: () => false,
           canUpgrade: () => true,
           isUpgraded: () => true,
-          isSHBC: () => false
+          isTlsActivation: () => false
         }
 
         config.actors!.getAMTDomainCert = fromPromise(async ({ input }) => await Promise.reject(new Error()))
@@ -976,26 +1013,18 @@ describe('Activation State Machine', () => {
         const flowStates = [
           'UNPROVISIONED',
           'GET_AMT_PROFILE',
+          'RESOLVE_LOCAL_TLS_ROUTING',
           'GET_AMT_DOMAIN_CERT',
           'FINAL'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
-        acmActivationService.subscribe({
-          next: (state) => {
-            try {
-              const expectedState: any = flowStates[currentStateIndex++]
-              expect(state.matches(expectedState)).toBe(true)
-              if (state.matches('DELAYED_TRANSITION')) {
-                vi.advanceTimersByTime(10000)
-              } else if (state.matches('FINAL') && currentStateIndex === flowStates.length) {
-                resolve()
-              }
-            } catch (err) {
-              reject(err)
-            }
-          },
-          error: (err) => {
-            reject(err)
+        acmActivationService.subscribe((state) => {
+          const expectedState: any = flowStates[currentStateIndex++]
+          expect(state.matches(expectedState)).toBe(true)
+          if (state.matches('DELAYED_TRANSITION')) {
+            vi.advanceTimersByTime(10000)
+          } else if (state.matches('FINAL') && currentStateIndex === flowStates.length) {
+            resolve()
           }
         })
 
@@ -1029,28 +1058,20 @@ describe('Activation State Machine', () => {
         const flowStates = [
           'UNPROVISIONED',
           'GET_AMT_PROFILE',
+          'RESOLVE_LOCAL_TLS_ROUTING',
           'CHECK_TENANT_ACCESS',
           'INIT_TLS_TUNNEL',
           'GET_GENERAL_SETTINGS',
           'ERROR'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
-        acmActivationService.subscribe({
-          next: (state) => {
-            try {
-              const expectedState: any = flowStates[currentStateIndex++]
-              expect(state.matches(expectedState)).toBe(true)
-              if (state.matches('DELAYED_TRANSITION')) {
-                vi.advanceTimersByTime(10000)
-              } else if (state.matches('ERROR') && currentStateIndex === flowStates.length) {
-                resolve()
-              }
-            } catch (err) {
-              reject(err)
-            }
-          },
-          error: (err) => {
-            reject(err)
+        acmActivationService.subscribe((state) => {
+          const expectedState: any = flowStates[currentStateIndex++]
+          expect(state.matches(expectedState)).toBe(true)
+          if (state.matches('DELAYED_TRANSITION')) {
+            vi.advanceTimersByTime(10000)
+          } else if (state.matches('ERROR') && currentStateIndex === flowStates.length) {
+            resolve()
           }
         })
 
@@ -1086,6 +1107,7 @@ describe('Activation State Machine', () => {
         const flowStates = [
           'UNPROVISIONED',
           'GET_AMT_PROFILE',
+          'RESOLVE_LOCAL_TLS_ROUTING',
           'GET_AMT_DOMAIN_CERT',
           'INIT_TLS_TUNNEL',
           'GET_GENERAL_SETTINGS',
@@ -1095,22 +1117,13 @@ describe('Activation State Machine', () => {
           'ERROR'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
-        acmActivationService.subscribe({
-          next: (state) => {
-            try {
-              const expectedState: any = flowStates[currentStateIndex++]
-              expect(state.matches(expectedState)).toBe(true)
-              if (state.matches('DELAYED_TRANSITION')) {
-                vi.advanceTimersByTime(10000)
-              } else if (state.matches('ERROR') && currentStateIndex === flowStates.length) {
-                resolve()
-              }
-            } catch (err) {
-              reject(err)
-            }
-          },
-          error: (err) => {
-            reject(err)
+        acmActivationService.subscribe((state) => {
+          const expectedState: any = flowStates[currentStateIndex++]
+          expect(state.matches(expectedState)).toBe(true)
+          if (state.matches('DELAYED_TRANSITION')) {
+            vi.advanceTimersByTime(10000)
+          } else if (state.matches('ERROR') && currentStateIndex === flowStates.length) {
+            resolve()
           }
         })
 
@@ -1145,6 +1158,7 @@ describe('Activation State Machine', () => {
         const flowStates = [
           'UNPROVISIONED',
           'GET_AMT_PROFILE',
+          'RESOLVE_LOCAL_TLS_ROUTING',
           'GET_AMT_DOMAIN_CERT',
           'INIT_TLS_TUNNEL',
           'GET_GENERAL_SETTINGS',
@@ -1162,22 +1176,13 @@ describe('Activation State Machine', () => {
           'PROVISIONED'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
-        acmActivationService.subscribe({
-          next: (state) => {
-            try {
-              const expectedState: any = flowStates[currentStateIndex++]
-              expect(state.matches(expectedState)).toBe(true)
-              if (state.matches('DELAYED_TRANSITION')) {
-                vi.advanceTimersByTime(10000)
-              } else if (state.matches('PROVISIONED') && currentStateIndex === flowStates.length) {
-                resolve()
-              }
-            } catch (err) {
-              reject(err)
-            }
-          },
-          error: (err) => {
-            reject(err)
+        acmActivationService.subscribe((state) => {
+          const expectedState: any = flowStates[currentStateIndex++]
+          expect(state.matches(expectedState)).toBe(true)
+          if (state.matches('DELAYED_TRANSITION')) {
+            vi.advanceTimersByTime(10000)
+          } else if (state.matches('PROVISIONED') && currentStateIndex === flowStates.length) {
+            resolve()
           }
         })
 
@@ -1207,28 +1212,20 @@ describe('Activation State Machine', () => {
         const flowStates = [
           'UNPROVISIONED',
           'GET_AMT_PROFILE',
+          'RESOLVE_LOCAL_TLS_ROUTING',
           'GET_AMT_DOMAIN_CERT',
           'INIT_TLS_TUNNEL',
           'GET_GENERAL_SETTINGS',
           'ERROR'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
-        acmActivationService.subscribe({
-          next: (state) => {
-            try {
-              const expectedState: any = flowStates[currentStateIndex++]
-              expect(state.matches(expectedState)).toBe(true)
-              if (state.matches('DELAYED_TRANSITION')) {
-                vi.advanceTimersByTime(10000)
-              } else if (state.matches('ERROR') && currentStateIndex === flowStates.length) {
-                resolve()
-              }
-            } catch (err) {
-              reject(err)
-            }
-          },
-          error: (err) => {
-            reject(err)
+        acmActivationService.subscribe((state) => {
+          const expectedState: any = flowStates[currentStateIndex++]
+          expect(state.matches(expectedState)).toBe(true)
+          if (state.matches('DELAYED_TRANSITION')) {
+            vi.advanceTimersByTime(10000)
+          } else if (state.matches('ERROR') && currentStateIndex === flowStates.length) {
+            resolve()
           }
         })
 
@@ -1266,6 +1263,7 @@ describe('Activation State Machine', () => {
         const flowStates = [
           'UNPROVISIONED',
           'GET_AMT_PROFILE',
+          'RESOLVE_LOCAL_TLS_ROUTING',
           'GET_AMT_DOMAIN_CERT',
           'INIT_TLS_TUNNEL',
           'GET_GENERAL_SETTINGS',
@@ -1275,22 +1273,13 @@ describe('Activation State Machine', () => {
           'ERROR'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
-        acmActivationService.subscribe({
-          next: (state) => {
-            try {
-              const expectedState: any = flowStates[currentStateIndex++]
-              expect(state.matches(expectedState)).toBe(true)
-              if (state.matches('DELAYED_TRANSITION')) {
-                vi.advanceTimersByTime(10000)
-              } else if (state.matches('ERROR') && currentStateIndex === flowStates.length) {
-                resolve()
-              }
-            } catch (err) {
-              reject(err)
-            }
-          },
-          error: (err) => {
-            reject(err)
+        acmActivationService.subscribe((state) => {
+          const expectedState: any = flowStates[currentStateIndex++]
+          expect(state.matches(expectedState)).toBe(true)
+          if (state.matches('DELAYED_TRANSITION')) {
+            vi.advanceTimersByTime(10000)
+          } else if (state.matches('ERROR') && currentStateIndex === flowStates.length) {
+            resolve()
           }
         })
 
@@ -1327,6 +1316,7 @@ describe('Activation State Machine', () => {
         const flowStates = [
           'UNPROVISIONED',
           'GET_AMT_PROFILE',
+          'RESOLVE_LOCAL_TLS_ROUTING',
           'GET_AMT_DOMAIN_CERT',
           'INIT_TLS_TUNNEL',
           'GET_GENERAL_SETTINGS',
@@ -1336,22 +1326,13 @@ describe('Activation State Machine', () => {
           'FINAL'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
-        acmActivationService.subscribe({
-          next: (state) => {
-            try {
-              const expectedState: any = flowStates[currentStateIndex++]
-              expect(state.matches(expectedState)).toBe(true)
-              if (state.matches('DELAYED_TRANSITION')) {
-                vi.advanceTimersByTime(10000)
-              } else if (state.matches('FINAL') && currentStateIndex === flowStates.length) {
-                resolve()
-              }
-            } catch (err) {
-              reject(err)
-            }
-          },
-          error: (err) => {
-            reject(err)
+        acmActivationService.subscribe((state) => {
+          const expectedState: any = flowStates[currentStateIndex++]
+          expect(state.matches(expectedState)).toBe(true)
+          if (state.matches('DELAYED_TRANSITION')) {
+            vi.advanceTimersByTime(10000)
+          } else if (state.matches('FINAL') && currentStateIndex === flowStates.length) {
+            resolve()
           }
         })
 
@@ -1384,6 +1365,7 @@ describe('Activation State Machine', () => {
         const flowStates = [
           'UNPROVISIONED',
           'GET_AMT_PROFILE',
+          'RESOLVE_LOCAL_TLS_ROUTING',
           'GET_AMT_DOMAIN_CERT',
           'INIT_TLS_TUNNEL',
           'GET_GENERAL_SETTINGS',
@@ -1402,22 +1384,13 @@ describe('Activation State Machine', () => {
           'PROVISIONED'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
-        acmActivationService.subscribe({
-          next: (state) => {
-            try {
-              const expectedState: any = flowStates[currentStateIndex++]
-              expect(state.matches(expectedState)).toBe(true)
-              if (state.matches('DELAYED_TRANSITION')) {
-                vi.advanceTimersByTime(10000)
-              } else if (state.matches('PROVISIONED') && currentStateIndex === flowStates.length) {
-                resolve()
-              }
-            } catch (err) {
-              reject(err)
-            }
-          },
-          error: (err) => {
-            reject(err)
+        acmActivationService.subscribe((state) => {
+          const expectedState: any = flowStates[currentStateIndex++]
+          expect(state.matches(expectedState)).toBe(true)
+          if (state.matches('DELAYED_TRANSITION')) {
+            vi.advanceTimersByTime(10000)
+          } else if (state.matches('PROVISIONED') && currentStateIndex === flowStates.length) {
+            resolve()
           }
         })
 
@@ -1450,6 +1423,7 @@ describe('Activation State Machine', () => {
         const flowStates = [
           'UNPROVISIONED',
           'GET_AMT_PROFILE',
+          'RESOLVE_LOCAL_TLS_ROUTING',
           'GET_AMT_DOMAIN_CERT',
           'INIT_TLS_TUNNEL',
           'GET_GENERAL_SETTINGS',
@@ -1460,22 +1434,13 @@ describe('Activation State Machine', () => {
           'ERROR'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
-        acmActivationService.subscribe({
-          next: (state) => {
-            try {
-              const expectedState: any = flowStates[currentStateIndex++]
-              expect(state.matches(expectedState)).toBe(true)
-              if (state.matches('DELAYED_TRANSITION')) {
-                vi.advanceTimersByTime(10000)
-              } else if (state.matches('ERROR') && currentStateIndex === flowStates.length) {
-                resolve()
-              }
-            } catch (err) {
-              reject(err)
-            }
-          },
-          error: (err) => {
-            reject(err)
+        acmActivationService.subscribe((state) => {
+          const expectedState: any = flowStates[currentStateIndex++]
+          expect(state.matches(expectedState)).toBe(true)
+          if (state.matches('DELAYED_TRANSITION')) {
+            vi.advanceTimersByTime(10000)
+          } else if (state.matches('ERROR') && currentStateIndex === flowStates.length) {
+            resolve()
           }
         })
 
@@ -1560,6 +1525,7 @@ describe('Activation State Machine', () => {
         const flowStates = [
           'UNPROVISIONED',
           'GET_AMT_PROFILE',
+          'RESOLVE_LOCAL_TLS_ROUTING',
           'GET_AMT_DOMAIN_CERT',
           'INIT_TLS_TUNNEL',
           'GET_GENERAL_SETTINGS',
@@ -1579,20 +1545,11 @@ describe('Activation State Machine', () => {
         ]
 
         const acmActivationService = createActor(mockActivationMachine, { input: context })
-        acmActivationService.subscribe({
-          next: (state) => {
-            try {
-              const expectedState: any = flowStates[currentStateIndex++]
-              expect(state.matches(expectedState)).toBe(true)
-              if (state.matches('PROVISIONED') && currentStateIndex === flowStates.length) {
-                resolve()
-              }
-            } catch (err) {
-              reject(err)
-            }
-          },
-          error: (err) => {
-            reject(err)
+        acmActivationService.subscribe((state) => {
+          const expectedState: any = flowStates[currentStateIndex++]
+          expect(state.matches(expectedState)).toBe(true)
+          if (state.matches('PROVISIONED') && currentStateIndex === flowStates.length) {
+            resolve()
           }
         })
 
@@ -1672,6 +1629,7 @@ describe('Activation State Machine', () => {
         const flowStates = [
           'UNPROVISIONED',
           'GET_AMT_PROFILE',
+          'RESOLVE_LOCAL_TLS_ROUTING',
           'GET_AMT_DOMAIN_CERT',
           'INIT_TLS_TUNNEL',
           'GET_GENERAL_SETTINGS',
@@ -1685,21 +1643,12 @@ describe('Activation State Machine', () => {
         ]
 
         const acmActivationService = createActor(mockActivationMachine, { input: context })
-        acmActivationService.subscribe({
-          next: (state) => {
-            try {
-              const expectedState: any = flowStates[currentStateIndex++]
-              expect(state.matches(expectedState)).toBe(true)
+        acmActivationService.subscribe((state) => {
+          const expectedState: any = flowStates[currentStateIndex++]
+          expect(state.matches(expectedState)).toBe(true)
 
-              if (state.matches('ERROR') && currentStateIndex === flowStates.length) {
-                resolve()
-              }
-            } catch (err) {
-              reject(err)
-            }
-          },
-          error: (err) => {
-            reject(err)
+          if (state.matches('ERROR') && currentStateIndex === flowStates.length) {
+            resolve()
           }
         })
 
@@ -1708,7 +1657,7 @@ describe('Activation State Machine', () => {
         vi.runAllTicks()
       }))
 
-    it('should eventually reach PROVISIONED if device is activated in ACM with SHBC', () =>
+    it('should eventually reach PROVISIONED if device is activated in ACM with TLS activation', () =>
       new Promise<void>((resolve, reject) => {
         vi.useFakeTimers()
 
@@ -1732,34 +1681,34 @@ describe('Activation State Machine', () => {
         devices[context.clientId].ClientData.payload.ver = '19.0.0'
 
         context.profile = {
-          profileName: 'shbc-acm-profile',
+          profileName: 'tls-acm-profile',
           activation: ClientAction.ADMINCTLMODE,
           amtPassword: 'Intel123!',
           mebxPassword: 'Intel123!',
           ciraConfigName: 'cira-config',
-          tags: ['shbc', 'acm']
+          tags: ['tls', 'acm']
         } as any
 
-        // Initialize SHBC flags
-        context.shbcCCMComplete = false
-        context.shbcACMComplete = false
+        // Initialize TLS activation flags
+        context.tlsCCMComplete = false
+        context.tlsACMComplete = false
 
-        // Configure guards for SHBC two-phase flow
+        // Configure guards for TLS activation two-phase flow
         config.guards = {
           isAdminMode: () => true,
 
-          isSHBC: ({ context }) => {
+          isTlsActivation: ({ context }) => {
             const device = devices[context.clientId]
             return (
               context.profile?.activation === ClientAction.ADMINCTLMODE &&
               parseFloat(device.ClientData.payload.ver) >= 19 &&
               device.ClientData.payload.currentMode === 0 &&
-              !context.shbcCCMComplete
+              !context.tlsCCMComplete
             )
           },
 
-          isSHBCCMComplete: ({ context }) => context.shbcCCMComplete === true,
-          isSHBCACMComplete: ({ context }) => context.shbcACMComplete === true,
+          isTlsCCMComplete: ({ context }) => context.tlsCCMComplete === true,
+          isTlsACMComplete: ({ context }) => context.tlsACMComplete === true,
 
           isDeviceCommittedInCCM: ({ context }) => {
             const device = devices[context.clientId]
@@ -1767,7 +1716,7 @@ describe('Activation State Machine', () => {
               context.message?.Envelope?.Body?.CommitChanges_OUTPUT?.ReturnValue === 0 &&
               parseFloat(device.ClientData.payload.ver) >= 19 &&
               context.profile?.activation === ClientAction.ADMINCTLMODE &&
-              !context.shbcACMComplete
+              !context.tlsACMComplete
             )
           },
           isDeviceAdminModeActivated: ({ context }) => {
@@ -1776,13 +1725,13 @@ describe('Activation State Machine', () => {
           maxCertLength: () => false,
           hasCIRAProfile: () => true,
           hasToUpgrade: ({ context }) => {
-            return context.shbcCCMComplete && !context.shbcACMComplete
+            return context.tlsCCMComplete && !context.tlsACMComplete
           },
           canActivate: () => true,
           canUpgrade: ({ context }) => {
             const device = devices[context.clientId]
             return (
-              (device.ClientData.payload.currentMode === 1 || context.shbcCCMComplete === true) &&
+              (device.ClientData.payload.currentMode === 1 || context.tlsCCMComplete === true) &&
               context.profile?.activation === ClientAction.ADMINCTLMODE
             )
           },
@@ -1871,25 +1820,28 @@ describe('Activation State Machine', () => {
         )
         config.actors!.cira = fromPromise(async ({ input }) => await Promise.resolve({ clientId: input.clientId }))
         const mockActivationMachine = activation.machine.provide(config)
+        // TLS activation flow: CCM activation → DMT cert generation → port switch → TLS tunnel → ACM upgrade
         const flowStates = [
           'UNPROVISIONED',
           'GET_AMT_PROFILE',
+          'RESOLVE_LOCAL_TLS_ROUTING',
           'INIT_TLS_TUNNEL',
           'GET_GENERAL_SETTINGS',
           'SETUP',
           'COMMIT_CHANGES',
           'DELAYED_TRANSITION',
+          'FETCH_POST_PROVISIONING_ROOT_KEY',
+          'TLS',
+          'SAVE_POST_PROVISIONING_CERTS',
+          'SIGNAL_PORT_SWITCH',
+          'INIT_TLS_TUNNEL_CONNECTION',
           'GET_AMT_DOMAIN_CERT',
           'INIT_TLS_TUNNEL',
           'GET_GENERAL_SETTINGS',
+          'CHECK_AMT_TLS_STATE',
           'IPS_HOST_BASED_SETUP_SERVICE',
           'ADD_NEXT_CERT_IN_CHAIN',
           'UPGRADE_TO_ADMIN_SETUP',
-          // NOTE: CHANGE_AMT_PASSWORD is invoked as part of the SHBC two-phase
-          // ACM flow but its state is a transient eventless transition that is
-          // not surfaced to subscribers in xstate v5; what subscribers observe
-          // between UPGRADE_TO_ADMIN_SETUP and SET_MEBX_PASSWORD is the
-          // COMMIT_CHANGES state that runs alongside password changes.
           'COMMIT_CHANGES',
           'SET_MEBX_PASSWORD',
           'SAVE_DEVICE_TO_SECRET_PROVIDER',
@@ -1902,47 +1854,26 @@ describe('Activation State Machine', () => {
         ]
 
         const acmActivationService = createActor(mockActivationMachine, { input: context })
-        // The SHBC two-phase flow emits intermediate "guard-only" states
-        // (CHECK_SETUP / UPDATE_CREDENTIALS / CHECK_UPGRADE) that are used to
-        // toggle flags via the subscribe callback but are not listed in the
-        // happy-path flowStates below. Skip assertions while in those states.
-        const transitionalStates = new Set([
-          'CHECK_SETUP',
-          'UPDATE_CREDENTIALS',
-          'CHECK_UPGRADE'
-        ])
-        acmActivationService.subscribe({
-          next: (state) => {
-            try {
-              if (state.matches('CHECK_SETUP') && !context.shbcCCMComplete) {
-                context.shbcCCMComplete = true
-              } else if (state.matches('UPDATE_CREDENTIALS') && context.shbcCCMComplete && !context.shbcACMComplete) {
-                context.hasToUpgrade = true
-              } else if (state.matches('CHECK_UPGRADE') && context.shbcCCMComplete && !context.shbcACMComplete) {
-                context.shbcACMComplete = true
-              }
+        acmActivationService.subscribe((state) => {
+          const expectedState: any = flowStates[currentStateIndex++]
+          if (state.matches('CHECK_SETUP') && !context.tlsCCMComplete) {
+            context.tlsCCMComplete = true
+          } else if (state.matches('UPDATE_CREDENTIALS') && context.tlsCCMComplete && !context.tlsACMComplete) {
+            context.hasToUpgrade = true
+          } else if (state.matches('CHECK_UPGRADE') && context.tlsCCMComplete && !context.tlsACMComplete) {
+            context.tlsACMComplete = true
+          }
 
-              const stateValue = typeof state.value === 'string' ? state.value : Object.keys(state.value as any)[0]
-              if (!transitionalStates.has(stateValue)) {
-                const expectedState: any = flowStates[currentStateIndex++]
-                expect(state.matches(expectedState)).toBe(true)
-              }
+          expect(state.matches(expectedState)).toBe(true)
 
-              // Handle timers
-              if (state.matches('DELAYED_TRANSITION')) {
-                vi.advanceTimersByTime(10000)
-              } else if (state.matches('PROVISIONED') && currentStateIndex === flowStates.length) {
-                console.log('SHBC ACM flow completed successfully')
-                resolve()
-              } else if (state.matches('FAILED') || state.matches('ERROR')) {
-                console.log(`Unexpected failure state: ${state.value}`)
-              }
-            } catch (err) {
-              reject(err)
-            }
-          },
-          error: (err) => {
-            reject(err)
+          // Handle timers
+          if (state.matches('DELAYED_TRANSITION')) {
+            vi.advanceTimersByTime(10000)
+          } else if (state.matches('PROVISIONED') && currentStateIndex === flowStates.length) {
+            console.log('TLS activation ACM flow completed successfully')
+            resolve()
+          } else if (state.matches('FAILED') || state.matches('ERROR')) {
+            console.log(`Unexpected failure state: ${state.value}`)
           }
         })
 
@@ -1970,6 +1901,7 @@ describe('Activation State Machine', () => {
         const flowStates = [
           'UNPROVISIONED',
           'GET_AMT_PROFILE',
+          'RESOLVE_LOCAL_TLS_ROUTING',
           'GET_AMT_DOMAIN_CERT',
           'INIT_TLS_TUNNEL',
           'GET_GENERAL_SETTINGS',
@@ -1987,22 +1919,13 @@ describe('Activation State Machine', () => {
           'PROVISIONED'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
-        acmActivationService.subscribe({
-          next: (state) => {
-            try {
-              const expectedState: any = flowStates[currentStateIndex++]
-              expect(state.matches(expectedState)).toBe(true)
-              if (state.matches('DELAYED_TRANSITION')) {
-                vi.advanceTimersByTime(10000)
-              } else if (state.matches('PROVISIONED') && currentStateIndex === flowStates.length) {
-                resolve()
-              }
-            } catch (err) {
-              reject(err)
-            }
-          },
-          error: (err) => {
-            reject(err)
+        acmActivationService.subscribe((state) => {
+          const expectedState: any = flowStates[currentStateIndex++]
+          expect(state.matches(expectedState)).toBe(true)
+          if (state.matches('DELAYED_TRANSITION')) {
+            vi.advanceTimersByTime(10000)
+          } else if (state.matches('PROVISIONED') && currentStateIndex === flowStates.length) {
+            resolve()
           }
         })
 
@@ -2025,20 +1948,11 @@ describe('Activation State Machine', () => {
           'FINAL'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
-        acmActivationService.subscribe({
-          next: (state) => {
-            try {
-              const expectedState: any = flowStates[currentStateIndex++]
-              expect(state.matches(expectedState)).toBe(true)
-              if (state.matches('FINAL') && currentStateIndex === flowStates.length) {
-                resolve()
-              }
-            } catch (err) {
-              reject(err)
-            }
-          },
-          error: (err) => {
-            reject(err)
+        acmActivationService.subscribe((state) => {
+          const expectedState: any = flowStates[currentStateIndex++]
+          expect(state.matches(expectedState)).toBe(true)
+          if (state.matches('FINAL') && currentStateIndex === flowStates.length) {
+            resolve()
           }
         })
 
@@ -2060,20 +1974,11 @@ describe('Activation State Machine', () => {
           'FINAL'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
-        acmActivationService.subscribe({
-          next: (state) => {
-            try {
-              const expectedState: any = flowStates[currentStateIndex++]
-              expect(state.matches(expectedState)).toBe(true)
-              if (state.matches('FINAL') && currentStateIndex === flowStates.length) {
-                resolve()
-              }
-            } catch (err) {
-              reject(err)
-            }
-          },
-          error: (err) => {
-            reject(err)
+        acmActivationService.subscribe((state) => {
+          const expectedState: any = flowStates[currentStateIndex++]
+          expect(state.matches(expectedState)).toBe(true)
+          if (state.matches('FINAL') && currentStateIndex === flowStates.length) {
+            resolve()
           }
         })
 
@@ -2092,24 +1997,16 @@ describe('Activation State Machine', () => {
         const flowStates = [
           'UNPROVISIONED',
           'GET_AMT_PROFILE',
+          'RESOLVE_LOCAL_TLS_ROUTING',
           'GET_AMT_DOMAIN_CERT',
           'FINAL'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
-        acmActivationService.subscribe({
-          next: (state) => {
-            try {
-              const expectedState: any = flowStates[currentStateIndex++]
-              expect(state.matches(expectedState)).toBe(true)
-              if (state.matches('FINAL') && currentStateIndex === flowStates.length) {
-                resolve()
-              }
-            } catch (err) {
-              reject(err)
-            }
-          },
-          error: (err) => {
-            reject(err)
+        acmActivationService.subscribe((state) => {
+          const expectedState: any = flowStates[currentStateIndex++]
+          expect(state.matches(expectedState)).toBe(true)
+          if (state.matches('FINAL') && currentStateIndex === flowStates.length) {
+            resolve()
           }
         })
 
@@ -2135,6 +2032,7 @@ describe('Activation State Machine', () => {
         const flowStates = [
           'UNPROVISIONED',
           'GET_AMT_PROFILE',
+          'RESOLVE_LOCAL_TLS_ROUTING',
           'GET_AMT_DOMAIN_CERT',
           'INIT_TLS_TUNNEL',
           'GET_GENERAL_SETTINGS',
@@ -2143,20 +2041,11 @@ describe('Activation State Machine', () => {
           'FINAL'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
-        acmActivationService.subscribe({
-          next: (state) => {
-            try {
-              const expectedState: any = flowStates[currentStateIndex++]
-              expect(state.matches(expectedState)).toBe(true)
-              if (state.matches('FINAL') && currentStateIndex === flowStates.length) {
-                resolve()
-              }
-            } catch (err) {
-              reject(err)
-            }
-          },
-          error: (err) => {
-            reject(err)
+        acmActivationService.subscribe((state) => {
+          const expectedState: any = flowStates[currentStateIndex++]
+          expect(state.matches(expectedState)).toBe(true)
+          if (state.matches('FINAL') && currentStateIndex === flowStates.length) {
+            resolve()
           }
         })
 
@@ -2193,12 +2082,12 @@ describe('Activation State Machine', () => {
       vi.useRealTimers()
     })
 
-    it('should reach PROVISIONED for TLS-enforced CCM and skip TLS configuration', () =>
+    it('should reach PROVISIONED for TLS-enforced CCM on AMT 19+ with post-provisioning DMT cert', () =>
       new Promise<void>((resolve, reject) => {
         vi.useFakeTimers()
 
-        context.shbcCCMComplete = false
-        context.shbcACMComplete = false
+        context.tlsCCMComplete = false
+        context.tlsACMComplete = false
         context.profile.activation = 'ccmactivate'
         devices[clientId].ClientData.payload.ver = '19.0.0'
         devices[clientId].ClientData.payload.action = ClientAction.CLIENTCTLMODE
@@ -2206,13 +2095,15 @@ describe('Activation State Machine', () => {
 
         config.guards = {
           isAdminMode: () => false,
-          isSHBC: () => false,
+          isTlsActivation: () => false,
           isDeviceClientModeActivated: () => true,
           hasCIRAProfile: () => false,
           isDigestRealmInvalid: () => false,
           canActivate: () => true,
           isActivated: () => false,
-          isTLSEnforced: () => true
+          isTLSEnforced: () => true,
+          isAMT19OrNewer: () => true,
+          needsPostProvisioningTLS: () => true
         }
 
         config.actors!.getAMTProfile = fromPromise(
@@ -2240,6 +2131,7 @@ describe('Activation State Machine', () => {
         const flowStates = [
           'UNPROVISIONED',
           'GET_AMT_PROFILE',
+          'RESOLVE_LOCAL_TLS_ROUTING',
           'INIT_TLS_TUNNEL',
           'GET_GENERAL_SETTINGS',
           'SETUP',
@@ -2251,25 +2143,19 @@ describe('Activation State Machine', () => {
           'UNCONFIGURATION',
           'NETWORK_CONFIGURATION',
           'FEATURES_CONFIGURATION',
+          'FETCH_POST_PROVISIONING_ROOT_KEY',
+          'TLS',
+          'SAVE_POST_PROVISIONING_CERTS',
           'PROVISIONED'
         ]
         const ccmActivationService = createActor(mockActivationMachine, { input: context })
-        ccmActivationService.subscribe({
-          next: (state) => {
-            try {
-              const expectedState: any = flowStates[currentStateIndex++]
-              expect(state.matches(expectedState)).toBe(true)
-              if (state.matches('WAIT_AFTER_COMMIT') || state.matches('DELAYED_TRANSITION')) {
-                vi.advanceTimersByTime(60000)
-              } else if (state.matches('PROVISIONED') && currentStateIndex === flowStates.length) {
-                resolve()
-              }
-            } catch (err) {
-              reject(err)
-            }
-          },
-          error: (err) => {
-            reject(err)
+        ccmActivationService.subscribe((state) => {
+          const expectedState: any = flowStates[currentStateIndex++]
+          expect(state.matches(expectedState)).toBe(true)
+          if (state.matches('WAIT_AFTER_COMMIT') || state.matches('DELAYED_TRANSITION')) {
+            vi.advanceTimersByTime(60000)
+          } else if (state.matches('PROVISIONED') && currentStateIndex === flowStates.length) {
+            resolve()
           }
         })
 
@@ -2301,6 +2187,7 @@ describe('Activation State Machine', () => {
         const flowStates = [
           'UNPROVISIONED',
           'GET_AMT_PROFILE',
+          'RESOLVE_LOCAL_TLS_ROUTING',
           'GET_AMT_DOMAIN_CERT',
           'INIT_TLS_TUNNEL',
           'GET_GENERAL_SETTINGS',
@@ -2317,22 +2204,13 @@ describe('Activation State Machine', () => {
           'PROVISIONED'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
-        acmActivationService.subscribe({
-          next: (state) => {
-            try {
-              const expectedState: any = flowStates[currentStateIndex++]
-              expect(state.matches(expectedState)).toBe(true)
-              if (state.matches('DELAYED_TRANSITION')) {
-                vi.advanceTimersByTime(60000)
-              } else if (state.matches('PROVISIONED') && currentStateIndex === flowStates.length) {
-                resolve()
-              }
-            } catch (err) {
-              reject(err)
-            }
-          },
-          error: (err) => {
-            reject(err)
+        acmActivationService.subscribe((state) => {
+          const expectedState: any = flowStates[currentStateIndex++]
+          expect(state.matches(expectedState)).toBe(true)
+          if (state.matches('DELAYED_TRANSITION')) {
+            vi.advanceTimersByTime(60000)
+          } else if (state.matches('PROVISIONED') && currentStateIndex === flowStates.length) {
+            resolve()
           }
         })
 
@@ -2345,14 +2223,14 @@ describe('Activation State Machine', () => {
       new Promise<void>((resolve, reject) => {
         vi.useFakeTimers()
 
-        context.shbcCCMComplete = false
-        context.shbcACMComplete = false
+        context.tlsCCMComplete = false
+        context.tlsACMComplete = false
         context.profile.activation = 'ccmactivate'
         devices[clientId].tlsEnforced = true
 
         config.guards = {
           isAdminMode: () => false,
-          isSHBC: () => false,
+          isTlsActivation: () => false,
           isActivated: () => false
         }
 
@@ -2364,24 +2242,108 @@ describe('Activation State Machine', () => {
         const flowStates = [
           'UNPROVISIONED',
           'GET_AMT_PROFILE',
+          'RESOLVE_LOCAL_TLS_ROUTING',
           'INIT_TLS_TUNNEL',
           'FINAL'
         ]
         const service = createActor(mockActivationMachine, { input: context })
-        service.subscribe({
-          next: (state) => {
-            try {
-              const expectedState: any = flowStates[currentStateIndex++]
-              expect(state.matches(expectedState)).toBe(true)
-              if (state.matches('FINAL') && currentStateIndex === flowStates.length) {
-                resolve()
+        service.subscribe((state) => {
+          const expectedState: any = flowStates[currentStateIndex++]
+          expect(state.matches(expectedState)).toBe(true)
+          if (state.matches('FINAL') && currentStateIndex === flowStates.length) {
+            resolve()
+          }
+        })
+
+        service.start()
+        service.send({ type: 'ACTIVATION', clientId, tenantId: '', friendlyName: null as any })
+        vi.runAllTicks()
+      }))
+
+    it('should verify FEATURES_CONFIGURATION transitions route correctly', () => {
+      const states = activation.machine.config.states as any
+      const featuresConfig = states.FEATURES_CONFIGURATION
+      expect(featuresConfig).toBeDefined()
+
+      const onDone = featuresConfig.invoke.onDone
+      expect(Array.isArray(onDone)).toBe(true)
+
+      // AMT 19+ CCM-only (cert not yet generated): needsPostProvisioningTLS → FETCH_POST_PROVISIONING_ROOT_KEY
+      const postProvGuard = onDone.find((t: any) => t.guard === 'needsPostProvisioningTLS')
+      expect(postProvGuard).toBeDefined()
+      expect(postProvGuard.target).toBe('FETCH_POST_PROVISIONING_ROOT_KEY')
+
+      // AMT <19 with --tls-tunnel (TLS enforced): isTLSEnforced → PROVISIONED
+      const tlsEnforcedGuard = onDone.find((t: any) => t.guard === 'isTLSEnforced')
+      expect(tlsEnforcedGuard).toBeDefined()
+      expect(tlsEnforcedGuard.target).toBe('PROVISIONED')
+
+      // Default (AMT <19 without --tls-tunnel): → PROVISIONED
+      const defaultTransition = onDone[onDone.length - 1]
+      expect(defaultTransition.target).toBe('PROVISIONED')
+    })
+
+    it('should reach PROVISIONED for AMT <19 without --tls-tunnel and skip TLS entirely', () =>
+      new Promise<void>((resolve, reject) => {
+        vi.useFakeTimers()
+
+        context.tlsCCMComplete = false
+        context.tlsACMComplete = false
+        context.profile.activation = 'ccmactivate'
+        devices[clientId].ClientData.payload.ver = '11.8.50'
+        devices[clientId].ClientData.payload.action = ClientAction.CLIENTCTLMODE
+        devices[clientId].tlsEnforced = false
+        delete (devices[clientId] as any).tlsTunnelActivation
+
+        config.guards = {
+          isAdminMode: () => false,
+          isTlsActivation: () => false,
+          isDeviceClientModeActivated: () => true,
+          hasCIRAProfile: () => false,
+          isDigestRealmInvalid: () => false,
+          canActivate: () => true,
+          isActivated: () => false,
+          isTLSEnforced: () => false,
+          isAMT19OrNewer: () => false
+        }
+
+        config.actors!.getAMTProfile = fromPromise(
+          async () =>
+            await Promise.resolve({
+              clientId,
+              profile: {
+                profileName: 'ccm-plain',
+                activation: 'ccmactivate',
+                amtPassword: 'Intel123!'
               }
-            } catch (err) {
-              reject(err)
-            }
-          },
-          error: (err) => {
-            reject(err)
+            })
+        )
+
+        const mockActivationMachine = activation.machine.provide(config)
+        // AMT <19 without --tls-tunnel: no post-provisioning TLS, skip to PROVISIONED
+        const flowStates = [
+          'UNPROVISIONED',
+          'GET_AMT_PROFILE',
+          'RESOLVE_LOCAL_TLS_ROUTING',
+          'INIT_TLS_TUNNEL',
+          'GET_GENERAL_SETTINGS',
+          'SETUP',
+          'DELAYED_TRANSITION',
+          'SAVE_DEVICE_TO_SECRET_PROVIDER',
+          'SAVE_DEVICE_TO_MPS',
+          'UNCONFIGURATION',
+          'NETWORK_CONFIGURATION',
+          'FEATURES_CONFIGURATION',
+          'PROVISIONED'
+        ]
+        const service = createActor(mockActivationMachine, { input: context })
+        service.subscribe((state) => {
+          const expectedState: any = flowStates[currentStateIndex++]
+          expect(state.matches(expectedState)).toBe(true)
+          if (state.matches('DELAYED_TRANSITION')) {
+            vi.advanceTimersByTime(60000)
+          } else if (state.matches('PROVISIONED') && currentStateIndex === flowStates.length) {
+            resolve()
           }
         })
 
@@ -2405,10 +2367,213 @@ describe('Activation State Machine', () => {
       expect(result).toBe(true)
       expect(devices[clientId].tlsTunnelManager).toBeUndefined()
     })
+
+    it('resolveLocalTlsRouting should keep TLS routing when --tls-tunnel is requested even if LMS allows non-secure', async () => {
+      const clientObj = devices[clientId]
+      clientObj.uuid = 'test-uuid'
+      clientObj.tlsEnforced = true
+      clientObj.tlsTunnelActivation = true
+
+      const enumerateSpy = vi.spyOn(activation as any, 'enumerateAndPull').mockImplementation(async () => {
+        return {
+          Envelope: {
+            Body: {
+              PullResponse: {
+                Items: {
+                  AMT_TLSSettingData: [
+                    {
+                      ElementName: 'Intel® AMT LMS TLS Settings',
+                      InstanceID: 'Intel® AMT LMS TLS Settings',
+                      NonSecureConnectionsSupported: true,
+                      AcceptNonSecureConnections: true
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      })
+
+      const result = await (activation as any).resolveLocalTlsRouting({ input: context })
+
+      expect(result).toBe(true)
+      expect(clientObj.tlsEnforced).toBe(true)
+      expect(enumerateSpy).not.toHaveBeenCalled()
+    })
+
+    it('resolveLocalTlsRouting should mark LMS non-TLS allowed when LMS accepts non-secure and --tls-tunnel is not set', async () => {
+      const clientObj = devices[clientId] as any
+      clientObj.uuid = 'test-uuid'
+      clientObj.tlsEnforced = true
+      delete clientObj.tlsTunnelActivation
+
+      vi.spyOn(activation as any, 'enumerateAndPull').mockImplementation(async () => {
+        return {
+          Envelope: {
+            Body: {
+              PullResponse: {
+                Items: {
+                  AMT_TLSSettingData: [
+                    {
+                      ElementName: 'Intel(r) AMT LMS TLS Settings',
+                      InstanceID: 'Intel(r) AMT LMS TLS Settings',
+                      NonSecureConnectionsSupported: true,
+                      AcceptNonSecureConnections: true
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      })
+
+      const result = await (activation as any).resolveLocalTlsRouting({ input: context })
+
+      expect(result).toBe(false)
+      expect(clientObj.tlsEnforced).toBe(false)
+      expect(clientObj.lmsNonTlsAllowed).toBe(true)
+    })
+
+    it('resolveLocalTlsRouting should allow non-TLS on legacy firmware when AcceptNonSecureConnections is true and NonSecureConnectionsSupported is missing', async () => {
+      const clientObj = devices[clientId] as any
+      clientObj.uuid = 'test-uuid'
+      clientObj.tlsEnforced = true
+      delete clientObj.tlsTunnelActivation
+
+      vi.spyOn(activation as any, 'enumerateAndPull').mockImplementation(async () => {
+        return {
+          Envelope: {
+            Body: {
+              PullResponse: {
+                Items: {
+                  AMT_TLSSettingData: [
+                    {
+                      ElementName: 'Intel(r) AMT LMS TLS Settings',
+                      InstanceID: 'Intel(r) AMT LMS TLS Settings',
+                      AcceptNonSecureConnections: true
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      })
+
+      const result = await (activation as any).resolveLocalTlsRouting({ input: context })
+
+      expect(result).toBe(false)
+      expect(clientObj.tlsEnforced).toBe(false)
+      expect(clientObj.lmsNonTlsAllowed).toBe(true)
+    })
+
+    it('resolveLocalTlsRouting should evaluate LMS settings in activated flow even when tlsEnforced starts false', async () => {
+      const clientObj = devices[clientId] as any
+      clientObj.uuid = 'test-uuid'
+      clientObj.tlsEnforced = false
+      delete clientObj.tlsTunnelActivation
+      context.isActivated = true
+
+      const enumerateSpy = vi.spyOn(activation as any, 'enumerateAndPull').mockImplementation(async () => {
+        return {
+          Envelope: {
+            Body: {
+              PullResponse: {
+                Items: {
+                  AMT_TLSSettingData: [
+                    {
+                      ElementName: 'Intel(r) AMT LMS TLS Settings',
+                      InstanceID: 'Intel(r) AMT LMS TLS Settings',
+                      AcceptNonSecureConnections: true
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      })
+
+      const result = await (activation as any).resolveLocalTlsRouting({ input: context })
+
+      expect(enumerateSpy).toHaveBeenCalled()
+      expect(result).toBe(false)
+      expect(clientObj.lmsNonTlsAllowed).toBe(true)
+    })
+
+    it('resolveLocalTlsRouting should treat string/number boolean values as true for LMS non-secure flags', async () => {
+      const clientObj = devices[clientId] as any
+      clientObj.uuid = 'test-uuid'
+      clientObj.tlsEnforced = true
+      delete clientObj.tlsTunnelActivation
+
+      vi.spyOn(activation as any, 'enumerateAndPull').mockImplementation(async () => {
+        return {
+          Envelope: {
+            Body: {
+              PullResponse: {
+                Items: {
+                  AMT_TLSSettingData: [
+                    {
+                      ElementName: 'Intel(r) AMT LMS TLS Settings',
+                      InstanceID: 'Intel(r) AMT LMS TLS Settings',
+                      NonSecureConnectionsSupported: '1',
+                      AcceptNonSecureConnections: 'TRUE'
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      })
+
+      const result = await (activation as any).resolveLocalTlsRouting({ input: context })
+
+      expect(result).toBe(false)
+      expect(clientObj.tlsEnforced).toBe(false)
+      expect(clientObj.lmsNonTlsAllowed).toBe(true)
+    })
+
+    it('shouldUseNonTlsActivatedPath should return true when non-TLS routing is selected and --tls-tunnel is not requested', () => {
+      const clientObj = devices[clientId]
+      clientObj.tlsEnforced = false
+      delete (clientObj as any).tlsTunnelActivation
+
+      const result = (activation as any).shouldUseNonTlsActivatedPath(clientId)
+
+      expect(result).toBe(true)
+    })
+
+    it('shouldUseNonTlsActivatedPath should return false when --tls-tunnel is requested', () => {
+      const clientObj = devices[clientId]
+      clientObj.tlsEnforced = false
+      clientObj.tlsTunnelActivation = true
+
+      const result = (activation as any).shouldUseNonTlsActivatedPath(clientId)
+
+      expect(result).toBe(false)
+    })
+
+    it('shouldUseNonTlsActivatedPath should return false when TLS is enforced', () => {
+      const clientObj = devices[clientId]
+      clientObj.tlsEnforced = true
+      delete (clientObj as any).tlsTunnelActivation
+
+      const result = (activation as any).shouldUseNonTlsActivatedPath(clientId)
+
+      expect(result).toBe(false)
+    })
   })
 
   describe('TLS Tunnel Activation', () => {
     describe('saveTlsTunnelCerts', () => {
+      beforeEach(async () => {
+        await activation.configurator.ready
+      })
+
       it('should save leaf cert to vault for ACM', async () => {
         const clientObj = devices[clientId]
         clientObj.uuid = 'test-uuid'
@@ -2449,36 +2614,73 @@ describe('Activation State Machine', () => {
         })
       })
 
-      it('should throw when amtPassword is null', async () => {
+      it('should throw when issuedCertPEM is missing', async () => {
+        const clientObj = devices[clientId]
+        clientObj.uuid = 'test-uuid'
+        clientObj.amtPassword = 'testAMTpw'
+        clientObj.mebxPassword = 'testMEBXpw'
+        clientObj.action = ClientAction.ADMINCTLMODE
+        clientObj.tls = {} as any
+
+        await expect(activation.saveTlsTunnelCerts({ input: context } as any)).rejects.toThrow(
+          'Missing TLS issued certificate for vault save'
+        )
+      })
+
+      it('should fall back to vault-stored AMT_PASSWORD when amtPassword is null', async () => {
         const clientObj = devices[clientId]
         clientObj.uuid = 'test-uuid'
         clientObj.amtPassword = null
         clientObj.mebxPassword = 'testMEBXpw'
         clientObj.action = ClientAction.ADMINCTLMODE
+        clientObj.tls = { issuedCertPEM: 'issuedCert' } as any
 
-        await expect(activation.saveTlsTunnelCerts({ input: context } as any)).rejects.toThrow(
-          'Missing prerequisites for saving TLS tunnel certs'
+        vi.spyOn(activation.configurator.secretsManager, 'getSecretAtPath').mockImplementation(
+          async () => ({ AMT_PASSWORD: 'vaultAMTpw', MEBX_PASSWORD: 'vaultMEBXpw' }) as any
         )
+        const insertSpy = vi
+          .spyOn(activation.configurator.secretsManager, 'writeSecretWithObject')
+          .mockImplementation(async () => true)
+
+        const result = await activation.saveTlsTunnelCerts({ input: context } as any)
+        expect(result).toBe(true)
+        expect(insertSpy).toHaveBeenCalledWith('devices/test-uuid', {
+          AMT_PASSWORD: 'vaultAMTpw',
+          MEBX_PASSWORD: 'testMEBXpw',
+          TLS_ISSUED_CERTIFICATE: 'issuedCert'
+        })
       })
 
-      it('should throw when mebxPassword is null for ACM', async () => {
+      it('should fall back to vault-stored MEBX_PASSWORD when mebxPassword is null for ACM', async () => {
         const clientObj = devices[clientId]
         clientObj.uuid = 'test-uuid'
         clientObj.amtPassword = 'testAMTpw'
         clientObj.mebxPassword = null
         clientObj.action = ClientAction.ADMINCTLMODE
+        clientObj.tls = { issuedCertPEM: 'issuedCert' } as any
 
-        await expect(activation.saveTlsTunnelCerts({ input: context } as any)).rejects.toThrow(
-          'Missing prerequisites for saving TLS tunnel certs'
+        vi.spyOn(activation.configurator.secretsManager, 'getSecretAtPath').mockImplementation(
+          async () => ({ AMT_PASSWORD: 'vaultAMTpw', MEBX_PASSWORD: 'vaultMEBXpw' }) as any
         )
+        const insertSpy = vi
+          .spyOn(activation.configurator.secretsManager, 'writeSecretWithObject')
+          .mockImplementation(async () => true)
+
+        const result = await activation.saveTlsTunnelCerts({ input: context } as any)
+        expect(result).toBe(true)
+        expect(insertSpy).toHaveBeenCalledWith('devices/test-uuid', {
+          AMT_PASSWORD: 'testAMTpw',
+          MEBX_PASSWORD: 'vaultMEBXpw',
+          TLS_ISSUED_CERTIFICATE: 'issuedCert'
+        })
       })
 
-      it('should save MEBX_PASSWORD for SHBC (action=CCM, profile=ACM)', async () => {
+      it('should save MEBX_PASSWORD for TLS activation (action=CCM, profile=ACM)', async () => {
         const clientObj = devices[clientId]
         clientObj.uuid = 'test-uuid'
         clientObj.amtPassword = 'testAMTpw'
         clientObj.mebxPassword = 'testMEBXpw'
-        // SHBC Phase 1 sets action to CCM, but profile activation is ACM
+        // TLS activation Phase 1 sets action to CCM, but profile activation is ACM
         clientObj.action = ClientAction.CLIENTCTLMODE as any
         clientObj.tls = { issuedCertPEM: 'issuedCert' } as any
 

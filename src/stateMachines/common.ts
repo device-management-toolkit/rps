@@ -47,6 +47,9 @@ export class HttpResponseError extends Error {
 const invokeWsmanCallInternal = async <T>(context: any): Promise<T> => {
   const { clientId, xmlMessage, httpHandler } = context
   const clientObj = devices[clientId]
+  if (xmlMessage == null) {
+    throw new Error('xmlMessage is null - cannot send WSMAN request')
+  }
   // Keep-alive only makes sense when reusing a TLS tunnel across messages.
   // Non-TLS path opens a fresh socket per message in rpc-go, so Connection: close is optimal there.
   const persistentTunnel = Environment.Config.amt_tls_tunnel_persistent !== false
@@ -97,7 +100,52 @@ const invokeWsmanCallViaTLSTunnel = async <T>(context: any, message: string): Pr
       clientObj.tlsTunnelManager.close()
     }
 
-    clientObj.tlsTunnelManager = new TLSTunnelManager(clientObj.ClientSocket, clientId)
+    // Trust anchor selection depends on where we are in the provisioning lifecycle:
+    //   - Pre-CCM: no cert material yet → caCert is undefined; TLSTunnelManager falls
+    //     back to walking the OnDie CA chain.
+    //   - Post-CCM / already-activated, no cert pinned yet: we need a temporary
+    //     tunnel before we can fetch AMT_PublicKeyCertificate / AMT_TLSCredentialContext
+    //     to identify the device's live cert. No trust anchor exists for this window;
+    //     digest auth via the admin password is the trust boundary. Skip verification.
+    //   - After RPS has generated/uploaded a TLS cert: issuedCertPEM pins the exact
+    //     cert. If an MPS root CA was used instead, mpsRootCertPEM wins.
+    const hasIssuedCert = clientObj.tls?.issuedCertPEM != null && clientObj.tls.issuedCertPEM !== ''
+    const caCert: string | undefined = clientObj.tls?.mpsRootCertPEM ?? clientObj.tls?.issuedCertPEM
+    const hasTrustAnchor = caCert != null && caCert !== ''
+
+    // Phase A (post-CCM transition): CCM complete but issued cert not yet installed on AMT.
+    // If no trust anchor is available, skip verification as before.
+    // If MPS root trust anchor exists, enforce verification and allow temporary
+    // self-signed fallback for AMT's brief post-CCM transition period.
+    const inPostCcmTransitionNoAnchor = clientObj.activationStatus === true && !hasIssuedCert && !hasTrustAnchor
+    const inPostCcmTransitionSelfSignedPhase = clientObj.activationStatus === true && !hasIssuedCert && hasTrustAnchor
+    const skipVerify = context.skipTlsVerification === true || inPostCcmTransitionNoAnchor
+    const rejectUnauthorized = skipVerify ? false : Environment.Config.amt_post_tls_reject === true
+
+    if (context.skipTlsVerification === true) {
+      invokeWsmanLogger.warn(
+        `Skipping TLS peer verification for this call (${clientId}) - deactivation/unprovision path`
+      )
+    } else if (inPostCcmTransitionNoAnchor) {
+      invokeWsmanLogger.warn(
+        `Skipping TLS peer verification for this tunnel (${clientId}) - post-CCM transition without trust anchor`
+      )
+    } else if (inPostCcmTransitionSelfSignedPhase && rejectUnauthorized) {
+      invokeWsmanLogger.warn(
+        `TLS post-CCM transition for ${clientId}: enforcing MPS-root verification with temporary self-signed fallback until issued cert is installed`
+      )
+    }
+
+    clientObj.tlsTunnelManager = new TLSTunnelManager(
+      clientObj.ClientSocket,
+      clientId,
+      rejectUnauthorized,
+      Environment.Config.amt_legacy_tls_compatibility === true,
+      caCert,
+      {
+        allowPostCcmTransitionSelfSigned: inPostCcmTransitionSelfSignedPhase && rejectUnauthorized
+      }
+    )
     clientObj.tlsTunnelSessionId = clientObj.tlsTunnelManager.getSessionId()
     clientObj.tlsTunnelNeedsReset = false
 
@@ -163,16 +211,12 @@ export const processTLSTunnelResponse = (clientId: string, data: Buffer, httpHan
     return
   }
 
-  invokeWsmanLogger.debug(`TLS response chunk received: ${data.length} bytes`)
-
   // Accumulate data in buffer
   if (clientObj.tlsResponseBuffer == null) {
     clientObj.tlsResponseBuffer = data
   } else {
     clientObj.tlsResponseBuffer = Buffer.concat([clientObj.tlsResponseBuffer, data])
   }
-
-  invokeWsmanLogger.debug(`TLS response buffer total: ${clientObj.tlsResponseBuffer.length} bytes`)
 
   // Check if we have a complete HTTP response
   const bufferStr = clientObj.tlsResponseBuffer.toString()
@@ -215,6 +259,9 @@ export const processTLSTunnelResponse = (clientId: string, data: Buffer, httpHan
         clientObj.reject(new UNEXPECTED_PARSE_ERROR())
       }
     } else {
+      // Non-200 (including 401 digest challenges) are rejected so the error state machine
+      // handles the retry/auth flow consistently with the non-TLS path. The error machine
+      // installs the digest challenge from Www-Authenticate and bounds retries via unauthCount.
       invokeWsmanLogger.warn(`WSMAN RESPONSE: HTTP ${statusCode}`)
       clientObj.reject(httpRsp)
     }
@@ -256,8 +303,9 @@ const invokeWsmanCall = async <T>(context: any, maxRetries = 0, timeoutMs?: numb
       ])
       return result as any
     } catch (error) {
-      // On any error, clean up TLS tunnel so next operation gets a fresh tunnel
-      if (clientObj?.tlsEnforced === true) {
+      // On TLS errors, clean up tunnel so next operation gets a fresh one.
+      // Exception: 401 is a normal digest auth challenge — tunnel is fine, just needs credentials.
+      if (clientObj?.tlsEnforced === true && (error as any)?.statusCode !== 401) {
         invokeWsmanLogger.warn(`Error during TLS operation, marking tunnel for reset`)
         if (clientObj.tlsTunnelManager != null) {
           clientObj.tlsTunnelManager.close()
@@ -364,6 +412,10 @@ export interface CommonContext {
   xmlMessage?: string | null
   parseErrorCount?: number
   targetAfterError?: string | null
+  // Deactivation / unprovision flow: the device is about to be wiped, so skip strict TLS cert
+  // verification for this call. The factory self-signed cert on a TLS-enforced box has no
+  // trust anchor we could validate against, and we already hold the admin credential.
+  skipTlsVerification?: boolean
 }
 
 export interface CommonMaintenanceContext extends CommonContext {

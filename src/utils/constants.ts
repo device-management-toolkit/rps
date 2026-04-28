@@ -6,6 +6,10 @@
 import { type apiResponse } from '../models/RCS.Config.js'
 export const ProtocolVersion = '4.0.0'
 export const AMTUserName = 'admin'
+
+export function asArray<T>(value: T | T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value : value == null ? [] : [value]
+}
 export const mpsserver = (name: string): string =>
   `<Address xmlns="http://schemas.xmlsoap.org/ws/2004/08/addressing">http://schemas.xmlsoap.org/ws/2004/08/addressing/role/anonymous</Address><ReferenceParameters xmlns="http://schemas.xmlsoap.org/ws/2004/08/addressing"><ResourceURI xmlns="http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd">http://intel.com/wbem/wscim/1/amt-schema/1/AMT_ManagementPresenceRemoteSAP</ResourceURI><SelectorSet xmlns="http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd"><Selector Name="Name">${name}</Selector></SelectorSet></ReferenceParameters>`
 

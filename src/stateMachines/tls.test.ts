@@ -324,7 +324,16 @@ describe('TLS State Machine', () => {
     await tls.addTrustedRootCertificate({ input: context })
     expect(invokeWsmanCallSpy).toHaveBeenCalled()
   })
-  it('should addTrustedRootCertificate with MPS root cert', async () => {
+  it('should addTrustedRootCertificate with MPS root cert from vault', async () => {
+    devices[clientId].ClientData = { payload: { profile: {} } }
+    devices[clientId].tls = {
+      rootCertKey: forge.pki.rsa.generateKeyPair(2048).privateKey,
+      mpsRootCertPEM: '-----BEGIN CERTIFICATE-----\ndGVzdA==\n-----END CERTIFICATE-----'
+    } as any
+    await tls.addTrustedRootCertificate({ input: context })
+    expect(invokeWsmanCallSpy).toHaveBeenCalled()
+  })
+  it('should addTrustedRootCertificate with MPS root cert from profile', async () => {
     devices[clientId].ClientData = {
       payload: { profile: { ciraConfigObject: { mpsRootCertificate: 'dGVzdA==' } } }
     }
@@ -472,4 +481,57 @@ describe('TLS State Machine', () => {
     await tls.commitChanges({ input: context })
     expect(invokeWsmanCallSpy).toHaveBeenCalled()
   })
+
+  it('should run full TLS flow including TLS settings Put for post-provisioning', () =>
+    new Promise<void>((resolve, reject) => {
+      vi.useFakeTimers()
+      currentStateIndex = 0
+      context.amtProfile = { tlsMode: 3, tlsSigningAuthoritys: 'SelfSigned' } as any
+
+      config.actors.createTlsCredentialContext = fromPromise(
+        async ({ input }) =>
+          await Promise.reject({
+            body: {
+              text: wsmanAlreadyExistsAllChunks
+            }
+          })
+      )
+      const tlsStateMachine = tls.machine.provide(config)
+      const flowStates = [
+        'PROVISIONED',
+        'ENUMERATE_PUBLIC_KEY_CERTIFICATE',
+        'PULL_PUBLIC_KEY_CERTIFICATE',
+        'ADD_TRUSTED_ROOT_CERTIFICATE',
+        'GENERATE_KEY_PAIR',
+        'ENUMERATE_PUBLIC_PRIVATE_KEY_PAIR',
+        'PULL_PUBLIC_PRIVATE_KEY_PAIR',
+        'ADD_CERTIFICATE',
+        'ENUMERATE_TLS_CREDENTIAL_CONTEXT',
+        'PULL_TLS_CREDENTIAL_CONTEXT',
+        'CREATE_TLS_CREDENTIAL_CONTEXT',
+        'SYNC_TIME',
+        'ENUMERATE_TLS_DATA',
+        'PULL_TLS_DATA',
+        'PUT_REMOTE_TLS_DATA',
+        'WAIT_A_BIT',
+        'PUT_LOCAL_TLS_DATA',
+        'COMMIT_CHANGES',
+        'SUCCESS'
+      ]
+
+      const tlsService = createActor(tlsStateMachine, { input: context })
+      tlsService.subscribe((state) => {
+        const expectedState: any = flowStates[currentStateIndex++]
+        expect(state.matches(expectedState)).toBe(true)
+        if (state.matches('WAIT_A_BIT')) {
+          vi.advanceTimersByTime(5000)
+        } else if (state.matches('SUCCESS') && currentStateIndex === flowStates.length) {
+          resolve()
+        }
+      })
+
+      tlsService.start()
+      tlsService.send({ type: 'CONFIGURE_TLS', clientId })
+      vi.runAllTicks()
+    }))
 })
