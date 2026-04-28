@@ -1,3 +1,10 @@
+# [2.36.0](https://github.com/device-management-toolkit/rps/compare/v2.35.0...v2.36.0) (2026-04-28)
+
+
+### Features
+
+* improves tls tunnel flow ([#2683](https://github.com/device-management-toolkit/rps/issues/2683)) ([652d2bf](https://github.com/device-management-toolkit/rps/commit/652d2bf3997e06dd7ce8246954fc1fe494126428))
+
 # [2.35.0](https://github.com/device-management-toolkit/rps/compare/v2.34.3...v2.35.0) (2026-04-24)
 
 
