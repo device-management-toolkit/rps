@@ -41,6 +41,32 @@ vi.mock('./common.js', async () => {
     coalesceMessage
   }
 })
+vi.mock('../Configurator.js', () => ({
+  Configurator: function () {
+    return {
+      ready: Promise.resolve(),
+      profileManager: {
+        getAmtProfile: async () => null,
+        getAmtPassword: async () => null,
+        getMEBxPassword: async () => null
+      },
+      domainCredentialManager: {
+        getProvisioningCert: async () => null
+      },
+      secretsManager: {
+        getSecretAtPath: async () => null,
+        writeSecretWithObject: async () => true
+      }
+    }
+  }
+}))
+vi.mock('../factories/DbCreatorFactory.js', () => ({
+  DbCreatorFactory: function () {
+    return {
+      getDb: async () => ({ domains: {}, profiles: {} })
+    }
+  }
+}))
 const { Activation } = await import('./activation.js')
 
 vi.mock('got')

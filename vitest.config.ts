@@ -53,9 +53,11 @@ function injectViteIgnoreForTests(): Plugin {
       const normalized = id.replace(/\\/g, '/')
       const target = targets.find((t) => normalized.endsWith(t.fileSuffix))
       if (target == null) return null
-      if (!code.includes(target.find)) return null
+      // Normalize CRLF to LF so the literal find string matches on Windows checkouts.
+      const lfCode = code.replace(/\r\n/g, '\n')
+      if (!lfCode.includes(target.find)) return null
       return {
-        code: code.replace(target.find, target.replace),
+        code: lfCode.replace(target.find, target.replace),
         map: null
       }
     }
