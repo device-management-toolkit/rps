@@ -1,3 +1,10 @@
+## [2.36.1](https://github.com/device-management-toolkit/rps/compare/v2.36.0...v2.36.1) (2026-04-29)
+
+
+### Bug Fixes
+
+* enable AMT legacy TLS compatibility and post-TLS reject by default ([#2689](https://github.com/device-management-toolkit/rps/issues/2689)) ([b9d4397](https://github.com/device-management-toolkit/rps/commit/b9d43976d8902de930bd57406e674fba8afeb3d2))
+
 # [2.36.0](https://github.com/device-management-toolkit/rps/compare/v2.35.0...v2.36.0) (2026-04-28)
 
 
