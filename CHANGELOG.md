@@ -1,3 +1,10 @@
+## [2.36.2](https://github.com/device-management-toolkit/rps/compare/v2.36.1...v2.36.2) (2026-04-30)
+
+
+### Bug Fixes
+
+* address negative serial numbers generated ~20% of the time ([#2690](https://github.com/device-management-toolkit/rps/issues/2690)) ([aa30c80](https://github.com/device-management-toolkit/rps/commit/aa30c80eafb33f9c9a92de9a0366020f2587c1e0))
+
 ## [2.36.1](https://github.com/device-management-toolkit/rps/compare/v2.36.0...v2.36.1) (2026-04-29)
 
 
