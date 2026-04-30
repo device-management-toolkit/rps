@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { randomBytes } from 'node:crypto'
 import { type pkcs12, type pki } from 'node-forge'
 import { type ILogger } from './interfaces/ILogger.js'
 import type Logger from './Logger.js'
@@ -339,7 +340,14 @@ export class CertManager {
     } else {
       cert.publicKey = this.nodeForge.publicKeyFromPem(`-----BEGIN PUBLIC KEY-----${DERKey}-----END PUBLIC KEY-----`)
     }
-    cert.serialNumber = Math.floor(Math.random() * 100000 + 1).toString()
+    // RFC 5280: serialNumber must be a positive integer. node-forge reads this as a hex string and
+    // DER-encodes it as a signed two's-complement INTEGER, so the high bit of the first byte must
+    // be clear or strict parsers (Go 1.23+ crypto/x509) reject it as a negative serial number.
+    // Also guarantee non-zero (zero is not "positive") by setting a low bit on the last byte.
+    const serialBytes = randomBytes(16)
+    serialBytes[0] &= 0x7f
+    serialBytes[serialBytes.length - 1] |= 0x01
+    cert.serialNumber = serialBytes.toString('hex')
 
     // If creating a leaf cert with MPS root cert provided, base validity on root cert validity dates.
     // Accept both PEM and base64 DER to avoid silently falling back to legacy dates.
