@@ -68,6 +68,7 @@ vi.mock('../factories/DbCreatorFactory.js', () => ({
   }
 }))
 const { Activation } = await import('./activation.js')
+const { TLSTunnelManager } = await import('../TLSTunnelManager.js')
 
 vi.mock('got')
 const clientId = randomUUID()
@@ -2394,7 +2395,7 @@ describe('Activation State Machine', () => {
       expect(devices[clientId].tlsTunnelManager).toBeUndefined()
     })
 
-    it('resolveLocalTlsRouting should keep TLS routing when --tls-tunnel is requested even if LMS allows non-secure', async () => {
+    it('evaluateLegacyLmsNonTlsOverride should keep TLS routing when --tls-tunnel is requested even if LMS allows non-secure', async () => {
       const clientObj = devices[clientId]
       clientObj.uuid = 'test-uuid'
       clientObj.tlsEnforced = true
@@ -2421,17 +2422,18 @@ describe('Activation State Machine', () => {
         }
       })
 
-      const result = await (activation as any).resolveLocalTlsRouting({ input: context })
+      const result = await (activation as any).evaluateLegacyLmsNonTlsOverride({ input: context })
 
       expect(result).toBe(true)
       expect(clientObj.tlsEnforced).toBe(true)
       expect(enumerateSpy).not.toHaveBeenCalled()
     })
 
-    it('resolveLocalTlsRouting should mark LMS non-TLS allowed when LMS accepts non-secure and --tls-tunnel is not set', async () => {
+    it('evaluateLegacyLmsNonTlsOverride should mark LMS non-TLS allowed when LMS accepts non-secure and --tls-tunnel is not set', async () => {
       const clientObj = devices[clientId] as any
       clientObj.uuid = 'test-uuid'
       clientObj.tlsEnforced = true
+      clientObj.ClientData = { payload: { currentMode: 1 } }
       delete clientObj.tlsTunnelActivation
 
       vi.spyOn(activation as any, 'enumerateAndPull').mockImplementation(async () => {
@@ -2455,17 +2457,18 @@ describe('Activation State Machine', () => {
         }
       })
 
-      const result = await (activation as any).resolveLocalTlsRouting({ input: context })
+      const result = await (activation as any).evaluateLegacyLmsNonTlsOverride({ input: context })
 
       expect(result).toBe(false)
       expect(clientObj.tlsEnforced).toBe(false)
       expect(clientObj.lmsNonTlsAllowed).toBe(true)
     })
 
-    it('resolveLocalTlsRouting should allow non-TLS on legacy firmware when AcceptNonSecureConnections is true and NonSecureConnectionsSupported is missing', async () => {
+    it('evaluateLegacyLmsNonTlsOverride should allow non-TLS on legacy firmware when AcceptNonSecureConnections is true and NonSecureConnectionsSupported is missing', async () => {
       const clientObj = devices[clientId] as any
       clientObj.uuid = 'test-uuid'
       clientObj.tlsEnforced = true
+      clientObj.ClientData = { payload: { currentMode: 1 } }
       delete clientObj.tlsTunnelActivation
 
       vi.spyOn(activation as any, 'enumerateAndPull').mockImplementation(async () => {
@@ -2488,17 +2491,18 @@ describe('Activation State Machine', () => {
         }
       })
 
-      const result = await (activation as any).resolveLocalTlsRouting({ input: context })
+      const result = await (activation as any).evaluateLegacyLmsNonTlsOverride({ input: context })
 
       expect(result).toBe(false)
       expect(clientObj.tlsEnforced).toBe(false)
       expect(clientObj.lmsNonTlsAllowed).toBe(true)
     })
 
-    it('resolveLocalTlsRouting should evaluate LMS settings in activated flow even when tlsEnforced starts false', async () => {
+    it('evaluateLegacyLmsNonTlsOverride should evaluate LMS settings in activated flow even when tlsEnforced starts false', async () => {
       const clientObj = devices[clientId] as any
       clientObj.uuid = 'test-uuid'
       clientObj.tlsEnforced = false
+      clientObj.ClientData = { payload: { currentMode: 1 } }
       delete clientObj.tlsTunnelActivation
       context.isActivated = true
 
@@ -2522,17 +2526,18 @@ describe('Activation State Machine', () => {
         }
       })
 
-      const result = await (activation as any).resolveLocalTlsRouting({ input: context })
+      const result = await (activation as any).evaluateLegacyLmsNonTlsOverride({ input: context })
 
       expect(enumerateSpy).toHaveBeenCalled()
       expect(result).toBe(false)
       expect(clientObj.lmsNonTlsAllowed).toBe(true)
     })
 
-    it('resolveLocalTlsRouting should treat string/number boolean values as true for LMS non-secure flags', async () => {
+    it('evaluateLegacyLmsNonTlsOverride should treat string/number boolean values as true for LMS non-secure flags', async () => {
       const clientObj = devices[clientId] as any
       clientObj.uuid = 'test-uuid'
       clientObj.tlsEnforced = true
+      clientObj.ClientData = { payload: { currentMode: 1 } }
       delete clientObj.tlsTunnelActivation
 
       vi.spyOn(activation as any, 'enumerateAndPull').mockImplementation(async () => {
@@ -2556,7 +2561,7 @@ describe('Activation State Machine', () => {
         }
       })
 
-      const result = await (activation as any).resolveLocalTlsRouting({ input: context })
+      const result = await (activation as any).evaluateLegacyLmsNonTlsOverride({ input: context })
 
       expect(result).toBe(false)
       expect(clientObj.tlsEnforced).toBe(false)
@@ -2766,6 +2771,38 @@ describe('Activation State Machine', () => {
         expect(states.INIT_TLS_TUNNEL_CONNECTION).toBeDefined()
         expect(states.INIT_TLS_TUNNEL_CONNECTION.invoke.onError.target).toBe('FAILED')
         expect(states.INIT_TLS_TUNNEL_CONNECTION.invoke.src).toBe('initializeTlsTunnelConnection')
+      })
+
+      it('should clear stale TLS reset state before reconnecting', async () => {
+        const clientObj = devices[clientId]
+        clientObj.uuid = 'test-uuid'
+        clientObj.activationStatus = true
+        clientObj.tls = { mpsRootCertPEM: 'test-ca' } as any
+        clientObj.tlsTunnelNeedsReset = true
+        clientObj.tlsResponseBuffer = Buffer.from('stale')
+        clientObj.tlsTunnelSessionId = 'old-session'
+
+        const oldCloseSpy = vi.fn()
+        clientObj.tlsTunnelManager = { close: oldCloseSpy } as any
+
+        const connectSpy = vi.spyOn(TLSTunnelManager.prototype, 'connect').mockResolvedValue(undefined)
+        const onDataSpy = vi.spyOn(TLSTunnelManager.prototype, 'onData').mockImplementation(() => {})
+
+        const result = await activation.initializeTlsTunnelConnection({ input: context } as any)
+
+        expect(result).toBe(true)
+        expect(oldCloseSpy).toHaveBeenCalledTimes(1)
+        expect(connectSpy).toHaveBeenCalledTimes(1)
+        expect(onDataSpy).toHaveBeenCalledTimes(1)
+        expect(clientObj.tlsTunnelNeedsReset).toBe(false)
+        expect(clientObj.tlsResponseBuffer).toBeUndefined()
+        expect(clientObj.tlsTunnelSessionId).not.toBe('old-session')
+        expect(clientObj.tlsTunnelSessionId).toBeTruthy()
+        expect(clientObj.tlsEnforced).toBe(true)
+        expect(clientObj.amtReconfiguring).toBe(false)
+
+        connectSpy.mockRestore()
+        onDataSpy.mockRestore()
       })
     })
   })
