@@ -116,11 +116,11 @@ describe('ChangePassword State Machine', () => {
       delays: {}
     }
     const mockSecretsManager: ISecretManagerService = {
-      deleteSecretAtPath: vi.fn<any>(),
-      getSecretFromKey: vi.fn<any>(),
-      health: vi.fn<any>(),
-      writeSecretWithObject: vi.fn<any>(),
-      getSecretAtPath: vi.fn<any>()
+      deleteSecretAtPath: vi.fn(),
+      getSecretFromKey: vi.fn(),
+      health: vi.fn(),
+      writeSecretWithObject: vi.fn(),
+      getSecretAtPath: vi.fn()
     }
     vi.spyOn(SecretManagerCreatorFactory.prototype, 'getSecretManager').mockResolvedValue(mockSecretsManager)
     secretGetterSpy = vi.spyOn(mockSecretsManager, 'getSecretAtPath').mockResolvedValue(deviceCredentials)
