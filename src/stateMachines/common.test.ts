@@ -24,6 +24,7 @@ import {
 Environment.Config = config
 describe('Common', () => {
   const clientId = randomUUID()
+  let originalWsmanMaxAttempts: number
   let sendSpy
   let responseMessageSpy: MockInstance
   let wrapItSpy: MockInstance
@@ -35,6 +36,9 @@ describe('Common', () => {
     httpHandler: new HttpHandler()
   }
   beforeEach(() => {
+    originalWsmanMaxAttempts = Environment.Config.wsman_max_attempts
+    // Keep this suite deterministic: explicit retries are covered by maxRetries arguments.
+    Environment.Config.wsman_max_attempts = 1
     vi.useFakeTimers()
     devices[clientId] = {
       ClientSocket: {
@@ -59,6 +63,7 @@ describe('Common', () => {
   })
 
   afterEach(() => {
+    Environment.Config.wsman_max_attempts = originalWsmanMaxAttempts
     vi.runAllTicks()
     vi.useRealTimers()
   })
@@ -124,7 +129,7 @@ describe('Common', () => {
     expect(sendSpy).toHaveBeenCalledTimes(3)
   })
 
-  it('should not retry by default on UNEXPECTED_PARSE_ERROR', async () => {
+  it('should not retry when wsman_max_attempts is configured to 1', async () => {
     const wsmanPromise = invokeWsmanCall(context)
     expect(sendSpy).toHaveBeenCalledTimes(1)
     devices[clientId].reject(new UNEXPECTED_PARSE_ERROR())

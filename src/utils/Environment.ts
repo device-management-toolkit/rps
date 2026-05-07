@@ -24,6 +24,8 @@ config.delay_setup_and_config_sync = 5000
 config.delay_tls_put_data_sync = 5000
 // TLS operations may take longer due to AMT reconfiguration (15+ seconds)
 config.delay_tls_timer = config.delay_tls_timer ?? 15
+// Generic WSMAN attempt budget (initial try + retries)
+config.wsman_max_attempts = config.wsman_max_attempts ?? 3
 // Post-provisioning: true when RPS owns the DMT root cert (AMT 19+, AMT ≤18 with --tls-tunnel)
 config.amt_post_tls_reject = config.amt_post_tls_reject ?? false
 // Generic compatibility mode for older AMT TLS implementations (legacy renegotiation/ciphers/protocol floor).

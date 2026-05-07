@@ -502,8 +502,31 @@ export class Activation {
   }
 
   commitChanges = async ({ input }: { input: ActivationContext }): Promise<any> => {
+    const clientObj = devices[input.clientId]
     input.xmlMessage = input.amt.SetupAndConfigurationService.CommitChanges()
-    return await invokeWsmanCall(input)
+    const result = await invokeWsmanCall(input)
+
+    // AMT 19+ (tlsEnforced path): CommitChanges can trigger TLS certificate/state
+    // rollover on the same 16993 endpoint. Force a fresh TLS tunnel for the next
+    // WSMAN operation to avoid reusing a stale pre-commit channel.
+    if (clientObj?.ClientData?.payload?.tlsEnforced === true) {
+      this.logger.info(
+        `CommitChanges completed for TLS-enforced device ${clientObj.uuid}; forcing fresh TLS tunnel for post-commit operations`
+      )
+
+      this.logger.silly(
+        `Post-commit TLS rollover: closing current TLS tunnel (session=${clientObj.tlsTunnelSessionId ?? 'none'}) and marking for fresh tunnel creation on next WSMAN call`
+      )
+
+      clientObj.tlsTunnelManager?.close()
+      clientObj.tlsTunnelManager = undefined
+      clientObj.tlsTunnelSessionId = undefined
+      clientObj.tlsTunnelNeedsReset = true
+      clientObj.tlsResponseBuffer = undefined
+      clientObj.amtReconfiguring = true
+    }
+
+    return result
   }
 
   invokeUnprovision = async ({ input }: { input: ActivationContext }): Promise<any> => {
@@ -688,11 +711,13 @@ export class Activation {
     return await invokeWsmanCall(input)
   }
 
-  private resolveLocalTlsRouting = async ({ input }: { input: ActivationContext }): Promise<boolean> => {
+  private evaluateLegacyLmsNonTlsOverride = async ({ input }: { input: ActivationContext }): Promise<boolean> => {
     const clientObj = devices[input.clientId]
     if (clientObj == null) {
       return false
     }
+
+    const currentMode: number = clientObj.ClientData?.payload?.currentMode ?? 0
 
     ;(clientObj as any).lmsNonTlsAllowed = false
 
@@ -708,6 +733,30 @@ export class Activation {
     if (input.isActivated !== true && clientObj.tlsEnforced !== true) {
       ;(clientObj as any).lmsNonTlsAllowed = false
       return false
+    }
+
+    // Pre-provisioning mode (currentMode=0) does not provide stable/meaningful
+    // LMS TLS settings for routing decisions. Skip AMT_TLSSettingData probe here.
+    if (currentMode === 0) {
+      clientObj.tlsEnforced = clientObj.tlsEnforced === true
+      ;(clientObj as any).lmsNonTlsAllowed = false
+      this.logger.debug(
+        `Skipping LMS TLS setting probe for pre-provisioning device ${clientObj.uuid}; keeping tlsEnforced=${String(clientObj.tlsEnforced)}`
+      )
+      return clientObj.tlsEnforced === true
+    }
+
+    // AMT 19+ TLS-enforced devices must stay on the TLS tunnel route.
+    // Do not force a temporary non-TLS probe here, otherwise RPS emits plain
+    // wsman messages instead of tls_data on an already-TLS local endpoint.
+    const firmwareVersion = Number.parseFloat(clientObj.ClientData?.payload?.ver ?? '0')
+    const isAMT19OrNewer = Number.isFinite(firmwareVersion) && firmwareVersion >= 19
+    if (clientObj.tlsEnforced === true && isAMT19OrNewer) {
+      ;(clientObj as any).lmsNonTlsAllowed = false
+      this.logger.debug(
+        `Skipping legacy LMS non-TLS override probe for AMT ${clientObj.ClientData?.payload?.ver ?? 'unknown'} TLS-enforced device ${clientObj.uuid}; keeping TLS tunnel routing`
+      )
+      return true
     }
 
     const asBool = (value: unknown): boolean => {
@@ -805,6 +854,20 @@ export class Activation {
     // Respect explicit --tls-tunnel requests. Otherwise, if routing was already
     // resolved to non-TLS, do not force a 16993 port switch for activated flows.
     return clientObj.tlsTunnelActivation !== true && clientObj.tlsEnforced !== true
+  }
+
+  private getAdminControlModeStatus = (clientId: string): string => {
+    const currentMode = devices[clientId]?.ClientData?.payload?.currentMode
+
+    if (currentMode === 1) {
+      return 'Upgraded to admin control mode.'
+    }
+
+    if (currentMode === 0) {
+      return 'Activated to admin control mode.'
+    }
+
+    return 'Admin control mode.'
   }
 
   private getActiveTlsCertificateFingerprints = async (input: ActivationContext): Promise<string[]> => {
@@ -963,6 +1026,31 @@ export class Activation {
     const clientObj = devices[input.clientId]
     const delaySeconds = Environment.Config.delay_tls_timer
 
+    // If TLS is already enforced by the device/runtime path, AMT stays on 16993.
+    // After cert provisioning we only need a settle delay for TLS service rollover,
+    // not an explicit rpc-go port switch command.
+    const alreadyOnTlsPort = clientObj.connectionParams?.port === 16993
+    if (alreadyOnTlsPort && clientObj.tlsEnforced === true && clientObj.tlsTunnelActivation !== true) {
+      this.logger.info(
+        `Skipping port_switch for device ${clientObj.uuid}: already using TLS path; waiting ${delaySeconds}s for AMT TLS rollover`
+      )
+
+      // The existing tunnel may be pre-rollover; close it so post-rollover steps create a fresh channel.
+      clientObj.tlsTunnelManager?.close()
+      clientObj.tlsTunnelManager = undefined
+      clientObj.tlsTunnelSessionId = undefined
+      clientObj.tlsTunnelNeedsReset = true
+      clientObj.tlsResponseBuffer = undefined
+
+      await new Promise((resolve) => setTimeout(resolve, delaySeconds * 1000))
+
+      if (clientObj.connectionParams != null) {
+        clientObj.connectionParams.port = 16993
+      }
+
+      return true
+    }
+
     const portSwitchPayload = JSON.stringify({
       port: '16993',
       delay: delaySeconds
@@ -1006,6 +1094,14 @@ export class Activation {
     this.logger.info(`Initializing TLS tunnel connection for device ${clientObj.uuid}`)
 
     try {
+      if (clientObj.tlsTunnelManager != null) {
+        clientObj.tlsTunnelManager.close()
+      }
+      clientObj.tlsTunnelManager = undefined
+      clientObj.tlsTunnelSessionId = undefined
+      clientObj.tlsResponseBuffer = undefined
+      clientObj.tlsTunnelNeedsReset = false
+
       // Post-CCM: the device presents the cert RPS just generated and uploaded. Pin
       // against issuedCertPEM (self-signed case). If the cert was signed by an MPS root
       // CA, mpsRootCertPEM holds that CA and wins.
@@ -1025,6 +1121,7 @@ export class Activation {
             inPostCcmTransitionSelfSignedPhase && Environment.Config.amt_post_tls_reject === true
         }
       )
+      clientObj.tlsTunnelSessionId = clientObj.tlsTunnelManager.getSessionId()
 
       // Connect (initiates TLS handshake)
       await clientObj.tlsTunnelManager.connect()
@@ -1036,6 +1133,7 @@ export class Activation {
 
       // Flip to TLS mode so all subsequent WSMAN calls route through the tunnel
       clientObj.tlsEnforced = true
+      clientObj.amtReconfiguring = false
 
       this.logger.info(`TLS tunnel established for device ${clientObj.uuid} - switching to TLS mode`)
       return true
@@ -1043,6 +1141,8 @@ export class Activation {
       const errMsg = err instanceof globalThis.Error ? err.message : String(err)
       this.logger.error(`Failed to establish TLS tunnel for device ${clientObj.uuid}: ${errMsg}`)
       clientObj.tlsTunnelManager = undefined
+      clientObj.tlsTunnelSessionId = undefined
+      clientObj.tlsTunnelNeedsReset = true
       throw err
     }
   }
@@ -1055,7 +1155,7 @@ export class Activation {
     },
     actors: {
       getAMTProfile: fromPromise(this.getAMTProfile.bind(this)),
-      resolveLocalTlsRouting: fromPromise(this.resolveLocalTlsRouting.bind(this)),
+      evaluateLegacyLmsNonTlsOverride: fromPromise(this.evaluateLegacyLmsNonTlsOverride.bind(this)),
       getDeviceFromMPS: fromPromise(this.getDeviceFromMPS.bind(this)),
       getAMTDomainCert: fromPromise(this.getAMTDomainCert.bind(this)),
       initializeTLSTunnel: fromPromise(this.initializeTLSTunnel.bind(this)),
@@ -1274,7 +1374,7 @@ export class Activation {
           id: 'get-amt-profile',
           onDone: {
             actions: assign({ profile: ({ event }) => (event as any).output }),
-            target: 'RESOLVE_LOCAL_TLS_ROUTING'
+            target: 'EVALUATE_LEGACY_LMS_NON_TLS_OVERRIDE'
           },
           onError: {
             actions: assign({ errorMessage: 'Failed to get amt profile from database' }),
@@ -1282,11 +1382,11 @@ export class Activation {
           }
         }
       },
-      RESOLVE_LOCAL_TLS_ROUTING: {
+      EVALUATE_LEGACY_LMS_NON_TLS_OVERRIDE: {
         invoke: {
-          src: 'resolveLocalTlsRouting',
+          src: 'evaluateLegacyLmsNonTlsOverride',
           input: ({ context }) => context,
-          id: 'resolve-local-tls-routing',
+          id: 'evaluate-legacy-lms-non-tls-override',
           onDone: 'CHECK_PROFILE_TYPE',
           onError: 'CHECK_PROFILE_TYPE'
         }
@@ -1582,7 +1682,7 @@ export class Activation {
             guard: 'isTlsCCMComplete',
             actions: [
               ({ context }) => {
-                devices[context.clientId].status.Status = 'Admin control mode.'
+                devices[context.clientId].status.Status = this.getAdminControlModeStatus(context.clientId)
               },
               'Set activation status'
             ],
@@ -1592,7 +1692,7 @@ export class Activation {
             guard: 'isDeviceAdminModeActivated',
             actions: [
               ({ context }) => {
-                devices[context.clientId].status.Status = 'Admin control mode.'
+                devices[context.clientId].status.Status = this.getAdminControlModeStatus(context.clientId)
               },
               'Set activation status'
             ],
@@ -1603,7 +1703,7 @@ export class Activation {
             guard: 'isDeviceActivatedInACM',
             actions: [
               ({ context }) => {
-                devices[context.clientId].status.Status = 'Admin control mode.'
+                devices[context.clientId].status.Status = this.getAdminControlModeStatus(context.clientId)
               },
               'Set activation status'
             ],
@@ -1662,7 +1762,7 @@ export class Activation {
             guard: 'isTlsUpgradeSuccessful',
             actions: [
               ({ context }) => {
-                devices[context.clientId].status.Status = 'admin control mode.'
+                devices[context.clientId].status.Status = this.getAdminControlModeStatus(context.clientId)
               },
               'Set activation status'
             ],
@@ -1673,7 +1773,7 @@ export class Activation {
             actions: [
               assign({ tlsACMComplete: () => true }),
               ({ context }) => {
-                devices[context.clientId].status.Status = 'Upgraded to admin control mode.'
+                devices[context.clientId].status.Status = this.getAdminControlModeStatus(context.clientId)
               },
               'Set activation status'
             ],
@@ -1684,7 +1784,7 @@ export class Activation {
             actions: [
               assign({ tlsACMComplete: () => true }),
               ({ context }) => {
-                devices[context.clientId].status.Status = 'Upgraded to admin control mode.'
+                devices[context.clientId].status.Status = this.getAdminControlModeStatus(context.clientId)
               },
               'Set activation status'
             ],
