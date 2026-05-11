@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file is the canonical guide for **any AI coding assistant** (Claude Code, GitHub Copilot, Cursor, Codex, Gemini CLI, Aider, Continue, etc.) working in this repository. The filename is `CLAUDE.md` for historical reasons; sibling pointer files (`AGENTS.md`, `.github/copilot-instructions.md`) exist so other tools pick the same content up automatically — keep this file as the single source of truth and treat the pointer files as redirects rather than independent docs.
 
 ## Overview
 
@@ -84,11 +84,18 @@ Both layers are dynamically imported by provider name:
 
 ## Implementation guidelines (non-negotiable)
 
-- **Never hand-author a WSMAN message in this repo.** All WSMAN XML construction goes through the `@device-management-toolkit/wsman-messages` dependency — use the `AMT`, `IPS`, and `CIM` namespaces (as imported in `stateMachines/activation.ts` and friends) to build messages. If a needed method is missing, fix it in `wsman-messages` upstream rather than crafting raw XML here.
+- **Never hand-author a WSMAN message in production code.** All runtime WSMAN XML construction (anywhere under `src/` except `src/test/`) goes through the `@device-management-toolkit/wsman-messages` dependency — use the `AMT`, `IPS`, and `CIM` namespaces (as imported in `stateMachines/activation.ts` and friends) to build messages. If a needed method is missing, fix it in `wsman-messages` upstream rather than crafting raw XML here. Test fixtures under `src/test/helper/` (e.g. `AMTMessages.ts`) are the only place raw WSMAN XML is acceptable, and only as canned response/request strings the tests assert against.
 - **Every state interaction belongs in an XState machine.** Add or modify states/guards/actors rather than calling WSMAN from outside the state machine layer.
+- **REST API changes must be backwards compatible.** The `/api/v1/admin/*` surface (and the `swagger.yaml` it's described in) is consumed by external tooling — RPC, the Sample Web UI, and downstream integrators. Prefer additive changes: add new optional fields, new endpoints, or new query params rather than renaming, removing, or tightening existing ones. If a breaking change is truly unavoidable, retain the old behavior behind the existing shape (e.g. accept both old and new field names, default missing values to prior semantics) and call it out explicitly in the PR description. The same rule applies to the WebSocket client-message schema (`ClientMsg` in `models/RCS.Config.ts`) and to DB column/profile-schema changes — older agents and existing rows must keep working.
+- **Keep PRs small and scoped to one concern.** Touch only the files relevant to the issue you're solving. **Do not scope-creep**: if you notice unrelated bugs, dead code, lint nits, or formatting drift while working, open a separate PR/issue for each — do not bundle them in. A focused 50-line diff gets reviewed and merged; a 500-line "while I was in there" diff stalls and risks regressions in unrelated state machines.
 - **Before declaring work done, all three must be green:** `npm test` (unit tests), `npm run ci-prettify` (formatting), `npm run lint` (ESLint). CI runs the same; fix locally first.
 - **Touching the activation / TLS path?** Verify the E2E TLS flow branches above are all still reachable, and update the corresponding `.test.ts` for any machine whose transitions you change.
 
 ## Commit conventions (enforced by commitlint)
 
-Format: `<type>(<scope>): <subject>` with body and optional footer. Types: `feat | fix | docs | style | refactor | perf | test | build | ci | revert`. Common scopes used in this repo: `activation`, `api`, `config`, `db`, `deactivation`, `deps`, `deps-dev`, `docker`, `events`, `gh-actions`, `health`, `maintenance`, `secrets`, `state-machine`, `utils`. Subject + body lines ≤72 chars. Releases are driven by `semantic-release` (`.releaserc.json`), so commit type/scope matters — it controls versioning and `CHANGELOG.md`. Linear history is preferred; PR authors merge via Rebase or Squash.
+Format: `<type>(<scope>): <subject>` with optional body and footer.
+
+- **Allowed types** (from `@commitlint/config-conventional`): `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`. `feat` triggers a minor release; `fix` and `chore` map to a patch release (`.releaserc.json:10-16`); `BREAKING CHANGE:` in the footer triggers a major.
+- **Scope-enum (enforced by `commitlint.config.cjs`):** `db`, `api`, `secrets`, `activation`, `deactivation`, `maintenance`, `state-machine`, `health`, `utils`, `events`, `docker`, `deps`, `deps-dev`, `gh-actions`, `config`. Scope is optional, but if provided it must be one of the above.
+- **Line length** is the spot where the doc and the enforced config diverge: `CONTRIBUTING.MD` asks for ≤72-char body lines as a style guideline, but `commitlint.config.cjs` only enforces `body-max-line-length: 200` and does not enforce a subject limit. Aim for the 72-char guideline; CI will block you at 200.
+- Releases are driven by `semantic-release` (`.releaserc.json`), so commit type/scope is what produces the next version and `CHANGELOG.md` entry — pick deliberately. Linear history is preferred; PR authors merge via Rebase or Squash.
