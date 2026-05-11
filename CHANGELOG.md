@@ -1,3 +1,10 @@
+## [2.36.3](https://github.com/device-management-toolkit/rps/compare/v2.36.2...v2.36.3) (2026-05-11)
+
+
+### Bug Fixes
+
+* harden post CCM TLS rollover and retry behavior ([#2691](https://github.com/device-management-toolkit/rps/issues/2691)) ([0576cca](https://github.com/device-management-toolkit/rps/commit/0576ccaec4c98dd00149df94e86da248b9899992))
+
 ## [2.36.2](https://github.com/device-management-toolkit/rps/compare/v2.36.1...v2.36.2) (2026-04-30)
 
 
