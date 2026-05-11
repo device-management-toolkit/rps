@@ -128,8 +128,11 @@ describe('processTLSTunnelResponse', () => {
 describe('invokeWsmanCall TLS error cleanup', () => {
   const clientId = randomUUID()
   let context: any
+  let originalWsmanMaxAttempts: number
 
   beforeEach(() => {
+    originalWsmanMaxAttempts = Environment.Config.wsman_max_attempts
+    Environment.Config.wsman_max_attempts = 1
     vi.useFakeTimers()
     const mockTunnelManager = {
       close: vi.fn(),
@@ -154,6 +157,7 @@ describe('invokeWsmanCall TLS error cleanup', () => {
   })
 
   afterEach(() => {
+    Environment.Config.wsman_max_attempts = originalWsmanMaxAttempts
     vi.runAllTicks()
     vi.useRealTimers()
     delete devices[clientId]
