@@ -10,7 +10,7 @@ import { HttpHandler } from '../HttpHandler.js'
 import { Environment } from '../utils/Environment.js'
 import { config } from '../test/helper/Config.js'
 
-import { CONNECTION_RESET_ERROR } from '../utils/constants.js'
+import { CONNECTION_RESET_ERROR, TLS_TUNNEL_ERROR } from '../utils/constants.js'
 
 Environment.Config = config
 
@@ -44,9 +44,12 @@ describe('invokeWsmanCall CONNECTION_RESET_ERROR retry', () => {
     // Use minimal delays for real-timer tests
     Environment.Config.delay_tls_timer = 0.01 // 10ms
 
-    mockConnect.mockClear()
+    mockConnect.mockReset()
+    mockConnect.mockResolvedValue(undefined)
     mockOnData.mockClear()
     mockClose.mockClear()
+
+    mockSend = vi.fn<any>().mockResolvedValue(undefined)
 
     const initialTunnelManager = {
       close: vi.fn(),
@@ -95,7 +98,7 @@ describe('invokeWsmanCall CONNECTION_RESET_ERROR retry', () => {
 
     const result = await invokeWsmanCall(context)
     expect(result).toEqual({ retried: true })
-    expect(devices[clientId].amtReconfiguring).toBe(false)
+    expect(devices[clientId].amtReconfiguring).not.toBe(true)
   })
 
   it('should throw CONNECTION_RESET_ERROR on second consecutive reset', async () => {
@@ -138,5 +141,38 @@ describe('invokeWsmanCall CONNECTION_RESET_ERROR retry', () => {
     expect(initialCloseSpy).toHaveBeenCalled()
     // New tunnel was created on retry
     expect(mockConnect).toHaveBeenCalled()
+  })
+
+  it('should retry TLS tunnel connect failures while AMT is still reconfiguring', async () => {
+    devices[clientId].tlsTunnelManager = undefined
+    devices[clientId].tlsTunnelSessionId = undefined
+    devices[clientId].tlsTunnelNeedsReset = true
+    devices[clientId].amtReconfiguring = true
+
+    mockConnect.mockRejectedValueOnce(new Error('AMT TLS stack not ready'))
+    mockConnect.mockResolvedValueOnce(undefined)
+    mockSend = vi.fn<any>().mockImplementation(async () => {
+      queueMicrotask(() => {
+        devices[clientId].resolve({ retried: 'after-connect-failure' })
+      })
+    })
+
+    const result = await invokeWsmanCall(context)
+
+    expect(result).toEqual({ retried: 'after-connect-failure' })
+    expect(mockConnect).toHaveBeenCalledTimes(2)
+    expect(devices[clientId].amtReconfiguring).toBe(false)
+  })
+
+  it('should stop retrying TLS tunnel connect failures after the retry budget is exhausted', async () => {
+    devices[clientId].tlsTunnelManager = undefined
+    devices[clientId].tlsTunnelSessionId = undefined
+    devices[clientId].tlsTunnelNeedsReset = true
+    devices[clientId].amtReconfiguring = true
+
+    mockConnect.mockRejectedValue(new Error('AMT TLS stack not ready'))
+
+    await expect(invokeWsmanCall(context)).rejects.toBeInstanceOf(TLS_TUNNEL_ERROR)
+    expect(mockConnect).toHaveBeenCalledTimes(3)
   })
 })
