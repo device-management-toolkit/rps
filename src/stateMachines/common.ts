@@ -286,16 +286,18 @@ const invokeWsmanCall = async <T>(context: any, maxRetries = 0, timeoutMs?: numb
   // If AMT is reconfiguring (connection_reset received), wait BEFORE starting the operation.
   // This must happen outside the timeout race so the wait doesn't count against operation timeout.
   if (clientObj?.amtReconfiguring === true) {
-    const delaySeconds = Environment.Config.delay_tls_timer ?? 30
+    const delaySeconds = Environment.Config.delay_tls_timer
     invokeWsmanLogger.info(`Waiting ${delaySeconds}s for AMT TLS reconfiguration...`)
     await new Promise((resolve) => setTimeout(resolve, delaySeconds * 1000))
     clientObj.amtReconfiguring = false
   }
 
-  let retries = 0
-  let connectionResetRetries = 0
+  let retriesUsed = 0
+  const maxAttempts = Math.max(maxRetries + 1, Environment.Config.wsman_max_attempts)
   const timeoutValue = timeoutMs ?? Environment.Config.delay_timer * 1000
-  while (retries <= maxRetries) {
+  const retryDelayMs = Environment.Config.delay_tls_timer * 1000
+
+  while (retriesUsed < maxAttempts) {
     try {
       const result = await Promise.race([
         invokeWsmanCallInternal<T>(context),
@@ -320,22 +322,48 @@ const invokeWsmanCall = async <T>(context: any, maxRetries = 0, timeoutMs?: numb
         }
       }
 
-      // CONNECTION_RESET_ERROR means AMT restarted (e.g., after CommitChanges).
-      // Wait for AMT to stabilize and retry the operation (up to 2 times).
-      if (error instanceof CONNECTION_RESET_ERROR && connectionResetRetries < 2) {
-        connectionResetRetries++
-        const delaySeconds = Environment.Config.delay_tls_timer ?? 30
-        invokeWsmanLogger.info(
-          `Connection reset during TLS operation (attempt ${connectionResetRetries}/2), waiting ${delaySeconds}s before retry...`
-        )
-        await new Promise((resolve) => setTimeout(resolve, delaySeconds * 1000))
-        clientObj.amtReconfiguring = false
+      const isRetryableError =
+        error instanceof UNEXPECTED_PARSE_ERROR ||
+        error instanceof CONNECTION_RESET_ERROR ||
+        error instanceof TLS_TUNNEL_ERROR ||
+        error instanceof GATEWAY_TIMEOUT_ERROR
+
+      if (isRetryableError && retriesUsed < maxAttempts - 1) {
+        retriesUsed++
+        const errorType = (error as any)?.constructor?.name ?? typeof error
+        const shouldDelay =
+          error instanceof CONNECTION_RESET_ERROR ||
+          error instanceof TLS_TUNNEL_ERROR ||
+          error instanceof GATEWAY_TIMEOUT_ERROR ||
+          clientObj?.amtReconfiguring === true
+
+        if (shouldDelay) {
+          const configuredDelaySeconds = Environment.Config.delay_tls_timer
+          invokeWsmanLogger.info(
+            `Retryable WSMAN error (${errorType}); retry ${retriesUsed}/${maxAttempts - 1}, waiting ${configuredDelaySeconds}s (${retryDelayMs}ms) before retry... (Error: ${(error as any)?.message})`
+          )
+          await new Promise((resolve) => setTimeout(resolve, retryDelayMs))
+          clientObj.amtReconfiguring = false
+        } else {
+          invokeWsmanLogger.warn(
+            `Retryable WSMAN error (${errorType}); retry ${retriesUsed}/${maxAttempts - 1} without delay... (Error: ${(error as any)?.message})`
+          )
+        }
+
         continue
       }
 
-      if (error instanceof UNEXPECTED_PARSE_ERROR && retries < maxRetries) {
-        retries++
-        invokeWsmanLogger.warn(`Retrying due to parse error... Attempt ${retries}`)
+      if (isRetryableError && retriesUsed >= maxAttempts - 1) {
+        const errorType = (error as any)?.constructor?.name ?? typeof error
+        const tunnelState = clientObj?.tlsTunnelManager != null ? 'present' : 'none'
+        const sessionId = clientObj?.tlsTunnelSessionId ?? 'none'
+        invokeWsmanLogger.error(
+          `Max WSMAN attempts (${maxAttempts}) exhausted for device ${clientId}. Error: ${(error as any)?.message}`
+        )
+        invokeWsmanLogger.error(
+          `WSMAN final failure context: attempts=${maxAttempts}, retriesUsed=${retriesUsed}, errorType=${errorType}, tunnelState=${tunnelState}, sessionId=${sessionId}, tunnelNeedsReset=${clientObj?.tlsTunnelNeedsReset === true}, amtReconfiguring=${clientObj?.amtReconfiguring === true}`
+        )
+        throw error
       } else {
         throw error
       }

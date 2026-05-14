@@ -35,6 +35,7 @@ export const config: RPSConfig = {
   mps_server: 'https://localhost:3000',
   delay_timer: 1,
   delay_tls_timer: 20,
+  wsman_max_attempts: 3,
   delay_activation_sync: 1,
   delay_setup_and_config_sync: 1,
   delay_tls_put_data_sync: 1,

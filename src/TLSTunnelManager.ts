@@ -217,6 +217,18 @@ export class TLSTunnelManager {
 
   private async connectAttempt(useLegacyProfile: boolean): Promise<void> {
     return await new Promise((resolve, reject) => {
+      let settled = false
+      const settleReject = (err: Error): void => {
+        if (settled) return
+        settled = true
+        reject(err)
+      }
+      const settleResolve = (): void => {
+        if (settled) return
+        settled = true
+        resolve()
+      }
+
       logger.debug(
         `TLS connect attempt: profile=${useLegacyProfile ? 'legacy-compat' : 'modern-default'}, rejectUnauthorized=${this.rejectUnauthorized}, session=${this.sessionId}`
       )
@@ -251,9 +263,7 @@ export class TLSTunnelManager {
             logger.error(`TLS custom verification failed: ${verifyResult.reason}`)
             this.logTLSDiagnostics(this.tlsSocket!, err)
             this.tlsSocket?.destroy(err)
-            if (!this.connected) {
-              reject(err)
-            }
+            settleReject(err)
             return
           }
           logger.debug(`TLS custom verification succeeded: ${verifyResult.reason}`)
@@ -261,20 +271,20 @@ export class TLSTunnelManager {
 
         this.connected = true
         this.logNegotiatedTLSDetails()
-        resolve()
+        settleResolve()
       })
 
       this.tlsSocket.on('error', (err: Error) => {
         logger.error(`TLS error: ${err.message}`)
         this.logTLSDiagnostics(this.tlsSocket!, err)
         if (!this.connected) {
-          reject(err)
+          settleReject(err)
         }
       })
 
       this.tlsSocket.on('close', () => {
         if (!this.connected && !this.intentionalClose) {
-          reject(new Error('TLS tunnel closed before handshake completed'))
+          settleReject(new Error('TLS tunnel closed before handshake completed'))
         }
         this.connected = false
       })
