@@ -15,10 +15,10 @@ import { CONNECTION_RESET_ERROR, TLS_TUNNEL_ERROR } from '../utils/constants.js'
 Environment.Config = config
 
 // Mock TLSTunnelManager so retry path can create a new tunnel
-const mockConnect = vi.hoisted(() => vi.fn<any>().mockResolvedValue(undefined))
+const mockConnect = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 const mockOnData = vi.hoisted(() => vi.fn())
 const mockClose = vi.hoisted(() => vi.fn())
-let mockSend = vi.fn<any>().mockResolvedValue(undefined)
+let mockSend = vi.fn().mockResolvedValue(undefined)
 
 vi.mock('../TLSTunnelManager.js', () => ({
   TLSTunnelManager: vi.fn().mockImplementation(function () {
@@ -90,7 +90,7 @@ describe('invokeWsmanCall CONNECTION_RESET_ERROR retry', () => {
     })
 
     // Retry call: mocked TLSTunnelManager's send triggers success
-    mockSend = vi.fn<any>().mockImplementation(async () => {
+    mockSend = vi.fn().mockImplementation(async () => {
       queueMicrotask(() => {
         devices[clientId].resolve({ retried: true })
       })
@@ -110,7 +110,7 @@ describe('invokeWsmanCall CONNECTION_RESET_ERROR retry', () => {
       })
     })
 
-    mockSend = vi.fn<any>().mockImplementation(async () => {
+    mockSend = vi.fn().mockImplementation(async () => {
       queueMicrotask(() => {
         devices[clientId].reject(new CONNECTION_RESET_ERROR())
       })
@@ -129,7 +129,7 @@ describe('invokeWsmanCall CONNECTION_RESET_ERROR retry', () => {
     })
 
     // Retry succeeds
-    mockSend = vi.fn<any>().mockImplementation(async () => {
+    mockSend = vi.fn().mockImplementation(async () => {
       queueMicrotask(() => {
         devices[clientId].resolve({ success: true })
       })
