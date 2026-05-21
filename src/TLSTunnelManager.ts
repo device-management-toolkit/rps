@@ -37,6 +37,7 @@ export class TLSTunnelManager {
   private flushPending = false
   private peerChainDer: Buffer[] = []
   private allowPostCcmTransitionSelfSigned: boolean
+  private diagnosticsLoggedForAttempt = false
 
   constructor(
     clientSocket: Server,
@@ -217,6 +218,8 @@ export class TLSTunnelManager {
 
   private async connectAttempt(useLegacyProfile: boolean): Promise<void> {
     return await new Promise((resolve, reject) => {
+      this.diagnosticsLoggedForAttempt = false
+
       let settled = false
       const settleReject = (err: Error): void => {
         if (settled) return
@@ -261,7 +264,7 @@ export class TLSTunnelManager {
           if (!verifyResult.ok) {
             const err = new Error(verifyResult.reason)
             logger.error(`TLS custom verification failed: ${verifyResult.reason}`)
-            this.logTLSDiagnostics(this.tlsSocket!, err)
+            this.logTLSDiagnosticsOnce(this.tlsSocket!, err)
             this.tlsSocket?.destroy(err)
             settleReject(err)
             return
@@ -276,7 +279,7 @@ export class TLSTunnelManager {
 
       this.tlsSocket.on('error', (err: Error) => {
         logger.error(`TLS error: ${err.message}`)
-        this.logTLSDiagnostics(this.tlsSocket!, err)
+        this.logTLSDiagnosticsOnce(this.tlsSocket!, err)
         if (!this.connected) {
           settleReject(err)
         }
@@ -406,6 +409,7 @@ export class TLSTunnelManager {
   private logTLSDiagnostics(socket: tls.TLSSocket, err: Error): void {
     try {
       logger.error(`TLS diagnostics for session ${this.sessionId}:`)
+      logger.error(`  trigger error: ${err.message}`)
       logger.error(`  rejectUnauthorized: ${this.rejectUnauthorized}`)
       logger.error(`  authorized: ${socket.authorized}`)
       logger.error(`  authorizationError: ${socket.authorizationError ?? 'none'}`)
@@ -439,6 +443,23 @@ export class TLSTunnelManager {
         logger.error(`  peer certificate: not available (handshake may not have completed)`)
       }
 
+      const peerChain = this.getBestEffortPeerChain(socket)
+      logger.error(
+        `  peer chain certificates: ${peerChain.length} (source: ${this.peerChainDer.length > 0 ? 'captured TLS Certificate message' : 'socket.getPeerCertificate'})`
+      )
+      if (peerChain.length === 0) {
+        logger.error('    chain unavailable')
+      } else {
+        for (let i = 0; i < peerChain.length; i++) {
+          const cert = peerChain[i]
+          logger.error(
+            `    chain[${i}] fp256=${cert.fingerprint256}, subject=${cert.subject.replace(/\n/g, ' ')}, issuer=${cert.issuer.replace(/\n/g, ' ')}, validTo=${cert.validTo}, isCA=${cert.ca}`
+          )
+        }
+      }
+
+      this.logTopChainSignerDiagnostics(peerChain)
+
       // Log the CA certs we're trusting
       const effectiveCa = this.caCerts != null ? this.caCerts : AMT_ODCA_ROOT_CERTS
       const caCount = Array.isArray(effectiveCa) ? effectiveCa.length : 1
@@ -447,6 +468,106 @@ export class TLSTunnelManager {
       )
     } catch (diagErr) {
       logger.error(`  diagnostics collection failed: ${(diagErr as Error).message}`)
+    }
+  }
+
+  private logTLSDiagnosticsOnce(socket: tls.TLSSocket, err: Error): void {
+    if (this.diagnosticsLoggedForAttempt) {
+      return
+    }
+    this.diagnosticsLoggedForAttempt = true
+    this.logTLSDiagnostics(socket, err)
+  }
+
+  private getBestEffortPeerChain(socket: tls.TLSSocket): crypto.X509Certificate[] {
+    if (this.peerChainDer.length > 0) {
+      try {
+        return this.peerChainDer.map((der) => new crypto.X509Certificate(der))
+      } catch (err) {
+        logger.error(`  captured peer chain parse failed: ${(err as Error).message}`)
+      }
+    }
+    return this.extractChainFromPeerCertificate(socket)
+  }
+
+  private getTrustedCaCertificates(): crypto.X509Certificate[] {
+    const effectiveCa = this.caCerts != null ? ensurePemCertificate(this.caCerts) : AMT_ODCA_ROOT_CERTS
+    const caEntries = Array.isArray(effectiveCa) ? effectiveCa : this.splitPemBundle(effectiveCa)
+    const trusted: crypto.X509Certificate[] = []
+    for (let i = 0; i < caEntries.length; i++) {
+      try {
+        trusted.push(new crypto.X509Certificate(caEntries[i]))
+      } catch (err) {
+        logger.error(`  trusted CA[${i}] parse failed during diagnostics: ${(err as Error).message}`)
+      }
+    }
+    return trusted
+  }
+
+  private isSelfIssuedCert(cert: crypto.X509Certificate): boolean {
+    if (cert.subject !== cert.issuer) {
+      return false
+    }
+    try {
+      return cert.verify(cert.publicKey)
+    } catch {
+      return false
+    }
+  }
+
+  private normalizeFingerprint(fp: string | undefined): string {
+    return (fp ?? '').replace(/[^a-fA-F0-9]/g, '').toUpperCase()
+  }
+
+  private fingerprintMatches(left: string | undefined, right: string | undefined): boolean {
+    const a = this.normalizeFingerprint(left)
+    const b = this.normalizeFingerprint(right)
+    return a.length > 0 && b.length > 0 && a === b
+  }
+
+  private logTopChainSignerDiagnostics(peerChain: crypto.X509Certificate[]): void {
+    if (peerChain.length === 0) {
+      return
+    }
+
+    const top = peerChain[peerChain.length - 1]
+    logger.error(
+      `  top chain cert: fp256=${top.fingerprint256}, subject=${top.subject.replace(/\n/g, ' ')}, issuer=${top.issuer.replace(/\n/g, ' ')}, validTo=${top.validTo}, isCA=${top.ca}`
+    )
+
+    const trustedRoots = this.getTrustedCaCertificates()
+    if (trustedRoots.length === 0) {
+      logger.error('  top chain signer candidates: unavailable (no trusted CA certs could be parsed)')
+      return
+    }
+
+    let signerIndex = 0
+    for (const root of trustedRoots) {
+      const exactMatch = this.fingerprintMatches(top.fingerprint256, root.fingerprint256)
+      let signatureValid = false
+
+      if (!exactMatch) {
+        try {
+          signatureValid = top.verify(root.publicKey)
+        } catch {
+          signatureValid = false
+        }
+      }
+
+      if (!exactMatch && !signatureValid) {
+        continue
+      }
+
+      logger.error(
+        `    top signer[${signerIndex}] relation=${exactMatch ? 'exact-root-match' : 'signed-by-root-public-key'}, fp256=${root.fingerprint256}, subject=${root.subject.replace(/\n/g, ' ')}, issuer=${root.issuer.replace(/\n/g, ' ')}, validTo=${root.validTo}, isCA=${root.ca}`
+      )
+      signerIndex++
+    }
+
+    if (signerIndex === 0) {
+      logger.error(
+        `  top chain signer candidates: none matched in trusted CA set (${trustedRoots.length} candidate(s), top issuer=${top.issuer.replace(/\n/g, ' ')})`
+      )
     }
   }
 
@@ -462,16 +583,7 @@ export class TLSTunnelManager {
    * INVALID_PURPOSE despite a cryptographically valid chain.
    */
   private verifyAmtChainAgainstODCA(socket: tls.TLSSocket): { ok: boolean; reason: string } {
-    let chain: crypto.X509Certificate[]
-    if (this.peerChainDer.length > 0) {
-      try {
-        chain = this.peerChainDer.map((der) => new crypto.X509Certificate(der))
-      } catch (err) {
-        return { ok: false, reason: `failed to parse captured peer chain: ${(err as Error).message}` }
-      }
-    } else {
-      chain = this.extractChainFromPeerCertificate(socket)
-    }
+    const chain = this.getBestEffortPeerChain(socket)
 
     if (chain.length === 0) {
       return { ok: false, reason: 'peer certificate chain not available after handshake' }
@@ -517,8 +629,28 @@ export class TLSTunnelManager {
     }
 
     const topCert = chain[chain.length - 1]
+    const topLooksSelfIssued = this.isSelfIssuedCert(topCert)
+
+    // If the peer presents a self-issued top certificate, treat that as an explicit
+    // root presentation and require an exact trusted-root fingerprint match.
+    if (topLooksSelfIssued) {
+      for (const root of trustedRoots) {
+        if (this.fingerprintMatches(topCert.fingerprint256, root.fingerprint256)) {
+          return {
+            ok: true,
+            reason: `presented root matches trusted ODCA root (fp=${root.fingerprint256})`
+          }
+        }
+      }
+
+      return {
+        ok: false,
+        reason: `presented root is not in trusted ODCA roots (${trustedRoots.length} root(s) checked, top subject=${topCert.subject.replace(/\n/g, ' ')})`
+      }
+    }
+
     for (const root of trustedRoots) {
-      if (topCert.fingerprint256 === root.fingerprint256) {
+      if (this.fingerprintMatches(topCert.fingerprint256, root.fingerprint256)) {
         return {
           ok: true,
           reason: `chain terminates at trusted ODCA root (fp=${root.fingerprint256})`
