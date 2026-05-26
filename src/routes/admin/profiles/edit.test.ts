@@ -208,6 +208,161 @@ describe('AMT Profile - Edit', () => {
     expect(resSpy.json).toHaveBeenCalledWith(amtConfig)
     expect(writeSecretWithObjectSpy).toHaveBeenCalledTimes(1)
   })
+  it('should refuse update and not touch vault when stored credentials are unreadable', async () => {
+    req.secretsManager = {
+      writeSecretWithObject: vi.fn(),
+      getSecretAtPath: vi.fn(),
+      deleteSecretAtPath: vi.fn()
+    }
+    const getSecretAtPathSpy = vi.spyOn(req.secretsManager, 'getSecretAtPath').mockResolvedValue(null)
+    const writeSpy = vi.spyOn(req.secretsManager, 'writeSecretWithObject')
+    const deleteSpy = vi.spyOn(req.secretsManager, 'deleteSecretAtPath')
+    const updateSpy = vi.spyOn(req.db.profiles, 'update')
+    req.body = {
+      profileName: 'static',
+      activation: ClientAction.ADMINCTLMODE,
+      generateRandomPassword: false,
+      generateRandomMEBxPassword: false,
+      version: '1'
+    }
+    vi.spyOn(req.db.profiles, 'getByName').mockResolvedValue({
+      profileName: 'static',
+      activation: ClientAction.ADMINCTLMODE,
+      generateRandomPassword: false,
+      generateRandomMEBxPassword: false,
+      version: '1'
+    })
+    await editProfile(req, resSpy)
+    expect(getSecretAtPathSpy).toHaveBeenCalledWith('profiles/static')
+    expect(updateSpy).not.toHaveBeenCalled()
+    expect(deleteSpy).not.toHaveBeenCalled()
+    expect(writeSpy).not.toHaveBeenCalled()
+    expect(resSpy.status).not.toHaveBeenCalledWith(200)
+  })
+  it('should refuse update when the stored secret is missing a required password field', async () => {
+    req.secretsManager = {
+      writeSecretWithObject: vi.fn(),
+      getSecretAtPath: vi.fn(),
+      deleteSecretAtPath: vi.fn()
+    }
+    const getSecretAtPathSpy = vi
+      .spyOn(req.secretsManager, 'getSecretAtPath')
+      .mockResolvedValue({ AMT_PASSWORD: 'RealP@ssw0rd' })
+    const writeSpy = vi.spyOn(req.secretsManager, 'writeSecretWithObject')
+    const updateSpy = vi.spyOn(req.db.profiles, 'update')
+    req.body = {
+      profileName: 'static',
+      activation: ClientAction.ADMINCTLMODE,
+      generateRandomPassword: false,
+      generateRandomMEBxPassword: false,
+      version: '1'
+    }
+    vi.spyOn(req.db.profiles, 'getByName').mockResolvedValue({
+      profileName: 'static',
+      activation: ClientAction.ADMINCTLMODE,
+      generateRandomPassword: false,
+      generateRandomMEBxPassword: false,
+      version: '1'
+    })
+    await editProfile(req, resSpy)
+    expect(getSecretAtPathSpy).toHaveBeenCalledWith('profiles/static')
+    expect(updateSpy).not.toHaveBeenCalled()
+    expect(writeSpy).not.toHaveBeenCalled()
+    expect(resSpy.status).not.toHaveBeenCalledWith(200)
+  })
+  it('should reject switching to ACM without a MEBx password available', async () => {
+    // CCM->ACM with no MEBx (none stored, not random) must be rejected, not stored empty.
+    req.secretsManager = {
+      writeSecretWithObject: vi.fn(),
+      getSecretAtPath: vi.fn(),
+      deleteSecretAtPath: vi.fn()
+    }
+    const getSecretAtPathSpy = vi.spyOn(req.secretsManager, 'getSecretAtPath')
+    const updateSpy = vi.spyOn(req.db.profiles, 'update')
+    req.body = {
+      profileName: 'wasCCM',
+      activation: ClientAction.ADMINCTLMODE,
+      generateRandomPassword: false,
+      generateRandomMEBxPassword: false,
+      version: '1'
+    }
+    vi.spyOn(req.db.profiles, 'getByName').mockResolvedValue({
+      profileName: 'wasCCM',
+      activation: ClientAction.CLIENTCTLMODE,
+      generateRandomPassword: false,
+      generateRandomMEBxPassword: false,
+      version: '1'
+    })
+    await editProfile(req, resSpy)
+    expect(getSecretAtPathSpy).not.toHaveBeenCalled()
+    expect(updateSpy).not.toHaveBeenCalled()
+    expect(resSpy.status).not.toHaveBeenCalledWith(200)
+  })
+  it('should not read or refuse on Vault when a CCM/random-password profile is edited without passwords', async () => {
+    // Regression: field-only PATCH on a random/CCM profile must not read-and-refuse on null Vault.
+    req.secretsManager = {
+      writeSecretWithObject: vi.fn(),
+      getSecretAtPath: vi.fn(),
+      deleteSecretAtPath: vi.fn()
+    }
+    const getSecretAtPathSpy = vi.spyOn(req.secretsManager, 'getSecretAtPath').mockResolvedValue(null)
+    vi.spyOn(req.secretsManager, 'writeSecretWithObject').mockResolvedValue({})
+    vi.spyOn(req.secretsManager, 'deleteSecretAtPath').mockResolvedValue(null)
+    req.body = {
+      profileName: 'random',
+      activation: ClientAction.CLIENTCTLMODE,
+      tags: ['tag123'],
+      generateRandomPassword: false,
+      generateRandomMEBxPassword: false,
+      version: '1'
+    }
+    vi.spyOn(req.db.profiles, 'getByName').mockResolvedValue({
+      profileName: 'random',
+      activation: ClientAction.CLIENTCTLMODE,
+      amtPassword: null,
+      mebxPassword: null,
+      generateRandomPassword: true,
+      generateRandomMEBxPassword: true,
+      version: '1'
+    })
+    vi.spyOn(req.db.profiles, 'update').mockResolvedValue({ profileName: 'random', version: '2' })
+    await editProfile(req, resSpy)
+    expect(getSecretAtPathSpy).not.toHaveBeenCalled()
+    expect(resSpy.status).toHaveBeenCalledWith(200)
+  })
+  it('should preserve stored static passwords when PATCH omits them', async () => {
+    req.secretsManager = {
+      writeSecretWithObject: vi.fn(),
+      getSecretAtPath: vi.fn(),
+      deleteSecretAtPath: vi.fn()
+    }
+    const getSecretAtPathSpy = vi
+      .spyOn(req.secretsManager, 'getSecretAtPath')
+      .mockResolvedValue({ AMT_PASSWORD: 'RealP@ssw0rd', MEBX_PASSWORD: 'RealM3bx!42' })
+    const writeSpy = vi.spyOn(req.secretsManager, 'writeSecretWithObject').mockResolvedValue({})
+    req.body = {
+      profileName: 'static',
+      activation: ClientAction.ADMINCTLMODE,
+      generateRandomPassword: false,
+      generateRandomMEBxPassword: false,
+      version: '1'
+    }
+    vi.spyOn(req.db.profiles, 'getByName').mockResolvedValue({
+      profileName: 'static',
+      activation: ClientAction.ADMINCTLMODE,
+      generateRandomPassword: false,
+      generateRandomMEBxPassword: false,
+      version: '1'
+    })
+    vi.spyOn(req.db.profiles, 'update').mockResolvedValue({ profileName: 'static', version: '2' })
+    await editProfile(req, resSpy)
+    expect(getSecretAtPathSpy).toHaveBeenCalledWith('profiles/static')
+    expect(writeSpy).toHaveBeenCalledWith('profiles/static', {
+      AMT_PASSWORD: 'RealP@ssw0rd',
+      MEBX_PASSWORD: 'RealM3bx!42'
+    })
+    expect(resSpy.status).toHaveBeenCalledWith(200)
+  })
 })
 
 test('test handleAMTpassword when the request body amtPassword is null or undefined', () => {
