@@ -1,3 +1,10 @@
+## [2.36.4](https://github.com/device-management-toolkit/rps/compare/v2.36.3...v2.36.4) (2026-05-26)
+
+
+### Bug Fixes
+
+* **api:** allow profile PATCH without passwords ([#2715](https://github.com/device-management-toolkit/rps/issues/2715)) ([7d77f64](https://github.com/device-management-toolkit/rps/commit/7d77f641e5a50cd2a384f145d5d6f4149fd0221e))
+
 ## [2.36.3](https://github.com/device-management-toolkit/rps/compare/v2.36.2...v2.36.3) (2026-05-11)
 
 

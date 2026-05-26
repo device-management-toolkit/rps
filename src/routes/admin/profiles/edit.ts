@@ -4,7 +4,7 @@
  **********************************************************************/
 
 import Logger from '../../../Logger.js'
-import { NOT_FOUND_EXCEPTION, NOT_FOUND_MESSAGE } from '../../../utils/constants.js'
+import { API_UNEXPECTED_EXCEPTION, NOT_FOUND_EXCEPTION, NOT_FOUND_MESSAGE } from '../../../utils/constants.js'
 import { type AMTConfiguration } from '../../../models/index.js'
 import {
   ClientAction,
@@ -35,8 +35,61 @@ export async function editProfile(req: Request, res: Response): Promise<void> {
       amtConfig.wifiConfigs = await handleWifiConfigs(newConfig, oldConfig, req.db.profileWirelessConfigs)
       amtConfig.proxyConfigs = await handleProxyConfigs(newConfig, oldConfig, req.db.profileProxyConfigs)
       // Assigning value key value for AMT Random Password and MEBx Random Password to store in database
-      const amtPwdBefore = amtConfig.amtPassword ?? ''
-      const mebxPwdBefore = amtConfig.mebxPassword ?? ''
+      let amtPwdBefore = amtConfig.amtPassword ?? ''
+      let mebxPwdBefore = amtConfig.mebxPassword ?? ''
+      const hasStoredAmtSecret = oldConfig.generateRandomPassword === false
+      const hasStoredMebxSecret =
+        oldConfig.generateRandomMEBxPassword === false && oldConfig.activation === ClientAction.ADMINCTLMODE
+      // ACM needs a MEBx: provided, random, or already stored.
+      if (
+        amtConfig.activation === ClientAction.ADMINCTLMODE &&
+        !amtConfig.generateRandomMEBxPassword &&
+        newConfig.mebxPassword == null &&
+        !hasStoredMebxSecret
+      ) {
+        throw new RPSError(`MEBx password is required for ${ClientAction.ADMINCTLMODE}`)
+      }
+      // Password omitted: preserve the stored one, but only if the old profile had it.
+      const needsStoredAmt = newConfig.amtPassword == null && !amtConfig.generateRandomPassword && hasStoredAmtSecret
+      const needsStoredMebx =
+        newConfig.mebxPassword == null &&
+        !amtConfig.generateRandomMEBxPassword &&
+        hasStoredMebxSecret &&
+        amtConfig.activation === ClientAction.ADMINCTLMODE
+      if (req.secretsManager && (needsStoredAmt || needsStoredMebx)) {
+        const stored = (await req.secretsManager.getSecretAtPath(
+          `profiles/${oldConfig.profileName}`
+        )) as DeviceCredentials | null
+        // null = secret genuinely absent (errors already threw). Refuse rather than
+        // write the DB placeholder literal over the real password.
+        if (stored == null) {
+          throw new RPSError(
+            API_UNEXPECTED_EXCEPTION(
+              `reading stored credentials for profile ${oldConfig.profileName}; refusing to overwrite secret with placeholder`
+            )
+          )
+        }
+        if (needsStoredAmt) {
+          if (stored.AMT_PASSWORD == null) {
+            throw new RPSError(
+              API_UNEXPECTED_EXCEPTION(
+                `stored credentials for profile ${oldConfig.profileName} are missing AMT_PASSWORD; refusing to overwrite secret with placeholder`
+              )
+            )
+          }
+          amtPwdBefore = stored.AMT_PASSWORD
+        }
+        if (needsStoredMebx) {
+          if (stored.MEBX_PASSWORD == null) {
+            throw new RPSError(
+              API_UNEXPECTED_EXCEPTION(
+                `stored credentials for profile ${oldConfig.profileName} are missing MEBX_PASSWORD; refusing to overwrite secret with placeholder`
+              )
+            )
+          }
+          mebxPwdBefore = stored.MEBX_PASSWORD
+        }
+      }
       if (req.secretsManager) {
         // store the AMT password key into db
         if (!amtConfig.generateRandomPassword) {

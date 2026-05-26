@@ -37,6 +37,7 @@ export interface CertCredentials {
 
 export interface ISecretManagerService {
   getSecretFromKey: (path: string, key: string) => Promise<string | null>
+  // null only when the secret is absent (404); transport/server errors throw.
   getSecretAtPath: (
     path: string
   ) => Promise<DeviceCredentials | WifiCredentials | TLSCredentials | CertCredentials | CiraConfigSecrets | null>
