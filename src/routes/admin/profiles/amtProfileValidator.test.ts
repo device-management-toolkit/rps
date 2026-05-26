@@ -74,6 +74,18 @@ describe('AMT Profile Validation', () => {
       expect(errMap.tlsMode).toBeTruthy()
       expect(errMap.tlsSigningAuthority).toBeTruthy()
     })
+    it('should fail on creation when amtPassword is omitted and generateRandomPassword is false', async () => {
+      delete req.body.amtPassword
+      await testExpressValidatorMiddleware(req, res, amtProfileValidator())
+      const errors = validationResult(req)
+      expect(errors.mapped().generateRandomPassword).toBeTruthy()
+    })
+    it('should fail on creation in ACM when mebxPassword is omitted and generateRandomMEBxPassword is false', async () => {
+      delete req.body.mebxPassword
+      await testExpressValidatorMiddleware(req, res, amtProfileValidator())
+      const errors = validationResult(req)
+      expect(errors.mapped().generateRandomMEBxPassword).toBeTruthy()
+    })
   })
   describe('Update', () => {
     it('should pass on update happy path', async () => {
@@ -96,6 +108,39 @@ describe('AMT Profile Validation', () => {
       const errMap = errors.mapped()
       expect(errMap.tlsMode).toBeTruthy()
       expect(errMap.tlsSigningAuthority).toBeTruthy()
+    })
+    it('should pass on update when amtPassword and mebxPassword are omitted', async () => {
+      delete req.body.amtPassword
+      delete req.body.mebxPassword
+      await testExpressValidatorMiddleware(req, res, profileUpdateValidator())
+      const errors = validationResult(req)
+      expect(errors.isEmpty()).toBeTruthy()
+    })
+    it('should fail on update when an invalid amtPassword is provided', async () => {
+      req.body.amtPassword = 'weak'
+      await testExpressValidatorMiddleware(req, res, profileUpdateValidator())
+      const errors = validationResult(req)
+      expect(errors.mapped().amtPassword).toBeTruthy()
+    })
+    it('should fail on update when an invalid mebxPassword is provided', async () => {
+      req.body.mebxPassword = 'weak'
+      await testExpressValidatorMiddleware(req, res, profileUpdateValidator())
+      const errors = validationResult(req)
+      expect(errors.mapped().mebxPassword).toBeTruthy()
+    })
+    it('should pass on update when amtPassword and mebxPassword are explicitly null', async () => {
+      req.body.amtPassword = null
+      req.body.mebxPassword = null
+      await testExpressValidatorMiddleware(req, res, profileUpdateValidator())
+      const errors = validationResult(req)
+      expect(errors.isEmpty()).toBeTruthy()
+    })
+    it('should fail on update when generateRandomPassword is true and amtPassword is also provided', async () => {
+      req.body.generateRandomPassword = true
+      req.body.amtPassword = 'ABCabc123!@#'
+      await testExpressValidatorMiddleware(req, res, profileUpdateValidator())
+      const errors = validationResult(req)
+      expect(errors.mapped().generateRandomPassword).toBeTruthy()
     })
   })
 })

@@ -5792,21 +5792,22 @@
           "response": []
         },
         {
-          "name": "Update Profile \"profile6\" ccmactivate with password combo false:missing",
+          "name": "Update Profile \"profile6\" ccmactivate succeeds without passwords",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
-                  "pm.test(\"Status code is 400\", function () {\r",
-                  "    pm.response.to.have.status(400);\r",
+                  "var responseBody = pm.response.json();\r",
+                  "pm.globals.set(\"profile6Version\", responseBody.version);\r",
+                  "\r",
+                  "pm.test(\"Status code is 200\", function () {\r",
+                  "    pm.response.to.have.status(200);\r",
                   "});\r",
                   "\r",
-                  "pm.test(\"Request fail\", function () {\r",
-                  "     var result = pm.response.json();\r",
-                  "    pm.expect(result.errors[0].msg).to.eql(\"Either generateRandomPassword should be enabled or provide amtPassword\")\r",
-                  "    pm.expect(result.errors[0].path).to.eql(\"activation\")\r",
-                  "    pm.expect(result.errors[0].location).to.eql(\"body\")\r",
+                  "pm.test(\"PATCH succeeds when passwords are omitted\", function () {\r",
+                  "    pm.expect(responseBody.profileName).to.eql(\"profile6\")\r",
+                  "    pm.expect(responseBody.activation).to.eql(\"ccmactivate\")\r",
                   "});"
                 ],
                 "type": "text/javascript"
@@ -6202,24 +6203,19 @@
           "response": []
         },
         {
-          "name": "Update Profile \"profile6\" activation to acmactivate without mebx password",
+          "name": "Update Profile \"profile6\" activation to acmactivate without mebx password is rejected",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
+                  "var responseBody = pm.response.json();\r",
+                  "\r",
                   "pm.test(\"Status code is 400\", function () {\r",
                   "    pm.response.to.have.status(400);\r",
                   "});\r",
-                  "pm.test(\"Creation should fail when payload contains acmactivate without mebx password\", function () {\r",
-                  "    var result = pm.response.json();\r",
-                  "    pm.expect(result.errors[0].msg).to.eql(\"Either generateRandomPassword should be enabled or provide amtPassword\")\r",
-                  "    pm.expect(result.errors[0].path).to.eql(\"activation\")\r",
-                  "    pm.expect(result.errors[0].location).to.eql(\"body\")\r",
-                  "\r",
-                  "    pm.expect(result.errors[1].msg).to.eql(\"If generate random AMT password is disabled, amtPassword is mandatory\")\r",
-                  "    pm.expect(result.errors[1].path).to.eql(\"generateRandomPassword\")\r",
-                  "    pm.expect(result.errors[1].location).to.eql(\"body\")\r",
+                  "pm.test(\"ACM requires a MEBx password\", function () {\r",
+                  "    pm.expect(responseBody.message).to.eql(\"MEBx password is required for acmactivate\")\r",
                   "});"
                 ],
                 "type": "text/javascript"
@@ -6237,7 +6233,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\r\n    \"profileName\": \"profile6\",\r\n    \"activation\": \"acmactivate\",\r\n    \"generateRandomPassword\": false,\r\n    \"generateRandomMEBxPassword\": false\r\n}"
+              "raw": "{\r\n    \"profileName\": \"profile6\",\r\n    \"activation\": \"acmactivate\",\r\n    \"generateRandomPassword\": false,\r\n    \"generateRandomMEBxPassword\": false,\r\n    \"version\": {{profile6Version}}\r\n}"
             },
             "url": {
               "raw": "{{protocol}}://{{host}}/api/v1/admin/profiles/",

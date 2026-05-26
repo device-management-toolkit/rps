@@ -9,8 +9,16 @@ import { type ILogger } from '../../interfaces/ILogger.js'
 import { config } from '../../test/helper/Config.js'
 import { Environment } from '../../utils/Environment.js'
 import { type DeviceCredentials } from '../../interfaces/ISecretManagerService.js'
+import { HTTPError } from 'got'
 
 import { vi, type MockInstance } from 'vitest'
+
+const makeHttpError = (statusCode: number): HTTPError => {
+  const err = Object.create(HTTPError.prototype) as HTTPError & { response: any; message: string }
+  err.response = { statusCode }
+  err.message = `Response code ${statusCode}`
+  return err
+}
 let secretManagerService: VaultService = null as any
 Environment.Config = config
 let gotSpy: MockInstance
@@ -71,14 +79,38 @@ it('should get a secret from a specific given path', async () => {
   expect(gotSpy).toHaveBeenCalledWith(secretPath)
 })
 
-it('should throw an exception and return null if given path does not exist', async () => {
-  gotFailSpy = vi.spyOn(secretManagerService.gotClient, 'get')
-  gotFailSpy.mockResolvedValue({
-    json: vi.fn(async () => await Promise.reject(new Error('Not Found')))
-  })
+it('should return null when Vault responds 404 (secret genuinely absent)', async () => {
+  gotFailSpy = vi.spyOn(secretManagerService.gotClient, 'get').mockImplementation(
+    () =>
+      ({
+        json: vi.fn(async () => await Promise.reject(makeHttpError(404)))
+      }) as any
+  )
   const result = await secretManagerService.getSecretAtPath('does/not/exist')
   expect(result).toEqual(null)
   expect(gotFailSpy).toHaveBeenCalledWith('does/not/exist')
+})
+
+it('should throw when Vault responds with a server error (5xx)', async () => {
+  gotFailSpy = vi.spyOn(secretManagerService.gotClient, 'get').mockImplementation(
+    () =>
+      ({
+        json: vi.fn(async () => await Promise.reject(makeHttpError(503)))
+      }) as any
+  )
+  await expect(secretManagerService.getSecretAtPath('transient/failure')).rejects.toMatchObject({
+    response: { statusCode: 503 }
+  })
+})
+
+it('should throw on network/transport errors', async () => {
+  gotFailSpy = vi.spyOn(secretManagerService.gotClient, 'get').mockImplementation(
+    () =>
+      ({
+        json: vi.fn(async () => await Promise.reject(new Error('ECONNRESET')))
+      }) as any
+  )
+  await expect(secretManagerService.getSecretAtPath('any/path')).rejects.toThrow('ECONNRESET')
 })
 
 it('should create a secret', async () => {

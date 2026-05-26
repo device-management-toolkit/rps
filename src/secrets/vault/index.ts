@@ -12,7 +12,7 @@ import {
 } from '../../interfaces/ISecretManagerService.js'
 import { type ILogger } from '../../interfaces/ILogger.js'
 import { Environment } from '../../utils/Environment.js'
-import got, { type Got } from 'got'
+import got, { HTTPError, type Got } from 'got'
 
 export class VaultService implements ISecretManagerService {
   gotClient: Got
@@ -53,9 +53,15 @@ export class VaultService implements ISecretManagerService {
       secretData.version = rspJson.data.metadata.version
       return secretData
     } catch (error) {
+      // 404 means the secret is absent; other errors throw so a Vault hiccup
+      // isn't mistaken for "no secret".
+      if (error instanceof HTTPError && error.response?.statusCode === 404) {
+        this.logger.debug(`secret not found at path: ${path}`)
+        return null
+      }
       this.logger.error('getSecretAtPath error \r\n')
       this.logger.error(error)
-      return null
+      throw error
     }
   }
 

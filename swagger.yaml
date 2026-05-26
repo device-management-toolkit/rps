@@ -520,8 +520,8 @@ paths:
         The profileName can not be changed.
 
         **Version must be provided to ensure the correct profile is edited.**
-          
-        The amtPassword and mebxPassword are stored in a secrets manager and are only used during activation and configuration, respectively, to set these credentials in the AMT device.
+
+        The amtPassword and mebxPassword are stored in a secrets manager and are only used during activation and configuration, respectively, to set these credentials in the AMT device. Both are optional on update - when omitted, the currently stored value is left unchanged. When provided, they must meet the AMT password complexity requirements. Note: acmactivate (admin control mode) requires a mebxPassword - either provide one, enable generateRandomMEBxPassword, or keep an already-stored value; switching to acmactivate without any of these is rejected.
 
         **Warning:** Choosing CIRA or TLS is **highly recommended**. By choosing 'none', an unsecure and unsafe channel is used for communication between the AMT device and MPS and is vulnerable to attacks.  To use neither, set both 'tlsMode' and 'ciraConfigName' to **null**.
       requestBody:

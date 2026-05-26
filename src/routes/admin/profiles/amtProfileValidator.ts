@@ -237,25 +237,9 @@ export const profileUpdateValidator = (): any => [
     .isIn(Object.values(ClientAction))
     .withMessage(
       `Activation accepts either ${ClientAction.ADMINCTLMODE} (admin control activation) or ${ClientAction.CLIENTCTLMODE} (client control mode activation)`
-    )
-    .custom((value, { req }) => {
-      const pwd = req.body.amtPassword
-      const randomPwd = req.body.generateRandomPassword
-      if (pwd == null && !randomPwd) {
-        throw new Error('Either generateRandomPassword should be enabled or provide amtPassword')
-      }
-      const mebxPwd = req.body.mebxPassword
-      const mebxRandomPwd = req.body.generateRandomMEBxPassword
-      if (value === ClientAction.ADMINCTLMODE) {
-        if (mebxPwd == null && !mebxRandomPwd) {
-          throw new Error(`MEBx Password is required for ${ClientAction.ADMINCTLMODE}`)
-        }
-      }
-      return true
-    }),
+    ),
   check('amtPassword')
-    .if((value, { req }) => req.body.generateRandomPassword === false)
-    .optional()
+    .optional({ nullable: true })
     .matches('^(?=.*[0-9])(?=.*[!@#$%^&*])(?=.*[a-z])(?=.*[A-Z])[a-zA-Z0-9$@$!%*#?&-_~^]{8,32}$')
     .withMessage(
       'AMT password is required field should contains at least one lowercase letter, one uppercase letter, one numeric digit,and one special character and password length should be in between 8 to 32.'
@@ -266,21 +250,14 @@ export const profileUpdateValidator = (): any => [
     .withMessage('Generate random AMT password must be a boolean true or false')
     .custom((value, { req }) => {
       const pwd = req.body.amtPassword
-      if (value === true) {
-        if (pwd != null) {
-          throw new Error(
-            'Either generate Random AMT Password should be enabled or should provide AMT Password but not both'
-          )
-        }
-      } else {
-        if (pwd == null) {
-          throw new Error('If generate random AMT password is disabled, amtPassword is mandatory')
-        }
+      if (value === true && pwd != null) {
+        throw new Error(
+          'Either generate Random AMT Password should be enabled or should provide AMT Password but not both'
+        )
       }
       return true
     }),
   check('mebxPassword')
-    .if((value, { req }) => req.body.generateRandomMEBxPassword === false)
     .optional({ nullable: true })
     .matches('^(?=.*[0-9])(?=.*[!@#$%^&*])(?=.*[a-z])(?=.*[A-Z])[a-zA-Z0-9$@$!%*#?&-_~^]{8,32}$')
     .withMessage(
@@ -293,18 +270,8 @@ export const profileUpdateValidator = (): any => [
     .custom((value, { req }) => {
       const pwd = req.body.mebxPassword
       const activationMode = req.body.activation
-      if (activationMode === ClientAction.ADMINCTLMODE) {
-        if (value === true) {
-          if (pwd != null) {
-            throw new Error(
-              'Either generate MEBx password should be enabled or should provide MEBx password, but not both'
-            )
-          }
-        } else {
-          if (pwd == null) {
-            throw new Error('If generate random MEBx password is disabled, mebxPassword is mandatory')
-          }
-        }
+      if (activationMode === ClientAction.ADMINCTLMODE && value === true && pwd != null) {
+        throw new Error('Either generate MEBx password should be enabled or should provide MEBx password, but not both')
       }
       return true
     }),
