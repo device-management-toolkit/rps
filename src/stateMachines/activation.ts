@@ -284,7 +284,8 @@ export class Activation {
         2,
         clientObj.signature
       )
-      return await invokeWsmanCall(input)
+      // One-shot: ACM activation drops the session on success; don't retry (state machine re-checks status).
+      return await invokeWsmanCall(input, 0, undefined, true)
     }
     return null
   }
@@ -300,7 +301,8 @@ export class Activation {
         2,
         clientObj.signature
       )
-      return await invokeWsmanCall(input)
+      // One-shot: CCM->ACM upgrade drops the session on success; don't retry (state machine re-checks status).
+      return await invokeWsmanCall(input, 0, undefined, true)
     }
     return null
   }
