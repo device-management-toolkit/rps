@@ -42,6 +42,32 @@ describe('CIRA Config - Edit', () => {
     expect(getByNameSpy).toHaveBeenCalledWith('profileName', req.tenantId)
     expect(resSpy.status).toHaveBeenCalledWith(200)
   })
+  it('should ignore empty provisioningCert when updating and retain old values', async () => {
+    req.body.provisioningCert = ''
+    req.body.provisioningCertPassword = ''
+
+    vi.spyOn(req.db.domains, 'getByName').mockResolvedValue({
+      profileName: 'profileName',
+      domainSuffix: 'domain.com',
+      provisioningCert: 'oldCert',
+      provisioningCertPassword: 'oldPassword',
+      expirationDate: '2025-01-01T00:00:00Z',
+      tenantId: ''
+    })
+
+    const updateSpy = vi.spyOn(req.db.domains, 'update').mockResolvedValue({})
+
+    await editDomain(req, resSpy)
+
+    expect(updateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provisioningCert: 'oldCert',
+        provisioningCertPassword: 'oldPassword',
+        expirationDate: '2025-01-01T00:00:00Z'
+      })
+    )
+    expect(resSpy.status).toHaveBeenCalledWith(200)
+  })
   it('should handle not found', async () => {
     vi.spyOn(req.db.domains, 'getByName').mockResolvedValue(null)
     await editDomain(req, resSpy)

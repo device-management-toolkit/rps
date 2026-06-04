@@ -40,7 +40,13 @@ export async function editDomain(req: Request, res: Response): Promise<void> {
       const results: AMTDomain | null = await req.db.domains.update(amtDomain)
       if (results) {
         // Delete the previous values of cert and password in vault and store the updated values
-        if (req.secretsManager && (newDomain.provisioningCert != null || newDomain.provisioningCertPassword != null)) {
+        if (
+          req.secretsManager &&
+          newDomain.provisioningCert &&
+          newDomain.provisioningCert !== '' &&
+          newDomain.provisioningCertPassword &&
+          newDomain.provisioningCertPassword !== ''
+        ) {
           const data: CertCredentials = {
             CERT: cert,
             CERT_PASSWORD: domainPwd
@@ -64,13 +70,22 @@ function getUpdatedData(newDomain: any, oldDomain: AMTDomain): AMTDomain {
   const nodeForge = new NodeForge()
   const certManager = new CertManager(new Logger('CertManager'), nodeForge)
   amtDomain.domainSuffix = newDomain.domainSuffix ?? oldDomain.domainSuffix
-  amtDomain.expirationDate =
-    certManager.getExpirationDate(newDomain.provisioningCert, newDomain.provisioningCertPassword) ??
-    oldDomain.expirationDate
-  amtDomain.provisioningCert = newDomain.provisioningCert ?? oldDomain.provisioningCert
+  amtDomain.provisioningCert =
+    newDomain.provisioningCert && newDomain.provisioningCert !== ''
+      ? newDomain.provisioningCert
+      : oldDomain.provisioningCert
   amtDomain.provisioningCertStorageFormat =
     newDomain.provisioningCertStorageFormat ?? oldDomain.provisioningCertStorageFormat
-  amtDomain.provisioningCertPassword = newDomain.provisioningCertPassword ?? oldDomain.provisioningCertPassword
+  amtDomain.provisioningCertPassword =
+    newDomain.provisioningCertPassword && newDomain.provisioningCertPassword !== ''
+      ? newDomain.provisioningCertPassword
+      : oldDomain.provisioningCertPassword
+
+  let expirationDate = oldDomain.expirationDate
+  if (newDomain.provisioningCert && newDomain.provisioningCert !== '') {
+    expirationDate = certManager.getExpirationDate(newDomain.provisioningCert, amtDomain.provisioningCertPassword ?? '')
+  }
+  amtDomain.expirationDate = expirationDate
   amtDomain.tenantId = newDomain.tenantId ?? oldDomain.tenantId
   amtDomain.version = newDomain.version
   return amtDomain
