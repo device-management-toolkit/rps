@@ -136,6 +136,39 @@ describe('Common', () => {
     expect(sendSpy).toHaveBeenCalledTimes(1)
     await expect(wsmanPromise).rejects.toBeInstanceOf(UNEXPECTED_PARSE_ERROR)
   })
+  it('should cap oneShot calls to a single attempt even when wsman_max_attempts > 1', async () => {
+    Environment.Config.wsman_max_attempts = 3
+    sendSpy = vi.spyOn(devices[clientId].ClientSocket, 'send')
+    sendSpy.mockImplementation(async () => devices[clientId].reject(new UNEXPECTED_PARSE_ERROR()))
+    const wsmanPromise = invokeWsmanCall(context, 0, undefined, true)
+    await expect(wsmanPromise).rejects.toBeInstanceOf(UNEXPECTED_PARSE_ERROR)
+    expect(sendSpy).toHaveBeenCalledTimes(1)
+  })
+  it('should honor the wsman_max_attempts floor when oneShot is false', async () => {
+    Environment.Config.wsman_max_attempts = 3
+    sendSpy = vi.spyOn(devices[clientId].ClientSocket, 'send')
+    sendSpy.mockImplementation(async () => devices[clientId].reject(new UNEXPECTED_PARSE_ERROR()))
+    const wsmanPromise = invokeWsmanCall(context)
+    await expect(wsmanPromise).rejects.toBeInstanceOf(UNEXPECTED_PARSE_ERROR)
+    expect(sendSpy).toHaveBeenCalledTimes(3)
+  })
+  it('should not log exhaustion for the expected oneShot timeout', async () => {
+    const errorLogSpy = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => {})
+    const wsmanPromise = invokeWsmanCall(context, 0, undefined, true)
+    vi.advanceTimersByTime(Environment.Config.delay_timer * 1000)
+    await expect(wsmanPromise).rejects.toBeInstanceOf(GATEWAY_TIMEOUT_ERROR)
+    expect(errorLogSpy).not.toHaveBeenCalledWith(expect.stringContaining('Max WSMAN attempts'))
+    errorLogSpy.mockRestore()
+  })
+  it('should log exhaustion for a non-timeout oneShot failure', async () => {
+    const errorLogSpy = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => {})
+    sendSpy = vi.spyOn(devices[clientId].ClientSocket, 'send')
+    sendSpy.mockImplementation(async () => devices[clientId].reject(new UNEXPECTED_PARSE_ERROR()))
+    const wsmanPromise = invokeWsmanCall(context, 0, undefined, true)
+    await expect(wsmanPromise).rejects.toBeInstanceOf(UNEXPECTED_PARSE_ERROR)
+    expect(errorLogSpy).toHaveBeenCalledWith(expect.stringContaining('Max WSMAN attempts'))
+    errorLogSpy.mockRestore()
+  })
   it('should not retry when error is not UNEXPECTED_PARSE_ERROR', async () => {
     const expected = {
       statusCode: 401,
