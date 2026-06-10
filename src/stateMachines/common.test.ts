@@ -18,8 +18,16 @@ import {
   invokeEnterpriseAssistantCall,
   invokeEnterpriseAssistantCallInternal,
   invokeWsmanCall,
-  coalesceMessage
+  coalesceMessage,
+  recordComponentResult,
+  normalizeDetails,
+  deriveControlMode,
+  deriveModeFromCurrentMode,
+  rollUpResult,
+  finalizeComponentResults,
+  updateNetworkStatus
 } from './common.js'
+import { COMPONENTS_VERSION } from '../models/RCS.Config.js'
 
 Environment.Config = config
 describe('Common', () => {
@@ -194,5 +202,199 @@ describe('Common', () => {
     expect(msg).toContain(prefix)
     expect(msg).toContain('Bad Request')
     expect(msg).toContain('400')
+  })
+
+  describe('recordComponentResult', () => {
+    it('should initialize Components and record a result (issue #2665)', () => {
+      devices[clientId].status = { Status: 'Admin control mode.' }
+      recordComponentResult(clientId, 'Activation', {
+        Result: 'Success',
+        Mode: 'ACM'
+      })
+      expect(devices[clientId].status.Components?.Activation).toEqual({
+        Result: 'Success',
+        Mode: 'ACM'
+      })
+    })
+
+    it('should preserve previously recorded components when adding another', () => {
+      devices[clientId].status = { Components: { Activation: { Result: 'Success' } } }
+      recordComponentResult(clientId, 'WirelessNetwork', {
+        Result: 'Failure',
+        Details: 'Failed to add 1'
+      })
+      expect(devices[clientId].status.Components?.Activation).toEqual({ Result: 'Success' })
+      expect(devices[clientId].status.Components?.WirelessNetwork).toEqual({
+        Result: 'Failure',
+        Details: 'Failed to add 1'
+      })
+    })
+
+    it('should normalize the failure detail and carry the reason in Details', () => {
+      devices[clientId].status = {}
+      recordComponentResult(clientId, 'TLS', { Result: 'Failure', Details: 'cert add rejected.' })
+      expect(devices[clientId].status.Components?.TLS).toEqual({
+        Result: 'Failure',
+        Details: 'Cert add rejected'
+      })
+    })
+
+    it('should no-op when the device has no status object', () => {
+      delete (devices[clientId] as any).status
+      expect(() => {
+        recordComponentResult(clientId, 'TLS', { Result: 'Success' })
+      }).not.toThrow()
+      expect(devices[clientId].status).toBeUndefined()
+    })
+  })
+
+  describe('normalizeDetails', () => {
+    it('strips a single trailing period and capitalizes the first character', () => {
+      expect(normalizeDetails('already enabled in admin mode.')).toEqual('Already enabled in admin mode')
+    })
+    it('leaves already-clean strings untouched', () => {
+      expect(normalizeDetails('Wired Network Configured')).toEqual('Wired Network Configured')
+    })
+    it('handles empty/whitespace input', () => {
+      expect(normalizeDetails('   ')).toEqual('')
+    })
+  })
+
+  describe('deriveControlMode', () => {
+    it('maps admin strings to ACM', () => {
+      expect(deriveControlMode('already enabled in admin mode.')).toEqual('ACM')
+    })
+    it('maps client strings to CCM', () => {
+      expect(deriveControlMode('Client control mode.')).toEqual('CCM')
+    })
+    it('returns undefined for unrecognized modes', () => {
+      expect(deriveControlMode('something else')).toBeUndefined()
+    })
+  })
+
+  describe('deriveModeFromCurrentMode', () => {
+    it('maps currentMode 1 to CCM', () => {
+      expect(deriveModeFromCurrentMode(1)).toEqual('CCM')
+    })
+    it('maps currentMode 2 to ACM', () => {
+      expect(deriveModeFromCurrentMode(2)).toEqual('ACM')
+    })
+    it('returns undefined for pre-provisioning (0) or an absent mode', () => {
+      expect(deriveModeFromCurrentMode(0)).toBeUndefined()
+      expect(deriveModeFromCurrentMode(undefined)).toBeUndefined()
+    })
+  })
+
+  describe('updateNetworkStatus', () => {
+    beforeEach(() => {
+      devices[clientId].status = {}
+    })
+    it('reports an error message as a failure', () => {
+      const result = updateNetworkStatus({ clientId, errorMessage: 'boom', itemLabel: 'Proxy Configurations' })
+      expect(result).toEqual({ message: 'boom', failed: true })
+      expect(devices[clientId].status.Network).toEqual('boom')
+    })
+    it('builds an added/failed summary and flags failure when some items failed', () => {
+      const result = updateNetworkStatus({
+        clientId,
+        added: '2',
+        failedItems: '1',
+        itemLabel: 'WiFi Profiles'
+      })
+      expect(result).toEqual({ message: 'Added 2 WiFi Profiles. Failed to add 1', failed: true })
+    })
+    it('reports the status message as a success when nothing failed', () => {
+      const result = updateNetworkStatus({ clientId, statusMessage: 'Configured', itemLabel: 'WiFi Profiles' })
+      expect(result).toEqual({ message: 'Configured', failed: false })
+    })
+    it('appends to an existing Network status rather than overwriting it', () => {
+      devices[clientId].status.Network = 'Prior'
+      updateNetworkStatus({ clientId, statusMessage: 'Configured', itemLabel: 'WiFi Profiles' })
+      expect(devices[clientId].status.Network).toEqual('Prior. Configured')
+    })
+  })
+
+  describe('rollUpResult', () => {
+    it('is Failure when any component failed', () => {
+      expect(rollUpResult({ TLS: { Result: 'Success' }, CIRAProxy: { Result: 'Failure' } })).toEqual('Failure')
+    })
+    it('is Success when at least one succeeded and none failed', () => {
+      expect(rollUpResult({ TLS: { Result: 'Success' }, CIRAProxy: { Result: 'NotApplicable' } })).toEqual('Success')
+    })
+    it('is NotApplicable when nothing was attempted', () => {
+      expect(rollUpResult({ TLS: { Result: 'NotApplicable' } })).toEqual('NotApplicable')
+    })
+  })
+
+  describe('finalizeComponentResults', () => {
+    it('backfills NotApplicable components, the overall roll-up, and the schema version', () => {
+      devices[clientId].status = {
+        Status: 'already enabled in admin mode.',
+        Components: { TLS: { Result: 'Success' } }
+      }
+      finalizeComponentResults(clientId, true)
+      const status = devices[clientId].status
+      expect(status.ComponentsVersion).toEqual(COMPONENTS_VERSION)
+      expect(status.ComponentsRollup).toEqual('Success')
+      // Already-activated device: Activation is backfilled from the legacy flat status.
+      expect(status.Components?.Activation).toEqual({
+        Result: 'Success',
+        Mode: 'ACM',
+        Details: 'Already enabled in admin mode'
+      })
+      // Every remaining component is present as NotApplicable.
+      expect(status.Components?.CIRAConnection?.Result).toEqual('NotApplicable')
+      expect(status.Components?.WiredNetwork?.Result).toEqual('NotApplicable')
+    })
+
+    it('backfills Activation as ACM for an already-activated device from the reported control mode', () => {
+      // Pure reconfigure: mode comes from currentMode (2 = ACM).
+      devices[clientId].ClientData = { payload: { currentMode: 2 } } as any
+      devices[clientId].status = { Components: { CIRAConnection: { Result: 'Success' } } }
+      finalizeComponentResults(clientId, true)
+      expect(devices[clientId].status.Components?.Activation).toEqual({
+        Result: 'Success',
+        Mode: 'ACM',
+        Details: 'Device already activated in admin control mode'
+      })
+    })
+
+    it('backfills Activation as CCM for an already-activated device from the reported control mode', () => {
+      devices[clientId].ClientData = { payload: { currentMode: 1 } } as any
+      devices[clientId].status = { Components: { CIRAConnection: { Result: 'Success' } } }
+      finalizeComponentResults(clientId, true)
+      expect(devices[clientId].status.Components?.Activation).toEqual({
+        Result: 'Success',
+        Mode: 'CCM',
+        Details: 'Device already activated in client control mode'
+      })
+    })
+
+    it('leaves Activation NotApplicable when neither a status string nor a control mode is available', () => {
+      devices[clientId].ClientData = { payload: {} } as any
+      devices[clientId].status = { Components: { CIRAConnection: { Result: 'Success' } } }
+      finalizeComponentResults(clientId, true)
+      expect(devices[clientId].status.Components?.Activation?.Result).toEqual('NotApplicable')
+    })
+
+    it('does not backfill Activation on the failure path', () => {
+      devices[clientId].status = { Status: 'Failed', Components: {} }
+      finalizeComponentResults(clientId, false)
+      expect(devices[clientId].status.Components?.Activation?.Result).toEqual('NotApplicable')
+    })
+
+    it("forces ComponentsRollup to 'Failure' on the failure path even when no component recorded a failure", () => {
+      devices[clientId].status = { Status: 'Admin control mode.', Components: { Activation: { Result: 'Success' } } }
+      finalizeComponentResults(clientId, false)
+      expect(devices[clientId].status.ComponentsRollup).toEqual('Failure')
+      expect(devices[clientId].status.Components?.Activation?.Result).toEqual('Success')
+    })
+
+    it('no-ops when the device has no status object', () => {
+      delete (devices[clientId] as any).status
+      expect(() => {
+        finalizeComponentResults(clientId, true)
+      }).not.toThrow()
+    })
   })
 })

@@ -88,11 +88,50 @@ export interface RemoteConfig {
   AMTDomains: AMTDomain[]
 }
 
+/**
+ * Per-component activation outcome. Additive structured detail that rides alongside the
+ * legacy flat status strings in the WebSocket `message` field (see issue #2665). Older
+ * clients that do not understand `Components` simply ignore it.
+ */
+export type ComponentResultStatus = 'Success' | 'Failure' | 'NotApplicable'
+
+/** Clean machine-readable mode enum for a component result. Prose belongs in Details. */
+export type ComponentMode = 'ACM' | 'CCM' | 'LocalProfileSync'
+
+export interface ComponentResult {
+  Result: ComponentResultStatus
+  Mode?: ComponentMode
+  /** Human-readable, sentence-case note (no trailing period). On failure this carries the reason. */
+  Details?: string
+}
+
+export interface ComponentResults {
+  Activation?: ComponentResult
+  WiredNetwork?: ComponentResult
+  WirelessNetwork?: ComponentResult
+  TLS?: ComponentResult
+  CIRAProxy?: ComponentResult
+  CIRAConnection?: ComponentResult
+}
+
+/**
+ * Schema version for the structured `Components` block (issue #2665). Bump when the set of
+ * reported components changes (e.g. when 802.1x reporting lands) so clients can reason about coverage.
+ */
+export const COMPONENTS_VERSION = 1
+
 export interface Status {
   Status?: string
   Network?: string
   CIRAConnection?: string
   TLSConfiguration?: string
+  // Additive structured per-component results (issue #2665). Legacy flat fields above are
+  // always populated for backwards compatibility; the fields below carry the granular breakdown.
+  // ComponentsRollup is derived from Components and may diverge from the transport-level status
+  // (e.g. a CIRA failure leaves activation a success but rolls the components up to Failure).
+  ComponentsRollup?: ComponentResultStatus
+  ComponentsVersion?: number
+  Components?: ComponentResults
 }
 export interface ClientObject {
   ClientId: string

@@ -25,7 +25,14 @@ import { DbCreatorFactory } from '../factories/DbCreatorFactory.js'
 import { AMTUserName, GATEWAY_TIMEOUT_ERROR, asArray } from '../utils/constants.js'
 import { CIRAConfiguration } from './ciraConfiguration.js'
 import { TLS } from './tls.js'
-import { type CommonContext, invokeWsmanCall, processTLSTunnelResponse } from './common.js'
+import {
+  type CommonContext,
+  invokeWsmanCall,
+  processTLSTunnelResponse,
+  recordComponentResult,
+  deriveControlMode,
+  finalizeComponentResults
+} from './common.js'
 import ClientResponseMsg from '../utils/ClientResponseMsg.js'
 import { Unconfiguration } from './unconfiguration.js'
 import { type DeviceCredentials } from '../interfaces/ISecretManagerService.js'
@@ -139,7 +146,17 @@ export class Activation {
     } else {
       clientObj.status.Status = context.errorMessage !== '' ? context.errorMessage : 'Failed'
       method = 'failed'
+      // Record the Activation component as a failure when the device never reached an
+      // activated control mode (issue #2665). If it activated but a later component failed,
+      // 'Set activation status' already recorded Activation as a success — don't overwrite it.
+      if (clientObj.activationStatus !== true) {
+        recordComponentResult(clientId, 'Activation', {
+          Result: 'Failure',
+          Details: clientObj.status.Status
+        })
+      }
     }
+    finalizeComponentResults(clientId, status === 'success')
     const responseMessage = ClientResponseMsg.get(clientId, null, status, method, JSON.stringify(clientObj.status))
     this.logger.info(JSON.stringify(responseMessage, null, '\t'))
     devices[clientId].ClientSocket?.send(JSON.stringify(responseMessage))
@@ -426,6 +443,11 @@ export class Activation {
     const clientObj = devices[context.clientId]
     this.logger.debug(`Device ${clientObj.uuid} activated in ${clientObj.status.Status}.`)
     clientObj.activationStatus = true
+    recordComponentResult(context.clientId, 'Activation', {
+      Result: 'Success',
+      Mode: deriveControlMode(clientObj.status.Status),
+      Details: clientObj.status.Status
+    })
     MqttProvider.publishEvent(
       'success',
       ['Activator', 'execute'],
