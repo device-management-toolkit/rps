@@ -45,7 +45,7 @@ jobs:
           path: junit.xml # Path to test results
           reporter: java-junit # Vitest's JUnit reporter emits standard JUnit XML
           fail-on-error: 'false'
-      - uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
+      - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         name: Upload Coverage Results
         if: ${{ matrix.node-version == '24.x' }}
       - run: mv junit.xml rps-unit-${{ matrix.node-version }}.xml
