@@ -36,6 +36,9 @@ vi.mock('./common.js', async () => {
     invokeWsmanCall: invokeWsmanCallSpy,
     invokeEnterpriseAssistantCall: vi.fn(),
     processTLSTunnelResponse: vi.fn(),
+    recordComponentResult: actual.recordComponentResult,
+    deriveControlMode: actual.deriveControlMode,
+    finalizeComponentResults: actual.finalizeComponentResults,
     HttpResponseError,
     isDigestRealmValid,
     coalesceMessage
@@ -828,6 +831,11 @@ describe('Activation State Machine', () => {
       devices[context.clientId].status.Status = 'Admin control mode.'
       activation.setActivationStatus({ context })
       expect(devices[clientId].activationStatus).toBeTruthy()
+      expect(devices[clientId].status.Components?.Activation).toEqual({
+        Result: 'Success',
+        Mode: 'ACM',
+        Details: 'Admin control mode'
+      })
     })
   })
 
@@ -2081,8 +2089,13 @@ describe('Activation State Machine', () => {
       }))
 
     it('should send success message to device', () => {
+      context.status = 'success'
+      devices[clientId].status = { Status: 'Admin control mode.' }
       activation.sendMessageToDevice({ context })
       expect(sendSpy).toHaveBeenCalled()
+      expect(devices[clientId].status.ComponentsRollup).toEqual('Success')
+      expect(devices[clientId].status.ComponentsVersion).toEqual(1)
+      expect(devices[clientId].status.Components?.Activation?.Result).toEqual('Success')
     })
     it('should update Credentials', () => {
       activation.updateCredentials({ context })
@@ -2092,6 +2105,8 @@ describe('Activation State Machine', () => {
     it('should send error message to device', () => {
       context.status = 'error'
       context.message = null
+      // Device never reached an activated control mode, so Activation is recorded as a Failure.
+      devices[clientId].activationStatus = false
       activation.sendMessageToDevice({ context })
       expect(responseMessageSpy).toHaveBeenCalledWith(
         context.clientId,
@@ -2100,6 +2115,7 @@ describe('Activation State Machine', () => {
         'failed',
         JSON.stringify(devices[clientId].status)
       )
+      expect(devices[clientId].status.Components?.Activation?.Result).toEqual('Failure')
       expect(sendSpy).toHaveBeenCalled()
     })
   })
