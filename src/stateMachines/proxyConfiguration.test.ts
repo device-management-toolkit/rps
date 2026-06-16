@@ -98,6 +98,7 @@ describe('Proxy Configuration State Machine', () => {
               if (state.matches('FAILED') && currentStateIndex === flowStates.length) {
                 const status = devices[clientId].status.Network
                 expect(status).toContain('Failed to get proxy config from DB')
+                expect(devices[clientId].status.Components?.CIRAProxy?.Result).toEqual('Failure')
                 service.stop()
                 resolve()
               }
@@ -145,6 +146,10 @@ describe('Proxy Configuration State Machine', () => {
               if (state.matches('SUCCESS') && currentStateIndex === flowStates.length) {
                 const status = devices[clientId].status.Network
                 expect(status).toEqual('Initial. Proxy Configured')
+                expect(devices[clientId].status.Components?.CIRAProxy).toEqual({
+                  Result: 'Success',
+                  Details: 'Proxy Configured'
+                })
                 service.stop()
                 resolve()
               }
@@ -193,6 +198,11 @@ describe('Proxy Configuration State Machine', () => {
               if (state.matches('SUCCESS') && currentStateIndex === flowStates.length) {
                 const status = devices[clientId].status.Network
                 expect(status).toEqual('Initial. Failed to add proxy1')
+                // Partial failure (some configs failed) is reported as a CIRAProxy Failure.
+                expect(devices[clientId].status.Components?.CIRAProxy).toEqual({
+                  Result: 'Failure',
+                  Details: 'Failed to add proxy1'
+                })
                 resolve()
               }
             } catch (err) {
@@ -236,6 +246,11 @@ describe('Proxy Configuration State Machine', () => {
               if (state.matches('SUCCESS') && currentStateIndex === flowStates.length) {
                 const status = devices[clientId].status.Network
                 expect(status).toEqual('Initial. Failed to add proxy1')
+                // Partial failure (some configs failed) is reported as a CIRAProxy Failure.
+                expect(devices[clientId].status.Components?.CIRAProxy).toEqual({
+                  Result: 'Failure',
+                  Details: 'Failed to add proxy1'
+                })
                 resolve()
               }
             } catch (err) {

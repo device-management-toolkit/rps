@@ -12,7 +12,7 @@ import { devices } from '../devices.js'
 import { Error } from './error.js'
 import { Configurator } from '../Configurator.js'
 import { DbCreatorFactory } from '../factories/DbCreatorFactory.js'
-import { type CommonContext, invokeWsmanCall } from './common.js'
+import { type CommonContext, invokeWsmanCall, recordComponentResult, updateNetworkStatus } from './common.js'
 import { type WifiCredentials } from '../interfaces/ISecretManagerService.js'
 import { UNEXPECTED_PARSE_ERROR, DEFAULT_MAX_TCP_RETRANSMISSIONS } from '../utils/constants.js'
 import {
@@ -21,6 +21,11 @@ import {
   sendEnterpriseAssistantKeyPairResponse
 } from './enterpriseAssistant.js'
 import { RPSError } from '../utils/RPSError.js'
+
+/** Status string that drives the LocalProfileSync mode; shared by producer and consumer. */
+const WIRELESS_LOCAL_PROFILE_SYNC_STATUS = 'Wireless Only Local Profile Sync Configured'
+/** Component-facing detail for the sync-only case (drops the legacy "Wireless Only" prefix). */
+const LOCAL_PROFILE_SYNC_DETAILS = 'Local Profile Sync Configured'
 
 export interface WiFiConfigContext extends CommonContext {
   amtProfile: AMTConfiguration | null
@@ -330,20 +335,20 @@ export class WiFiConfiguration {
       },
       'Update Configuration Status': ({ context }) => {
         const { clientId, profilesAdded, profilesFailed, statusMessage, errorMessage } = context
-        const device = devices[clientId]
-        const networkStatus = device.status.Network
-        let message
-        if (errorMessage) {
-          message = errorMessage
-        } else if (profilesFailed) {
-          message =
-            profilesAdded != null
-              ? `Added ${profilesAdded} WiFi Profiles. Failed to add ${profilesFailed}`
-              : `Failed to add ${profilesFailed}`
-        } else {
-          message = statusMessage
-        }
-        device.status.Network = networkStatus ? `${networkStatus}. ${message}` : message
+        const { message, failed } = updateNetworkStatus({
+          clientId,
+          errorMessage,
+          statusMessage,
+          added: profilesAdded,
+          failedItems: profilesFailed,
+          itemLabel: 'WiFi Profiles'
+        })
+        const isLocalSync = !failed && message === WIRELESS_LOCAL_PROFILE_SYNC_STATUS
+        recordComponentResult(clientId, 'WirelessNetwork', {
+          Result: failed ? 'Failure' : 'Success',
+          Mode: isLocalSync ? 'LocalProfileSync' : undefined,
+          Details: isLocalSync ? LOCAL_PROFILE_SYNC_DETAILS : message
+        })
       },
       'Reset Retry Count': assign({ retryCount: () => 0 }),
       'Increment Retry Count': assign({ retryCount: ({ context, event }) => context.retryCount + 1 }),
@@ -739,7 +744,7 @@ export class WiFiConfiguration {
       },
       SUCCESS_SYNC_ONLY: {
         entry: [
-          assign({ statusMessage: () => 'Wireless Only Local Profile Sync Configured' }),
+          assign({ statusMessage: () => WIRELESS_LOCAL_PROFILE_SYNC_STATUS }),
           'Update Configuration Status'
         ],
         type: 'final'
