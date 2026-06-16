@@ -13,6 +13,7 @@ import { Error } from './error.js'
 import { Configurator } from '../Configurator.js'
 import { DbCreatorFactory } from '../factories/DbCreatorFactory.js'
 import { type CommonContext, invokeWsmanCall } from './common.js'
+import { addUnique, removeItem, addFailure } from '../utils/statusList.js'
 import { type WifiCredentials } from '../interfaces/ISecretManagerService.js'
 import { UNEXPECTED_PARSE_ERROR, DEFAULT_MAX_TCP_RETRANSMISSIONS } from '../utils/constants.js'
 import {
@@ -348,28 +349,14 @@ export class WiFiConfiguration {
       'Reset Retry Count': assign({ retryCount: () => 0 }),
       'Increment Retry Count': assign({ retryCount: ({ context, event }) => context.retryCount + 1 }),
       'Check Return Value': assign({
-        profilesAdded: ({ context, event }) => {
-          if (event.output.Envelope?.Body?.AddWiFiSettings_OUTPUT?.ReturnValue === 0) {
-            if (context.profilesAdded == null) {
-              return `${context.wifiProfileName}`
-            } else {
-              return `${context.profilesAdded}, ${context.wifiProfileName}`
-            }
-          } else {
-            return context.profilesAdded
-          }
-        },
-        profilesFailed: ({ context, event }) => {
-          if (event.output.Envelope?.Body?.AddWiFiSettings_OUTPUT?.ReturnValue !== 0) {
-            if (context.profilesFailed == null) {
-              return `${context.wifiProfileName}`
-            } else {
-              return `${context.profilesFailed}, ${context.wifiProfileName}`
-            }
-          } else {
-            return context.profilesFailed
-          }
-        }
+        profilesAdded: ({ context, event }) =>
+          event.output.Envelope?.Body?.AddWiFiSettings_OUTPUT?.ReturnValue === 0
+            ? addUnique(context.profilesAdded, context.wifiProfileName)
+            : context.profilesAdded,
+        profilesFailed: ({ context, event }) =>
+          event.output.Envelope?.Body?.AddWiFiSettings_OUTPUT?.ReturnValue === 0
+            ? removeItem(context.profilesFailed, context.wifiProfileName)
+            : addFailure(context.profilesFailed, context.profilesAdded, context.wifiProfileName)
       })
     }
   }).createMachine({
@@ -392,7 +379,7 @@ export class WiFiConfiguration {
         on: {
           WIFICONFIG: {
             actions: [
-              assign({ wifiProfileCount: () => 0 }),
+              assign({ wifiProfileCount: () => 0, profilesAdded: () => undefined, profilesFailed: () => undefined }),
               'Reset Unauth Count',
               'Reset Retry Count'
             ],
@@ -696,9 +683,7 @@ export class WiFiConfiguration {
           onError: {
             actions: assign({
               profilesFailed: ({ context }) =>
-                context.profilesFailed == null
-                  ? `${context.wifiProfileName}`
-                  : `${context.profilesFailed}, ${context.wifiProfileName}`
+                addFailure(context.profilesFailed, context.profilesAdded, context.wifiProfileName)
             }),
             target: 'CHECK_ADD_WIFI_SETTINGS_RESPONSE'
           }

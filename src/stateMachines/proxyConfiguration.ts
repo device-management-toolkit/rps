@@ -14,6 +14,7 @@ import { Error } from './error.js'
 import { Configurator } from '../Configurator.js'
 import { DbCreatorFactory } from '../factories/DbCreatorFactory.js'
 import { type CommonContext, invokeWsmanCall } from './common.js'
+import { addUnique, removeItem, addFailure } from '../utils/statusList.js'
 import { UNEXPECTED_PARSE_ERROR } from '../utils/constants.js'
 
 export interface ProxyConfigContext extends CommonContext {
@@ -119,28 +120,14 @@ export class ProxyConfiguration {
       'Reset Retry Count': assign({ retryCount: () => 0 }),
       'Increment Retry Count': assign({ retryCount: ({ context }) => context.retryCount + 1 }),
       'Check Return Value': assign({
-        proxyConfigAdded: ({ context, event }) => {
-          if (event.output.Envelope?.Body?.AddProxyAccessPoint_OUTPUT?.ReturnValue === 0) {
-            if (context.proxyConfigAdded == null) {
-              return `${context.proxyConfigName}`
-            } else {
-              return `${context.proxyConfigAdded}, ${context.proxyConfigName}`
-            }
-          } else {
-            return context.proxyConfigAdded
-          }
-        },
-        proxyConfigFailed: ({ context, event }) => {
-          if (event.output.Envelope?.Body?.AddProxyAccessPoint_OUTPUT?.ReturnValue !== 0) {
-            if (context.proxyConfigFailed == null) {
-              return `${context.proxyConfigName}`
-            } else {
-              return `${context.proxyConfigFailed}, ${context.proxyConfigName}`
-            }
-          } else {
-            return context.proxyConfigFailed
-          }
-        }
+        proxyConfigAdded: ({ context, event }) =>
+          event.output.Envelope?.Body?.AddProxyAccessPoint_OUTPUT?.ReturnValue === 0
+            ? addUnique(context.proxyConfigAdded, context.proxyConfigName)
+            : context.proxyConfigAdded,
+        proxyConfigFailed: ({ context, event }) =>
+          event.output.Envelope?.Body?.AddProxyAccessPoint_OUTPUT?.ReturnValue === 0
+            ? removeItem(context.proxyConfigFailed, context.proxyConfigName)
+            : addFailure(context.proxyConfigFailed, context.proxyConfigAdded, context.proxyConfigName)
       })
     }
   }).createMachine({
@@ -162,7 +149,11 @@ export class ProxyConfiguration {
         on: {
           PROXYCONFIG: {
             actions: [
-              assign({ proxyConfigsCount: () => 0 }),
+              assign({
+                proxyConfigsCount: () => 0,
+                proxyConfigAdded: () => undefined,
+                proxyConfigFailed: () => undefined
+              }),
               'Reset Retry Count'
             ],
             target: 'CHECK_FOR_PROXY_CONFIGS'
@@ -206,9 +197,7 @@ export class ProxyConfiguration {
           onError: {
             actions: assign({
               proxyConfigFailed: ({ context }) =>
-                context.proxyConfigFailed == null
-                  ? `${context.proxyConfigName}`
-                  : `${context.proxyConfigFailed}, ${context.proxyConfigName}`
+                addFailure(context.proxyConfigFailed, context.proxyConfigAdded, context.proxyConfigName)
             }),
             target: 'CHECK_ADD_PROXY_CONFIGS_RESPONSE'
           }
