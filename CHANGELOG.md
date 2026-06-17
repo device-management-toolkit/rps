@@ -1,3 +1,10 @@
+## [2.36.6](https://github.com/device-management-toolkit/rps/compare/v2.36.5...v2.36.6) (2026-06-17)
+
+
+### Bug Fixes
+
+* **activation:** don't retry one-shot ACM activation calls on timeout ([#2743](https://github.com/device-management-toolkit/rps/issues/2743)) ([0602b24](https://github.com/device-management-toolkit/rps/commit/0602b24e161a7f3be67969a0b93730a5be9fcb1c))
+
 ## [2.36.5](https://github.com/device-management-toolkit/rps/compare/v2.36.4...v2.36.5) (2026-06-03)
 
 ## [2.36.4](https://github.com/device-management-toolkit/rps/compare/v2.36.3...v2.36.4) (2026-05-26)
