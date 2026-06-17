@@ -279,7 +279,7 @@ const timeout = async (ms: number): Promise<void> => {
   })
 }
 
-const invokeWsmanCall = async <T>(context: any, maxRetries = 0, timeoutMs?: number): Promise<T> => {
+const invokeWsmanCall = async <T>(context: any, maxRetries = 0, timeoutMs?: number, oneShot = false): Promise<T> => {
   const { clientId } = context
   const clientObj = devices[clientId]
 
@@ -293,7 +293,8 @@ const invokeWsmanCall = async <T>(context: any, maxRetries = 0, timeoutMs?: numb
   }
 
   let retriesUsed = 0
-  const maxAttempts = Math.max(maxRetries + 1, Environment.Config.wsman_max_attempts)
+  // One-shot calls (ACM activation/upgrade) drop the session on success; never re-issue them.
+  const maxAttempts = oneShot ? 1 : Math.max(maxRetries + 1, Environment.Config.wsman_max_attempts)
   const timeoutValue = timeoutMs ?? Environment.Config.delay_timer * 1000
   const retryDelayMs = Environment.Config.delay_tls_timer * 1000
 
@@ -353,7 +354,9 @@ const invokeWsmanCall = async <T>(context: any, maxRetries = 0, timeoutMs?: numb
         continue
       }
 
-      if (isRetryableError && retriesUsed >= maxAttempts - 1) {
+      // Skip the exhaustion log only for the expected one-shot timeout; still log real failures.
+      const isExpectedOneShotTimeout = oneShot && error instanceof GATEWAY_TIMEOUT_ERROR
+      if (isRetryableError && retriesUsed >= maxAttempts - 1 && !isExpectedOneShotTimeout) {
         const errorType = (error as any)?.constructor?.name ?? typeof error
         const tunnelState = clientObj?.tlsTunnelManager != null ? 'present' : 'none'
         const sessionId = clientObj?.tlsTunnelSessionId ?? 'none'
@@ -363,10 +366,8 @@ const invokeWsmanCall = async <T>(context: any, maxRetries = 0, timeoutMs?: numb
         invokeWsmanLogger.error(
           `WSMAN final failure context: attempts=${maxAttempts}, retriesUsed=${retriesUsed}, errorType=${errorType}, tunnelState=${tunnelState}, sessionId=${sessionId}, tunnelNeedsReset=${clientObj?.tlsTunnelNeedsReset === true}, amtReconfiguring=${clientObj?.amtReconfiguring === true}`
         )
-        throw error
-      } else {
-        throw error
       }
+      throw error
     }
   }
   return await Promise.reject(new Error('Max retries reached'))
