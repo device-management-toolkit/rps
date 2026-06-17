@@ -22,7 +22,7 @@ import {
   initiateCertRequest,
   sendEnterpriseAssistantKeyPairResponse
 } from './enterpriseAssistant.js'
-import { type CommonContext, invokeWsmanCall } from './common.js'
+import { type CommonContext, invokeWsmanCall, sendProgressToDevice } from './common.js'
 
 export interface TLSContext extends CommonContext {
   amtProfile: AMTConfiguration | null
@@ -233,8 +233,11 @@ export class TLS {
   updateConfigurationStatus({ context }: { context: TLSContext }): void {
     if (context.status === 'success') {
       devices[context.clientId].status.TLSConfiguration = context.statusMessage
+      sendProgressToDevice(context.clientId, 'TLS configuration completed')
     } else if (context.status === 'error') {
-      devices[context.clientId].status.TLSConfiguration = context.errorMessage !== '' ? context.errorMessage : 'Failed'
+      const details = context.errorMessage !== '' ? context.errorMessage : 'Failed'
+      devices[context.clientId].status.TLSConfiguration = details
+      sendProgressToDevice(context.clientId, `TLS configuration failed: ${details}`)
     }
   }
 

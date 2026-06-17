@@ -25,6 +25,26 @@ import { parseChunkedMessage } from '../utils/parseChunkedMessage.js'
 import { TLSTunnelManager } from '../TLSTunnelManager.js'
 
 const invokeWsmanLogger = new Logger('invokeWsmanCall')
+const progressLogger = new Logger('sendProgressToDevice')
+
+// Best-effort progress note to rpc-go — emitted both at phase boundaries (state entry)
+// and for per-item milestones (e.g. each WiFi profile / proxy add) via transition actions.
+// Gated on the client advertising `progressSupported`; failures are swallowed.
+export const sendProgressToDevice = (clientId: string, label: string): void => {
+  try {
+    const clientObj = devices[clientId]
+    if (clientObj?.ClientSocket == null) {
+      return
+    }
+    if (clientObj.ClientData?.payload?.progressSupported !== true) {
+      return
+    }
+    const responseMessage = ClientResponseMsg.get(clientId, null, 'progress', 'ok', label)
+    clientObj.ClientSocket.send(JSON.stringify(responseMessage))
+  } catch (err) {
+    progressLogger.warn(`Failed to send progress to device ${clientId}: ${(err as Error).message}`)
+  }
+}
 
 /**
  * If retries is more than 0, will resend the message

@@ -19,7 +19,8 @@ const invokeWsmanCallSpy = vi.hoisted(() => vi.fn<any>())
 const invokeEnterpriseAssistantCallSpy = vi.hoisted(() => vi.fn<any>())
 vi.mock('./common.js', () => ({
   invokeWsmanCall: invokeWsmanCallSpy,
-  invokeEnterpriseAssistantCall: invokeEnterpriseAssistantCallSpy
+  invokeEnterpriseAssistantCall: invokeEnterpriseAssistantCallSpy,
+  sendProgressToDevice: vi.fn()
 }))
 
 const { TLS } = await import('./tls.js')

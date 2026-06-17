@@ -29,6 +29,7 @@ vi.mock('./common.js', async () => {
     invokeWsmanCall: invokeWsmanCallSpy,
     invokeEnterpriseAssistantCall: vi.fn(),
     processTLSTunnelResponse: vi.fn(),
+    sendProgressToDevice: vi.fn(),
     HttpResponseError,
     isDigestRealmValid,
     coalesceMessage
