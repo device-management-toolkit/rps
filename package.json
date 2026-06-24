@@ -57,19 +57,19 @@
     "express-promise-router": "^4.1.1",
     "express-validator": "^7.3.2",
     "express-ws": "^5.0.2",
-    "got": "^15.0.5",
+    "got": "^15.0.6",
     "http-z": "^7.0.0",
     "js-yaml": "^4.2.0",
     "minimist": "^1.2.8",
     "mqtt": "^5.15.1",
     "node-forge": "^1.4.0",
-    "pg": "^8.21.0",
+    "pg": "^8.22.0",
     "pg-format": "^1.0.4",
     "rc": "^1.2.8",
     "winston": "^3.19.0",
     "ws": "^8.21.0",
     "xml2js": "^0.6.2",
-    "xstate": "^5.32.1"
+    "xstate": "^5.32.2"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -88,7 +88,7 @@
     "prettier-plugin-multiline-arrays": "^4.1.9",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.3",
-    "typescript-eslint": "8.61.1",
+    "typescript-eslint": "8.62.0",
     "vitest": "^4.1.9"
   },
   "optionalDependencies": {
