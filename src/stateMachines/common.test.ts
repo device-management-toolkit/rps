@@ -25,7 +25,8 @@ import {
   deriveModeFromCurrentMode,
   finalizeComponentResults,
   updateNetworkStatus,
-  applicableComponents
+  applicableComponents,
+  sendProgressToDevice
 } from './common.js'
 
 Environment.Config = config
@@ -51,6 +52,11 @@ describe('Common', () => {
       ClientSocket: {
         send: vi.fn()
       },
+      ClientData: {
+        payload: {
+          progressSupported: true
+        }
+      },
       connectionParams: {
         guid: clientId,
         port: 16992,
@@ -73,6 +79,27 @@ describe('Common', () => {
     Environment.Config.wsman_max_attempts = originalWsmanMaxAttempts
     vi.runAllTicks()
     vi.useRealTimers()
+  })
+
+  it('should send a progress message as a plain-text progress frame', () => {
+    sendProgressToDevice(clientId, 'Configuring network settings')
+    expect(sendSpy).toHaveBeenCalledTimes(1)
+    const sent = JSON.parse(sendSpy.mock.calls[0][0])
+    expect(sent.method).toEqual('progress')
+    expect(sent.message).toEqual('Configuring network settings')
+    // Progress carries its text in `message`, not an encoded payload.
+    expect(sent.payload).toBeNull()
+  })
+  it('should not send progress when the client did not advertise progressSupported', () => {
+    devices[clientId].ClientData.payload.progressSupported = undefined
+    sendProgressToDevice(clientId, 'Configuring network settings')
+    expect(sendSpy).not.toHaveBeenCalled()
+  })
+  it('should not throw when the device has no client socket', () => {
+    const orphanId = randomUUID()
+    expect(() => {
+      sendProgressToDevice(orphanId, 'Starting provisioning')
+    }).not.toThrow()
   })
 
   it('should send a WSMan message once with successful reply', async () => {

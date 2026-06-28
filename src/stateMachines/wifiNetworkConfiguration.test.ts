@@ -22,6 +22,7 @@ import { HttpResponseError, coalesceMessage, isDigestRealmValid } from './common
 
 const invokeWsmanCallSpy = vi.hoisted(() => vi.fn<any>())
 const invokeEnterpriseAssistantCallSpy = vi.hoisted(() => vi.fn<any>())
+const sendProgressToDeviceSpy = vi.hoisted(() => vi.fn<any>())
 vi.mock('./common.js', async () => {
   const actual = await vi.importActual<typeof import('./common.js')>('./common.js')
   const { HttpResponseError, coalesceMessage, isDigestRealmValid } = actual
@@ -31,6 +32,7 @@ vi.mock('./common.js', async () => {
     processTLSTunnelResponse: vi.fn(),
     recordComponentResult: actual.recordComponentResult,
     updateNetworkStatus: actual.updateNetworkStatus,
+    sendProgressToDevice: sendProgressToDeviceSpy,
     HttpResponseError,
     isDigestRealmValid,
     coalesceMessage
@@ -53,6 +55,7 @@ describe('WiFi Network Configuration', () => {
     vi.clearAllMocks()
     invokeWsmanCallSpy.mockClear()
     invokeEnterpriseAssistantCallSpy.mockClear()
+    sendProgressToDeviceSpy.mockClear()
     wifiProfile = {
       profileName: 'test-profile',
       authenticationMethod: 5,
@@ -888,6 +891,11 @@ describe('WiFi Network Configuration', () => {
                   Result: 'Success',
                   Details: 'Wireless Configured'
                 })
+                // emits on successful add (ReturnValue 0)
+                expect(sendProgressToDeviceSpy).toHaveBeenCalledWith(
+                  clientId,
+                  'Added wireless profile unsupportedEncryption'
+                )
                 resolve()
               }
             } catch (err) {
@@ -1122,6 +1130,21 @@ describe('WiFi Network Configuration', () => {
               if (state.matches('SUCCESS') && currentStateIndex === flowStates.length) {
                 const status = devices[clientId].status.Network
                 expect(status).toEqual('Wired Network Configured. Failed to add profile5')
+                // no per-profile "Added" emit on failed add (ReturnValue 1) ...
+                expect(sendProgressToDeviceSpy).not.toHaveBeenCalledWith(
+                  clientId,
+                  expect.stringContaining('Added wireless profile')
+                )
+                // ... a per-profile "Failed to add" emit (with the AMT ReturnValue) is sent instead ...
+                expect(sendProgressToDeviceSpy).toHaveBeenCalledWith(
+                  clientId,
+                  'Failed to add wireless profile profile5 (ReturnValue 1)'
+                )
+                // ... and the final failure summary is emitted
+                expect(sendProgressToDeviceSpy).toHaveBeenCalledWith(
+                  clientId,
+                  'Wireless network configuration failed: Failed to add profile5'
+                )
                 resolve()
               }
             } catch (err) {

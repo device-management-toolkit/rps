@@ -31,6 +31,7 @@ vi.mock('./common.js', async () => {
     invokeEnterpriseAssistantCall: invokeEnterpriseAssistantCallSpy,
     processTLSTunnelResponse: vi.fn(),
     recordComponentResult: actual.recordComponentResult,
+    sendProgressToDevice: vi.fn(),
     coalesceMessage,
     isDigestRealmValid,
     HttpResponseError

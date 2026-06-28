@@ -32,7 +32,8 @@ import {
   recordComponentResult,
   deriveControlMode,
   finalizeComponentResults,
-  applicableComponents
+  applicableComponents,
+  sendProgressToDevice
 } from './common.js'
 import ClientResponseMsg from '../utils/ClientResponseMsg.js'
 import { Unconfiguration } from './unconfiguration.js'
@@ -466,6 +467,8 @@ export class Activation {
   setActivationStatus({ context }): void {
     const clientObj = devices[context.clientId]
     this.logger.debug(`Device ${clientObj.uuid} activated in ${clientObj.status.Status}.`)
+    // Emit once: the E2E TLS flow activates (CCM) then upgrades (ACM), calling this twice.
+    const alreadyActivated = clientObj.activationStatus === true
     clientObj.activationStatus = true
     // Write-once activation timestamp — RPS performed this activation, so stamp 'now' (issue #2665).
     clientObj.activatedAt ??= new Date()
@@ -474,6 +477,9 @@ export class Activation {
       Mode: deriveControlMode(clientObj.status.Status),
       Details: clientObj.status.Status
     })
+    if (!alreadyActivated) {
+      sendProgressToDevice(context.clientId, 'Activation completed')
+    }
     MqttProvider.publishEvent(
       'success',
       ['Activator', 'execute'],
@@ -1410,7 +1416,10 @@ export class Activation {
       'Send Message to Device': this.sendMessageToDevice.bind(this),
       'Get Provisioning CertObj': this.GetProvisioningCertObj.bind(this),
       'Compare Domain Cert Hashes': this.compareCertHashes.bind(this),
-      'Update AMT Credentials': this.updateCredentials.bind(this)
+      'Update AMT Credentials': this.updateCredentials.bind(this),
+      'Send Progress': ({ context }, params: { label: string }) => {
+        sendProgressToDevice(context.clientId, params.label)
+      }
     }
   }).createMachine({
     context: ({ input }) => ({
@@ -1464,6 +1473,7 @@ export class Activation {
         }
       },
       GET_AMT_PROFILE: {
+        entry: { type: 'Send Progress', params: { label: 'Starting provisioning' } },
         invoke: {
           src: 'getAMTProfile',
           input: ({ context }) => context,
@@ -1491,7 +1501,8 @@ export class Activation {
         always: [
           {
             guard: 'isActivated',
-            target: 'CHECK_TENANT_ACCESS'
+            target: 'CHECK_TENANT_ACCESS',
+            actions: { type: 'Send Progress', params: { label: 'Device already activated' } }
           },
           {
             guard: 'isTlsActivation',
@@ -2491,7 +2502,10 @@ export class Activation {
         }
       },
       UNCONFIGURATION: {
-        entry: sendTo('unconfiguration-machine', { type: 'REMOVECONFIG' }),
+        entry: [
+          { type: 'Send Progress', params: { label: 'Clearing previous configuration' } },
+          sendTo('unconfiguration-machine', { type: 'REMOVECONFIG' })
+        ],
         invoke: {
           src: 'unconfiguration',
           id: 'unconfiguration-machine',
@@ -2511,7 +2525,10 @@ export class Activation {
         }
       },
       NETWORK_CONFIGURATION: {
-        entry: sendTo('network-configuration-machine', { type: 'NETWORKCONFIGURATION' }),
+        entry: [
+          { type: 'Send Progress', params: { label: 'Configuring network settings' } },
+          sendTo('network-configuration-machine', { type: 'NETWORKCONFIGURATION' })
+        ],
         invoke: {
           src: 'networkConfiguration',
           id: 'network-configuration-machine',
@@ -2530,7 +2547,10 @@ export class Activation {
         }
       },
       FEATURES_CONFIGURATION: {
-        entry: sendTo('features-configuration-machine', { type: 'CONFIGURE_FEATURES' }),
+        entry: [
+          { type: 'Send Progress', params: { label: 'Configuring AMT features' } },
+          sendTo('features-configuration-machine', { type: 'CONFIGURE_FEATURES' })
+        ],
         invoke: {
           src: 'featuresConfiguration',
           id: 'features-configuration-machine',
@@ -2568,7 +2588,10 @@ export class Activation {
         }
       },
       CIRA: {
-        entry: sendTo('cira-machine', { type: 'CONFIGURE_CIRA' }),
+        entry: [
+          { type: 'Send Progress', params: { label: 'Configuring CIRA remote access' } },
+          sendTo('cira-machine', { type: 'CONFIGURE_CIRA' })
+        ],
         invoke: {
           src: 'cira',
           id: 'cira-machine',
@@ -2596,7 +2619,10 @@ export class Activation {
         }
       },
       TLS: {
-        entry: sendTo('tls-machine', { type: 'CONFIGURE_TLS' }),
+        entry: [
+          { type: 'Send Progress', params: { label: 'Configuring TLS' } },
+          sendTo('tls-machine', { type: 'CONFIGURE_TLS' })
+        ],
         invoke: {
           src: 'tls',
           id: 'tls-machine',

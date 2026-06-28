@@ -22,7 +22,7 @@ import { type DeviceCredentials } from '../interfaces/ISecretManagerService.js'
 import { type AMTConfiguration } from '../models/index.js'
 import { randomUUID } from 'node:crypto'
 import { Error } from './error.js'
-import { type CommonContext, invokeWsmanCall, recordComponentResult } from './common.js'
+import { type CommonContext, invokeWsmanCall, recordComponentResult, sendProgressToDevice } from './common.js'
 
 /** Status string marking a successful CIRA configuration; shared by producer and consumer. */
 const CIRA_CONFIGURED_STATUS = 'Configured'
@@ -323,6 +323,11 @@ export class CIRAConfiguration {
           Result: success ? 'Success' : 'Failure',
           Details: context.statusMessage
         })
+        if (success) {
+          sendProgressToDevice(context.clientId, 'CIRA configuration completed')
+        } else {
+          sendProgressToDevice(context.clientId, `CIRA configuration failed: ${context.statusMessage}`)
+        }
       },
       'Reset Unauth Count': ({ context, event }) => {
         devices[context.clientId].unauthCount = 0

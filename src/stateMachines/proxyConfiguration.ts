@@ -12,7 +12,13 @@ import { type AMTConfiguration } from '../models/index.js'
 import { Error } from './error.js'
 import { Configurator } from '../Configurator.js'
 import { DbCreatorFactory } from '../factories/DbCreatorFactory.js'
-import { type CommonContext, invokeWsmanCall, recordComponentResult, updateNetworkStatus } from './common.js'
+import {
+  type CommonContext,
+  invokeWsmanCall,
+  recordComponentResult,
+  sendProgressToDevice,
+  updateNetworkStatus
+} from './common.js'
 import { UNEXPECTED_PARSE_ERROR } from '../utils/constants.js'
 
 export interface ProxyConfigContext extends CommonContext {
@@ -112,6 +118,14 @@ export class ProxyConfiguration {
           Result: failed ? 'Failure' : 'Success',
           Details: message
         })
+        // Phase completion line — only when proxies were actually processed (something added or failed).
+        if (proxyConfigsAdded != null || proxyConfigsFailed != null || errorMessage) {
+          if (failed) {
+            sendProgressToDevice(clientId, `Proxies configuration failed: ${message}`)
+          } else {
+            sendProgressToDevice(clientId, 'Proxies configuration completed')
+          }
+        }
       },
       'Reset Retry Count': assign({ retryCount: () => 0 }),
       'Increment Retry Count': assign({ retryCount: ({ context }) => context.retryCount + 1 }),
@@ -138,7 +152,19 @@ export class ProxyConfiguration {
             return context.proxyConfigFailed
           }
         }
-      })
+      }),
+      'Send Proxy Progress': ({ context, event }) => {
+        // mirror 'Check Return Value' — keep in sync
+        const returnValue = event.output?.Envelope?.Body?.AddProxyAccessPoint_OUTPUT?.ReturnValue
+        if (returnValue === 0) {
+          sendProgressToDevice(context.clientId, `Added proxy configuration ${context.proxyConfigName}`)
+        } else {
+          sendProgressToDevice(
+            context.clientId,
+            `Failed to add proxy configuration ${context.proxyConfigName} (ReturnValue ${returnValue})`
+          )
+        }
+      }
     }
   }).createMachine({
     /** @xstate-layout N4IgpgJg5mDOIC5QAcBOB7AHgTwLQGN0A7AMwEsoBXVAQwBczjcBbG-ACzKLADoBBAMIAVAJIA1PqIDyAOQDEABQBKUgBoBNAbIBiIgOIBtAAwBdRCnSwyDYuZCZEAFgBMARh4BOIwDZnAZkcADi9nUIBWMIAaEGxEQPcwoyNXIwB2ZyNQj0cw1IBfPOi0LDxCUgpqekYiFjZObh4BAAkAUQEAaQB9bSklTuU1dU6tGV09AGU5YzMkEGRLa2q7BwQU13dA50CjD2zvR1S-V29o2NXXDx5Uoz9-Vz9vLw8-MOcCoowcAmJyKlobGqsDhcXjNNpdHp9AYaYY6fSTAyuGYWKwA5aIIynDHvOafUo-Cr-aq1YENPQtIT9FQwkZjOQQYi8LgAN3QAGteDA6Lhil8yr9pnZ5qilrMVmtAld4hcPIlUtlUicYohnKkwjxvGFvA9HF5goEDWEcbz8eU-lUmED6rxyZToUNafo5GBUBhUDxkAAbegkdCoZg8Lk8vHfM2C2bCxa2MWIVy5VI8HJHC7+baOIxRZUIZyvTzODzbHP7VyBVLHY0h-mEi2Auog-gAEQbVMGsNG8PpjJ4LPZvBoEAgwZKod+sHDKKjRHRCBc7i8vgCwUy4UzZyCCcCYWyN1CLlSavyhVxw6r5oBJOtjeb9rbY0mLrdHu9dF9-p4-cHJpHFDHpiFCzRGMZzcTwfH8IIQhXLEED8bJQO1B51jVRJvArE8CTPYkrXrMEOk6PgmxbGk4QmTolBacYFFkcYWimP8IwA0VQHFZINi2HY9gOI4lTXC4eDcXxXFVe5HBLRw0L5DDKnPbCGlwroCOvakHRI8YyIoqiZBoqYkX-EVo2Y2NWJ4TZtl2Rx9kOY5oIs9UBIuW5ZTSTUjRxIh0AgOAhUrKSiUtOtuD0ydp1wIJoNwUseGObxvFSQJROOWC-Ak01fmkrCAt4QRRAkaQZCCwDDOzbwEjjbwdlCG4XjCPxoKQzwavuJJci1DJXI+dCzXS-zSVBVo8MhIiVPbCYCqY+xEG8A0otLGq3F2NxHDq1wE1lI4-GatVfAzFLv0wnrL1tIbb30MaDIm1Z-GceCc2alaImgnN3DK9b9RyMJAl209utrXqr2Ox1RoY-SpyAlxHrLfj4luRIjG2Hd2uPSSur837L3k-DCJvQG1PIyjqJaM7QaK-ZvB4AI-EVOGvBeJasxcPwTM2DxXEcDbNnzRGv2+1GL3rbQ+BEAAZFoGyJ6cVq8fiKdLLxdUpjw6os+CAkeCyPEeGqvt8ms+YacYAFUBAECjxnFoChNuG7YbCe7VycHMrmODIpvuUIHgKAogA */
@@ -178,6 +204,12 @@ export class ProxyConfiguration {
         ]
       },
       GET_PROXY_CONFIG: {
+        // Emit the phase start once, before the first proxy is fetched.
+        entry: ({ context }) => {
+          if (context.proxyConfigsCount === 0) {
+            sendProgressToDevice(context.clientId, 'Configuring proxies')
+          }
+        },
         invoke: {
           src: 'getProxyConfig',
           input: ({ context }) => context,
@@ -197,16 +229,20 @@ export class ProxyConfiguration {
           input: ({ context }) => context,
           id: 'add-proxy-configs',
           onDone: {
-            actions: 'Check Return Value',
+            actions: ['Check Return Value', 'Send Proxy Progress'],
             target: 'CHECK_ADD_PROXY_CONFIGS_RESPONSE'
           },
           onError: {
-            actions: assign({
-              proxyConfigFailed: ({ context }) =>
-                context.proxyConfigFailed == null
-                  ? `${context.proxyConfigName}`
-                  : `${context.proxyConfigFailed}, ${context.proxyConfigName}`
-            }),
+            actions: [
+              assign({
+                proxyConfigFailed: ({ context }) =>
+                  context.proxyConfigFailed == null
+                    ? `${context.proxyConfigName}`
+                    : `${context.proxyConfigFailed}, ${context.proxyConfigName}`
+              }),
+              ({ context }) =>
+                sendProgressToDevice(context.clientId, `Failed to add proxy configuration ${context.proxyConfigName}`)
+            ],
             target: 'CHECK_ADD_PROXY_CONFIGS_RESPONSE'
           }
         }

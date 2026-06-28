@@ -29,6 +29,7 @@ import {
 } from './activation.js'
 
 const invokeWsmanCallSpy = vi.hoisted(() => vi.fn<any>())
+const sendProgressToDeviceSpy = vi.hoisted(() => vi.fn<any>())
 vi.mock('./common.js', async () => {
   const actual = await vi.importActual<typeof import('./common.js')>('./common.js')
   const { HttpResponseError, coalesceMessage, isDigestRealmValid } = actual
@@ -40,6 +41,7 @@ vi.mock('./common.js', async () => {
     deriveControlMode: actual.deriveControlMode,
     finalizeComponentResults: actual.finalizeComponentResults,
     applicableComponents: actual.applicableComponents,
+    sendProgressToDevice: sendProgressToDeviceSpy,
     HttpResponseError,
     isDigestRealmValid,
     coalesceMessage
@@ -908,8 +910,10 @@ describe('Activation State Machine', () => {
       expect(devices[clientId].ClientData.payload.modes).toBeDefined()
     })
 
-    it('should set activation status', () => {
+    it('should set activation status and emit "Activation completed" only once', () => {
       devices[context.clientId].status.Status = 'Admin control mode.'
+      devices[context.clientId].activationStatus = false
+      sendProgressToDeviceSpy.mockClear()
       activation.setActivationStatus({ context })
       expect(devices[clientId].activationStatus).toBeTruthy()
       expect(devices[clientId].status.Components?.Activation).toEqual({
@@ -917,6 +921,10 @@ describe('Activation State Machine', () => {
         Mode: 'ACM',
         Details: 'Admin control mode'
       })
+      expect(sendProgressToDeviceSpy).toHaveBeenCalledWith(clientId, 'Activation completed')
+      // E2E TLS calls this again (CCM -> ACM upgrade); it must not emit a second time
+      activation.setActivationStatus({ context })
+      expect(sendProgressToDeviceSpy).toHaveBeenCalledTimes(1)
     })
 
     it('should stamp activatedAt write-once (issue #2665)', () => {
@@ -994,6 +1002,11 @@ describe('Activation State Machine', () => {
           if (state.matches('DELAYED_TRANSITION')) {
             vi.advanceTimersByTime(10000)
           } else if (state.matches('PROVISIONED') && currentStateIndex === flowStates.length) {
+            // progress fired at each milestone
+            expect(sendProgressToDeviceSpy).toHaveBeenCalledWith(clientId, 'Starting provisioning')
+            expect(sendProgressToDeviceSpy).toHaveBeenCalledWith(clientId, 'Clearing previous configuration')
+            expect(sendProgressToDeviceSpy).toHaveBeenCalledWith(clientId, 'Configuring network settings')
+            expect(sendProgressToDeviceSpy).toHaveBeenCalledWith(clientId, 'Configuring AMT features')
             resolve()
           }
         })

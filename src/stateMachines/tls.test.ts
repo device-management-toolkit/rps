@@ -22,7 +22,8 @@ vi.mock('./common.js', async () => {
   return {
     invokeWsmanCall: invokeWsmanCallSpy,
     invokeEnterpriseAssistantCall: invokeEnterpriseAssistantCallSpy,
-    recordComponentResult: actual.recordComponentResult
+    recordComponentResult: actual.recordComponentResult,
+    sendProgressToDevice: vi.fn()
   }
 })
 
