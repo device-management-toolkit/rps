@@ -1,3 +1,10 @@
+## [2.36.7](https://github.com/device-management-toolkit/rps/compare/v2.36.6...v2.36.7) (2026-06-30)
+
+
+### Bug Fixes
+
+* Update the domain cert checking to cater for the edit of domain cert reupload ([#2757](https://github.com/device-management-toolkit/rps/issues/2757)) ([febfc0f](https://github.com/device-management-toolkit/rps/commit/febfc0ff632599fcf3391482c53ec25acf98426d))
+
 ## [2.36.6](https://github.com/device-management-toolkit/rps/compare/v2.36.5...v2.36.6) (2026-06-17)
 
 
