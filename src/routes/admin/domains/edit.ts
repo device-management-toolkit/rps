@@ -26,7 +26,22 @@ export async function editDomain(req: Request, res: Response): Promise<void> {
     if (oldDomain == null) {
       throw new RPSError(NOT_FOUND_MESSAGE('Domain', newDomain.profileName), NOT_FOUND_EXCEPTION)
     } else {
-      amtDomain = getUpdatedData(newDomain, oldDomain)
+      // When a new cert is provided without a password, retrieve the existing password
+      // from vault so the expiration date can be computed correctly
+      let resolvedCertPassword: string | undefined
+      const isNewCert = newDomain.provisioningCert && newDomain.provisioningCert !== ''
+      const isNewPassword = newDomain.provisioningCertPassword && newDomain.provisioningCertPassword !== ''
+      if (isNewPassword) {
+        resolvedCertPassword = newDomain.provisioningCertPassword
+      } else if (req.secretsManager && isNewCert) {
+        const existingSecrets = (await req.secretsManager.getSecretAtPath(
+          `certs/${newDomain.profileName}`
+        )) as CertCredentials | null
+        if (existingSecrets?.CERT_PASSWORD) {
+          resolvedCertPassword = existingSecrets.CERT_PASSWORD
+        }
+      }
+      amtDomain = getUpdatedData(newDomain, oldDomain, resolvedCertPassword)
       // store the cert and password key in database
       if (req.secretsManager) {
         if (typeof amtDomain.provisioningCert === 'string' && typeof amtDomain.provisioningCertPassword === 'string') {
@@ -39,8 +54,8 @@ export async function editDomain(req: Request, res: Response): Promise<void> {
       // SQL Query > Insert Data
       const results: AMTDomain | null = await req.db.domains.update(amtDomain)
       if (results) {
-        // Delete the previous values of cert and password in vault and store the updated values
-        if (req.secretsManager && (newDomain.provisioningCert != null || newDomain.provisioningCertPassword != null)) {
+        // Update vault whenever cert or password has changed
+        if (req.secretsManager && (isNewCert || isNewPassword)) {
           const data: CertCredentials = {
             CERT: cert,
             CERT_PASSWORD: domainPwd
@@ -59,18 +74,29 @@ export async function editDomain(req: Request, res: Response): Promise<void> {
   }
 }
 
-function getUpdatedData(newDomain: any, oldDomain: AMTDomain): AMTDomain {
+function getUpdatedData(newDomain: any, oldDomain: AMTDomain, resolvedCertPassword?: string): AMTDomain {
   const amtDomain: AMTDomain = { profileName: newDomain.profileName } as AMTDomain
   const nodeForge = new NodeForge()
   const certManager = new CertManager(new Logger('CertManager'), nodeForge)
   amtDomain.domainSuffix = newDomain.domainSuffix ?? oldDomain.domainSuffix
-  amtDomain.expirationDate =
-    certManager.getExpirationDate(newDomain.provisioningCert, newDomain.provisioningCertPassword) ??
-    oldDomain.expirationDate
-  amtDomain.provisioningCert = newDomain.provisioningCert ?? oldDomain.provisioningCert
+
+  const isNewCert = newDomain.provisioningCert && newDomain.provisioningCert !== ''
+  // Use the explicitly provided password, fall back to the vault-resolved password
+  const passwordToUse =
+    newDomain.provisioningCertPassword && newDomain.provisioningCertPassword !== ''
+      ? newDomain.provisioningCertPassword
+      : resolvedCertPassword
+
+  let expirationDate = oldDomain.expirationDate
+  if (isNewCert) {
+    expirationDate = certManager.getExpirationDate(newDomain.provisioningCert, passwordToUse)
+  }
+  amtDomain.expirationDate = expirationDate
+
+  amtDomain.provisioningCert = isNewCert ? newDomain.provisioningCert : oldDomain.provisioningCert
   amtDomain.provisioningCertStorageFormat =
     newDomain.provisioningCertStorageFormat ?? oldDomain.provisioningCertStorageFormat
-  amtDomain.provisioningCertPassword = newDomain.provisioningCertPassword ?? oldDomain.provisioningCertPassword
+  amtDomain.provisioningCertPassword = passwordToUse ?? oldDomain.provisioningCertPassword
   amtDomain.tenantId = newDomain.tenantId ?? oldDomain.tenantId
   amtDomain.version = newDomain.version
   return amtDomain

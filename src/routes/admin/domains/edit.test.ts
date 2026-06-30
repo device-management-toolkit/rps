@@ -42,6 +42,54 @@ describe('CIRA Config - Edit', () => {
     expect(getByNameSpy).toHaveBeenCalledWith('profileName', req.tenantId)
     expect(resSpy.status).toHaveBeenCalledWith(200)
   })
+  it('should ignore empty provisioningCert when updating and retain old values', async () => {
+    req.body.provisioningCert = ''
+    req.body.provisioningCertPassword = ''
+
+    vi.spyOn(req.db.domains, 'getByName').mockResolvedValue({
+      profileName: 'profileName',
+      domainSuffix: 'domain.com',
+      provisioningCert: 'oldCert',
+      provisioningCertPassword: 'oldPassword',
+      expirationDate: '2025-01-01T00:00:00Z',
+      tenantId: ''
+    })
+
+    const updateSpy = vi.spyOn(req.db.domains, 'update').mockResolvedValue({})
+
+    await editDomain(req, resSpy)
+
+    expect(updateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provisioningCert: 'oldCert',
+        provisioningCertPassword: 'oldPassword',
+        expirationDate: '2025-01-01T00:00:00Z'
+      })
+    )
+    expect(resSpy.status).toHaveBeenCalledWith(200)
+  })
+  it('should update cert without password by fetching password from vault', async () => {
+    req.body.provisioningCertPassword = ''
+    req.secretsManager = {
+      getSecretAtPath: vi.fn().mockResolvedValue({ CERT: 'oldCert', CERT_PASSWORD: 'P@ssw0rd' }),
+      writeSecretWithObject: vi.fn().mockResolvedValue({})
+    }
+    vi.spyOn(req.db.domains, 'getByName').mockResolvedValue({
+      profileName: 'profileName',
+      domainSuffix: 'domain.com',
+      tenantId: ''
+    })
+    vi.spyOn(req.db.domains, 'update').mockResolvedValue({})
+
+    await editDomain(req, resSpy)
+
+    expect(req.secretsManager.getSecretAtPath).toHaveBeenCalledWith('certs/profileName')
+    expect(req.secretsManager.writeSecretWithObject).toHaveBeenCalledWith(
+      'certs/profileName',
+      expect.objectContaining({ CERT_PASSWORD: 'P@ssw0rd' })
+    )
+    expect(resSpy.status).toHaveBeenCalledWith(200)
+  })
   it('should handle not found', async () => {
     vi.spyOn(req.db.domains, 'getByName').mockResolvedValue(null)
     await editDomain(req, resSpy)
