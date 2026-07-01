@@ -1,3 +1,10 @@
+## [2.38.2](https://github.com/device-management-toolkit/rps/compare/v2.38.1...v2.38.2) (2026-07-01)
+
+
+### Bug Fixes
+
+* **db:** dedupe profile wifi/proxy configs in Cartesian-product join ([#2770](https://github.com/device-management-toolkit/rps/issues/2770)) ([630f666](https://github.com/device-management-toolkit/rps/commit/630f666574c4c7913bd555def41f92bf68dc9679)), closes [#2665](https://github.com/device-management-toolkit/rps/issues/2665)
+
 ## [2.38.1](https://github.com/device-management-toolkit/rps/compare/v2.38.0...v2.38.1) (2026-07-01)
 
 
