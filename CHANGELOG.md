@@ -1,3 +1,10 @@
+# [2.37.0](https://github.com/device-management-toolkit/rps/compare/v2.36.7...v2.37.0) (2026-07-01)
+
+
+### Features
+
+* **activation:** structured per-component provisioning result ([#2744](https://github.com/device-management-toolkit/rps/issues/2744)) ([47f1166](https://github.com/device-management-toolkit/rps/commit/47f1166fb5be9cd590694ef0e2787af347d80683)), closes [#2665](https://github.com/device-management-toolkit/rps/issues/2665)
+
 ## [2.36.7](https://github.com/device-management-toolkit/rps/compare/v2.36.6...v2.36.7) (2026-06-30)
 
 
