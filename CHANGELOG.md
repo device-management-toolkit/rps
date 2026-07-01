@@ -1,3 +1,10 @@
+# [2.38.0](https://github.com/device-management-toolkit/rps/compare/v2.37.0...v2.38.0) (2026-07-01)
+
+
+### Features
+
+* **activation:** stream real-time provisioning progress to rpc-go ([#2765](https://github.com/device-management-toolkit/rps/issues/2765)) ([4416fbb](https://github.com/device-management-toolkit/rps/commit/4416fbbfa4cd46494a7efd1ee5b0b073a4e3a86c)), closes [device-management-toolkit/rps#2665](https://github.com/device-management-toolkit/rps/issues/2665)
+
 # [2.37.0](https://github.com/device-management-toolkit/rps/compare/v2.36.7...v2.37.0) (2026-07-01)
 
 
