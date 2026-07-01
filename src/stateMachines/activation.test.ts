@@ -36,6 +36,10 @@ vi.mock('./common.js', async () => {
     invokeWsmanCall: invokeWsmanCallSpy,
     invokeEnterpriseAssistantCall: vi.fn(),
     processTLSTunnelResponse: vi.fn(),
+    recordComponentResult: actual.recordComponentResult,
+    deriveControlMode: actual.deriveControlMode,
+    finalizeComponentResults: actual.finalizeComponentResults,
+    applicableComponents: actual.applicableComponents,
     HttpResponseError,
     isDigestRealmValid,
     coalesceMessage
@@ -829,6 +833,11 @@ describe('Activation State Machine', () => {
       devices[context.clientId].status.Status = 'Admin control mode.'
       activation.setActivationStatus({ context })
       expect(devices[clientId].activationStatus).toBeTruthy()
+      expect(devices[clientId].status.Components?.Activation).toEqual({
+        Result: 'Success',
+        Mode: 'ACM',
+        Details: 'Admin control mode'
+      })
     })
   })
 
@@ -2082,8 +2091,18 @@ describe('Activation State Machine', () => {
       }))
 
     it('should send success message to device', () => {
+      context.status = 'success'
+      devices[clientId].status = { Status: 'Admin control mode.' }
       activation.sendMessageToDevice({ context })
       expect(sendSpy).toHaveBeenCalled()
+      expect(devices[clientId].status.Components?.Activation?.Result).toEqual('Success')
+      // The full status is sent to RPC, keeping the legacy prose Status for backwards compatibility
+      // alongside the structured Components block. The confusing roll-up/version fields are gone.
+      const sentPayload = JSON.parse(responseMessageSpy.mock.calls[0][4])
+      expect(sentPayload.Status).toEqual('Admin control mode.')
+      expect(sentPayload.Components?.Activation?.Result).toEqual('Success')
+      expect(sentPayload.ComponentsRollup).toBeUndefined()
+      expect(sentPayload.ComponentsVersion).toBeUndefined()
     })
     it('should update Credentials', () => {
       activation.updateCredentials({ context })
@@ -2093,7 +2112,10 @@ describe('Activation State Machine', () => {
     it('should send error message to device', () => {
       context.status = 'error'
       context.message = null
+      // Device never reached an activated control mode, so Activation is recorded as a Failure.
+      devices[clientId].activationStatus = false
       activation.sendMessageToDevice({ context })
+      // The full status object is serialized to RPC unchanged for backwards compatibility (issue #2665).
       expect(responseMessageSpy).toHaveBeenCalledWith(
         context.clientId,
         context.message,
@@ -2101,7 +2123,34 @@ describe('Activation State Machine', () => {
         'failed',
         JSON.stringify(devices[clientId].status)
       )
+      const sentPayload = JSON.parse(responseMessageSpy.mock.calls[0][4])
+      expect(sentPayload.ComponentsRollup).toBeUndefined()
+      expect(sentPayload.ComponentsVersion).toBeUndefined()
+      expect(devices[clientId].status.Components?.Activation?.Result).toEqual('Failure')
       expect(sendSpy).toHaveBeenCalled()
+    })
+
+    it('on a component failure, sends the full NotApplicable set to RPC but logs only the components that ran', () => {
+      context.status = 'error'
+      context.message = null
+      devices[clientId].activationStatus = false
+      // TLS genuinely ran and failed; nothing else was attempted.
+      devices[clientId].status = { Components: { TLS: { Result: 'Failure', Details: 'TLS handshake failed' } } }
+      const loggerSpy = vi.spyOn(activation.logger, 'info')
+      activation.sendMessageToDevice({ context })
+
+      // Wire to RPC: full set incl. the NotApplicable backfill (backwards compatibility).
+      const sentPayload = JSON.parse(responseMessageSpy.mock.calls[0][4])
+      expect(sentPayload.Components.TLS.Result).toEqual('Failure')
+      expect(sentPayload.Components.CIRAProxy.Result).toEqual('NotApplicable')
+      expect(sentPayload.Components.WiredNetwork.Result).toEqual('NotApplicable')
+
+      // Log: the failed TLS stays; the NotApplicable fillers are stripped out.
+      const logged = JSON.parse(loggerSpy.mock.calls.at(-1)?.[0] as string)
+      expect(logged.Components.TLS.Result).toEqual('Failure')
+      expect(logged.Components.Activation.Result).toEqual('Failure')
+      expect(logged.Components.CIRAProxy).toBeUndefined()
+      expect(logged.Components.WiredNetwork).toBeUndefined()
     })
   })
 

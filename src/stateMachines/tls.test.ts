@@ -17,10 +17,14 @@ import { Environment } from '../utils/Environment.js'
 import { vi } from 'vitest'
 const invokeWsmanCallSpy = vi.hoisted(() => vi.fn<any>())
 const invokeEnterpriseAssistantCallSpy = vi.hoisted(() => vi.fn<any>())
-vi.mock('./common.js', () => ({
-  invokeWsmanCall: invokeWsmanCallSpy,
-  invokeEnterpriseAssistantCall: invokeEnterpriseAssistantCallSpy
-}))
+vi.mock('./common.js', async () => {
+  const actual = await vi.importActual<typeof import('./common.js')>('./common.js')
+  return {
+    invokeWsmanCall: invokeWsmanCallSpy,
+    invokeEnterpriseAssistantCall: invokeEnterpriseAssistantCallSpy,
+    recordComponentResult: actual.recordComponentResult
+  }
+})
 
 const { TLS } = await import('./tls.js')
 
@@ -397,6 +401,10 @@ describe('TLS State Machine', () => {
     context.statusMessage = 'success status message'
     tls.updateConfigurationStatus({ context })
     expect(devices[context.clientId].status.TLSConfiguration).toEqual('success status message')
+    expect(devices[context.clientId].status.Components?.TLS).toEqual({
+      Result: 'Success',
+      Details: 'Success status message'
+    })
     expect(invokeWsmanCallSpy).not.toHaveBeenCalled()
   })
   it('should updateConfigurationStatus when failure', async () => {
@@ -404,6 +412,10 @@ describe('TLS State Machine', () => {
     context.errorMessage = 'error status message'
     tls.updateConfigurationStatus({ context })
     expect(devices[context.clientId].status.TLSConfiguration).toEqual('error status message')
+    expect(devices[context.clientId].status.Components?.TLS).toEqual({
+      Result: 'Failure',
+      Details: 'Error status message'
+    })
     expect(invokeWsmanCallSpy).not.toHaveBeenCalled()
   })
   it('should enumerateTLSData', async () => {
