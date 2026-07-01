@@ -17,7 +17,7 @@ export default {
   get(
     clientId: string,
     payload: string | null,
-    method: 'error' | 'wsman' | 'success' | 'heartbeat_request' | 'tls_data' | 'port_switch',
+    method: 'error' | 'wsman' | 'success' | 'heartbeat_request' | 'tls_data' | 'port_switch' | 'progress',
     status: 'failed' | 'success' | 'ok' | 'heartbeat',
     message = ''
   ): ClientMsg {

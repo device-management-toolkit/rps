@@ -25,7 +25,16 @@ import { DbCreatorFactory } from '../factories/DbCreatorFactory.js'
 import { AMTUserName, GATEWAY_TIMEOUT_ERROR, asArray } from '../utils/constants.js'
 import { CIRAConfiguration } from './ciraConfiguration.js'
 import { TLS } from './tls.js'
-import { type CommonContext, invokeWsmanCall, processTLSTunnelResponse } from './common.js'
+import {
+  type CommonContext,
+  invokeWsmanCall,
+  processTLSTunnelResponse,
+  sendProgressToDevice,
+  recordComponentResult,
+  deriveControlMode,
+  finalizeComponentResults,
+  applicableComponents
+} from './common.js'
 import ClientResponseMsg from '../utils/ClientResponseMsg.js'
 import { Unconfiguration } from './unconfiguration.js'
 import { type DeviceCredentials } from '../interfaces/ISecretManagerService.js'
@@ -110,6 +119,15 @@ export class Activation {
         )
 
         if (result?.body != null && result?.body !== '') {
+          // Device already known to MPS — stash its deviceInfo so a later status write can carry
+          // forward the write-once activatedAt, and remember it exists (issue #2665).
+          try {
+            const existing = typeof result.body === 'string' ? JSON.parse(result.body) : result.body
+            clientObj.existingDeviceInfo = existing?.deviceInfo
+          } catch {
+            // Non-JSON body — ignore; we just won't have a prior activatedAt to preserve.
+          }
+          clientObj.registeredInMPS = true
           return true // if we have a result the device is already in their tenant and can activated
         }
       } else {
@@ -137,12 +155,34 @@ export class Activation {
     if (status === 'success') {
       method = 'success'
     } else {
-      clientObj.status.Status = context.errorMessage !== '' ? context.errorMessage : 'Failed'
+      // errorMessage is optional/untyped — guard against undefined, not just '' (issue #2665).
+      clientObj.status.Status = context.errorMessage ? context.errorMessage : 'Failed'
       method = 'failed'
+      // Record the Activation component as a failure when the device never reached an
+      // activated control mode (issue #2665). If it activated but a later component failed,
+      // 'Set activation status' already recorded Activation as a success — don't overwrite it.
+      if (clientObj.activationStatus !== true) {
+        recordComponentResult(clientId, 'Activation', {
+          Result: 'Failure',
+          Details: clientObj.status.Status
+        })
+      }
     }
+    finalizeComponentResults(clientId, status === 'success')
+    // Full status to RPC for backwards compatibility.
     const responseMessage = ClientResponseMsg.get(clientId, null, status, method, JSON.stringify(clientObj.status))
-    this.logger.info(JSON.stringify(responseMessage, null, '\t'))
+    // Log the final per-component provisioning status (only the components that ran).
+    this.logger.info(
+      `Provisioning status: ${JSON.stringify({ status: applicableComponents(clientObj.status.Components) }, null, '\t')}`
+    )
     devices[clientId].ClientSocket?.send(JSON.stringify(responseMessage))
+    // Persist final provisioning status to MPS — best-effort, never blocks the device reply (issue #2665).
+    void this.persistProvisioningStatusToMPS({
+      clientId,
+      profile: context.profile,
+      friendlyName: context.friendlyName,
+      success: status === 'success'
+    })
   }
 
   createSignedString(clientId: string, hashAlgorithm: string): boolean {
@@ -427,7 +467,19 @@ export class Activation {
   setActivationStatus({ context }): void {
     const clientObj = devices[context.clientId]
     this.logger.debug(`Device ${clientObj.uuid} activated in ${clientObj.status.Status}.`)
+    // Emit once: the E2E TLS flow activates (CCM) then upgrades (ACM), calling this twice.
+    const alreadyActivated = clientObj.activationStatus === true
     clientObj.activationStatus = true
+    // Write-once activation timestamp — RPS performed this activation, so stamp 'now' (issue #2665).
+    clientObj.activatedAt ??= new Date()
+    if (!alreadyActivated) {
+      sendProgressToDevice(context.clientId, 'Activation completed')
+    }
+    recordComponentResult(context.clientId, 'Activation', {
+      Result: 'Success',
+      Mode: deriveControlMode(clientObj.status.Status),
+      Details: clientObj.status.Status
+    })
     MqttProvider.publishEvent(
       'success',
       ['Activator', 'execute'],
@@ -464,43 +516,91 @@ export class Activation {
     return true
   }
 
+  // Builds the MPS deviceInfo blob: firmware metadata + structured provisioning status (issue #2665).
+  // MPS replaces deviceInfo wholesale, so this always emits the full set.
+  buildMpsDeviceInfo(clientObj: ClientObject, profile: AMTConfiguration | null | undefined, success: boolean): any {
+    // activatedAt is write-once: this session's stamp, else the value MPS already holds, else null when unknown.
+    const activatedAt = clientObj.activatedAt ?? clientObj.existingDeviceInfo?.activatedAt ?? null
+    return {
+      fwVersion: clientObj.ClientData.payload.ver,
+      fwBuild: clientObj.ClientData.payload.build,
+      fwSku: clientObj.ClientData.payload.sku,
+      currentMode: clientObj.ClientData.payload.currentMode?.toString(),
+      features: clientObj.ClientData.payload.features,
+      ipAddress: clientObj.ClientData.payload.ipConfiguration?.ipAddress,
+      // Full structured per-component provisioning status (issue #2665): the exact
+      // Components object RPS logs and returns to RPC, stored verbatim under `status`.
+      status: applicableComponents(clientObj.status?.Components),
+      activatedAt,
+      lastProvisionedAt: new Date(),
+      lastUpdated: new Date()
+    }
+  }
+
+  // Assembles the full MPS POST body around the deviceInfo blob.
+  buildMpsDevicePayload(clientObj: ClientObject, profile: AMTConfiguration | null | undefined, success: boolean): any {
+    const jsonData: any = {
+      guid: clientObj.uuid,
+      hostname: clientObj.hostname,
+      mpsusername: clientObj.mpsUsername,
+      tags: profile?.tags ?? [],
+      tenantId: profile?.tenantId,
+      dnsSuffix: clientObj.ClientData?.payload.fqdn,
+      deviceInfo: this.buildMpsDeviceInfo(clientObj, profile, success)
+    }
+    return jsonData
+  }
+
   saveDeviceInfoToMPS = async ({ input }: { input: ActivationContext }): Promise<boolean> => {
     const { clientId, profile } = input
     const clientObj = devices[clientId]
     /* Register device metadata with MPS */
     try {
-      const deviceInfo = {
-        fwVersion: clientObj.ClientData.payload.ver,
-        fwBuild: clientObj.ClientData.payload.build,
-        fwSku: clientObj.ClientData.payload.sku,
-        currentMode: clientObj.ClientData.payload.currentMode?.toString(),
-        features: clientObj.ClientData.payload.features,
-        ipAddress: clientObj.ClientData.payload.ipConfiguration?.ipAddress,
-        lastUpdated: new Date()
-      }
       const url = `${Environment.Config.mps_server}/api/v1/devices`
-      const jsonData: any = {
-        guid: clientObj.uuid,
-        hostname: clientObj.hostname,
-        mpsusername: clientObj.mpsUsername,
-        tags: profile?.tags ?? [],
-        tenantId: profile?.tenantId,
-        dnsSuffix: clientObj.ClientData?.payload.fqdn,
-        deviceInfo
-      }
-      // friendlyName with an empty string indicates clearing the value
-      // otherwise, do not include the property so an update of the device
-      // preserves existing value
+      const jsonData = this.buildMpsDevicePayload(clientObj, profile, true)
+      // Empty string clears friendlyName; omit it so an update preserves the existing value.
       if (input.friendlyName != null) {
         jsonData.friendlyName = input.friendlyName
       }
       await got.post(url, { json: jsonData })
+      clientObj.registeredInMPS = true // device now known to MPS (issue #2665)
       return true
     } catch (err) {
       MqttProvider.publishEvent('fail', ['Activator'], 'unable to register metadata with MPS', clientObj.uuid)
       this.logger.error('unable to register metadata with MPS', err)
     }
     return false
+  }
+
+  // Best-effort final status write, fired from the terminal states so success, already-activated
+  // no-op, and failure paths are all covered (issue #2665). MPS upserts, so a success registers a
+  // missing device; a failure only updates a device MPS already tracks (no rows for never-registered
+  // devices). Fire-and-forget: failures are logged, never block the activation result.
+  persistProvisioningStatusToMPS = async (input: {
+    clientId: string
+    profile?: AMTConfiguration | null
+    friendlyName?: string | null
+    success: boolean
+  }): Promise<void> => {
+    const { clientId, profile, success } = input
+    const clientObj = devices[clientId]
+    if (clientObj?.uuid == null) {
+      return
+    }
+    // Don't create an MPS row for a device that failed before it was ever registered.
+    if (!success && clientObj.registeredInMPS !== true) {
+      return
+    }
+    try {
+      const jsonData = this.buildMpsDevicePayload(clientObj, profile, success)
+      if (input.friendlyName != null) {
+        jsonData.friendlyName = input.friendlyName
+      }
+      await got.post(`${Environment.Config.mps_server}/api/v1/devices`, { json: jsonData })
+      clientObj.registeredInMPS = true
+    } catch (err) {
+      this.logger.error('unable to persist provisioning status to MPS', err)
+    }
   }
 
   commitChanges = async ({ input }: { input: ActivationContext }): Promise<any> => {
@@ -1316,7 +1416,10 @@ export class Activation {
       'Send Message to Device': this.sendMessageToDevice.bind(this),
       'Get Provisioning CertObj': this.GetProvisioningCertObj.bind(this),
       'Compare Domain Cert Hashes': this.compareCertHashes.bind(this),
-      'Update AMT Credentials': this.updateCredentials.bind(this)
+      'Update AMT Credentials': this.updateCredentials.bind(this),
+      'Send Progress': ({ context }, params: { label: string }) => {
+        sendProgressToDevice(context.clientId, params.label)
+      }
     }
   }).createMachine({
     context: ({ input }) => ({
@@ -1370,6 +1473,7 @@ export class Activation {
         }
       },
       GET_AMT_PROFILE: {
+        entry: { type: 'Send Progress', params: { label: 'Starting provisioning' } },
         invoke: {
           src: 'getAMTProfile',
           input: ({ context }) => context,
@@ -1397,7 +1501,8 @@ export class Activation {
         always: [
           {
             guard: 'isActivated',
-            target: 'CHECK_TENANT_ACCESS'
+            target: 'CHECK_TENANT_ACCESS',
+            actions: { type: 'Send Progress', params: { label: 'Device already activated' } }
           },
           {
             guard: 'isTlsActivation',
@@ -2397,7 +2502,10 @@ export class Activation {
         }
       },
       UNCONFIGURATION: {
-        entry: sendTo('unconfiguration-machine', { type: 'REMOVECONFIG' }),
+        entry: [
+          { type: 'Send Progress', params: { label: 'Clearing previous configuration' } },
+          sendTo('unconfiguration-machine', { type: 'REMOVECONFIG' })
+        ],
         invoke: {
           src: 'unconfiguration',
           id: 'unconfiguration-machine',
@@ -2417,7 +2525,10 @@ export class Activation {
         }
       },
       NETWORK_CONFIGURATION: {
-        entry: sendTo('network-configuration-machine', { type: 'NETWORKCONFIGURATION' }),
+        entry: [
+          { type: 'Send Progress', params: { label: 'Configuring network settings' } },
+          sendTo('network-configuration-machine', { type: 'NETWORKCONFIGURATION' })
+        ],
         invoke: {
           src: 'networkConfiguration',
           id: 'network-configuration-machine',
@@ -2436,7 +2547,10 @@ export class Activation {
         }
       },
       FEATURES_CONFIGURATION: {
-        entry: sendTo('features-configuration-machine', { type: 'CONFIGURE_FEATURES' }),
+        entry: [
+          { type: 'Send Progress', params: { label: 'Configuring AMT features' } },
+          sendTo('features-configuration-machine', { type: 'CONFIGURE_FEATURES' })
+        ],
         invoke: {
           src: 'featuresConfiguration',
           id: 'features-configuration-machine',
@@ -2474,7 +2588,10 @@ export class Activation {
         }
       },
       CIRA: {
-        entry: sendTo('cira-machine', { type: 'CONFIGURE_CIRA' }),
+        entry: [
+          { type: 'Send Progress', params: { label: 'Configuring CIRA remote access' } },
+          sendTo('cira-machine', { type: 'CONFIGURE_CIRA' })
+        ],
         invoke: {
           src: 'cira',
           id: 'cira-machine',
@@ -2502,7 +2619,10 @@ export class Activation {
         }
       },
       TLS: {
-        entry: sendTo('tls-machine', { type: 'CONFIGURE_TLS' }),
+        entry: [
+          { type: 'Send Progress', params: { label: 'Configuring TLS' } },
+          sendTo('tls-machine', { type: 'CONFIGURE_TLS' })
+        ],
         invoke: {
           src: 'tls',
           id: 'tls-machine',
