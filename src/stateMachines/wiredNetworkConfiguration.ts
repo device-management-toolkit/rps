@@ -11,7 +11,7 @@ import { devices } from '../devices.js'
 import { Error } from './error.js'
 import { Configurator } from '../Configurator.js'
 import { DbCreatorFactory } from '../factories/DbCreatorFactory.js'
-import { type CommonContext, invokeWsmanCall } from './common.js'
+import { type CommonContext, invokeWsmanCall, sendProgressToDevice, recordComponentResult } from './common.js'
 import { UNEXPECTED_PARSE_ERROR } from '../utils/constants.js'
 import { Environment } from '../utils/Environment.js'
 import {
@@ -253,6 +253,18 @@ export class WiredConfiguration {
       'Update Configuration Status': ({ context }) => {
         const device = devices[context.clientId]
         device.status.Network = context.errorMessage ?? context.statusMessage
+        if (context.errorMessage) {
+          sendProgressToDevice(context.clientId, `Wired network configuration failed: ${context.errorMessage}`)
+        } else {
+          sendProgressToDevice(context.clientId, 'Wired network configuration completed')
+        }
+        recordComponentResult(
+          context.clientId,
+          'WiredNetwork',
+          context.errorMessage
+            ? { Result: 'Failure', Details: context.errorMessage }
+            : { Result: 'Success', Details: context.statusMessage }
+        )
       }
     }
   }).createMachine({

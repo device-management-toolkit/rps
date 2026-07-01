@@ -21,10 +21,12 @@ import { devices } from '../devices.js'
 import { HttpHandler } from '../HttpHandler.js'
 import { type MachineImplementationsSimplified, createActor, fromPromise } from 'xstate'
 import { AMT, CIM, IPS } from '@device-management-toolkit/wsman-messages'
+import { sendProgressToDevice } from './common.js'
 
 const invokeWsmanCallSpy = vi.hoisted(() => vi.fn<any>())
 vi.mock('./common.js', () => ({
-  invokeWsmanCall: invokeWsmanCallSpy
+  invokeWsmanCall: invokeWsmanCallSpy,
+  sendProgressToDevice: vi.fn()
 }))
 
 const { FeaturesConfiguration } = await import('./featuresConfiguration.js')
@@ -140,6 +142,11 @@ describe('Features State Machine', () => {
             const expectedState: any = flowStates[currentStateIndex++]
             expect(state.matches(expectedState)).toBe(true)
             if (state.matches('SUCCESS') && currentStateIndex === flowStates.length) {
+              // Progress reports which features were configured (issue #2665)
+              expect(sendProgressToDevice).toHaveBeenCalledWith(
+                clientId,
+                'AMT features completed: KVM, SOL, IDER (User Consent: All)'
+              )
               resolve()
             }
           } catch (err) {

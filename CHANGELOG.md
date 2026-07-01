@@ -1,3 +1,24 @@
+# [2.38.0](https://github.com/device-management-toolkit/rps/compare/v2.37.0...v2.38.0) (2026-07-01)
+
+
+### Features
+
+* **activation:** stream real-time provisioning progress to rpc-go ([#2765](https://github.com/device-management-toolkit/rps/issues/2765)) ([4416fbb](https://github.com/device-management-toolkit/rps/commit/4416fbbfa4cd46494a7efd1ee5b0b073a4e3a86c)), closes [device-management-toolkit/rps#2665](https://github.com/device-management-toolkit/rps/issues/2665)
+
+# [2.37.0](https://github.com/device-management-toolkit/rps/compare/v2.36.7...v2.37.0) (2026-07-01)
+
+
+### Features
+
+* **activation:** structured per-component provisioning result ([#2744](https://github.com/device-management-toolkit/rps/issues/2744)) ([47f1166](https://github.com/device-management-toolkit/rps/commit/47f1166fb5be9cd590694ef0e2787af347d80683)), closes [#2665](https://github.com/device-management-toolkit/rps/issues/2665)
+
+## [2.36.7](https://github.com/device-management-toolkit/rps/compare/v2.36.6...v2.36.7) (2026-06-30)
+
+
+### Bug Fixes
+
+* Update the domain cert checking to cater for the edit of domain cert reupload ([#2757](https://github.com/device-management-toolkit/rps/issues/2757)) ([febfc0f](https://github.com/device-management-toolkit/rps/commit/febfc0ff632599fcf3391482c53ec25acf98426d))
+
 ## [2.36.6](https://github.com/device-management-toolkit/rps/compare/v2.36.5...v2.36.6) (2026-06-17)
 
 
