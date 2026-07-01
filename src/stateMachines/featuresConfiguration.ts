@@ -12,7 +12,7 @@ import {
   mapAMTUserConsent,
   AMTUserConsent
 } from '../models/index.js'
-import { type CommonContext, invokeWsmanCall } from './common.js'
+import { type CommonContext, invokeWsmanCall, sendProgressToDevice } from './common.js'
 
 export interface FeatureContext extends CommonContext {
   isRedirectionChanged: boolean
@@ -306,14 +306,25 @@ export class FeaturesConfiguration {
         }
       },
       SUCCESS: {
-        entry: () => {
+        entry: ({ context }) => {
           this.logger.info('AMT Features Configuration success')
+          const cfg = context.amtConfiguration
+          const enabled: string[] = []
+          if (cfg?.kvmEnabled) enabled.push('KVM')
+          if (cfg?.solEnabled) enabled.push('SOL')
+          if (cfg?.iderEnabled) enabled.push('IDER')
+          const userConsent = cfg?.userConsent != null ? cfg.userConsent : AMTUserConsent.ALL
+          let detail = 'AMT features completed'
+          if (enabled.length > 0) detail += `: ${enabled.join(', ')}`
+          detail += ` (User Consent: ${userConsent})`
+          sendProgressToDevice(context.clientId, detail)
         },
         type: 'final'
       },
       FAILED: {
         entry: ({ context }) => {
           this.logger.error(`AMT Features Configuration failed: ${context.statusMessage}`)
+          sendProgressToDevice(context.clientId, `AMT features configuration failed: ${context.statusMessage}`)
         },
         type: 'final'
       }

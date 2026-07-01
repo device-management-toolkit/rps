@@ -17,6 +17,7 @@ import {
 import { type MachineImplementationsSimplified, createActor, fromPromise } from 'xstate'
 import { HttpHandler } from '../HttpHandler.js'
 import { IPS } from '@device-management-toolkit/wsman-messages'
+import * as common from './common.js'
 
 const { ProxyConfiguration } = await import('./proxyConfiguration.js')
 const clientId = randomUUID()
@@ -116,6 +117,7 @@ describe('Proxy Configuration State Machine', () => {
 
     it('should add a Proxy config to AMT.', () =>
       new Promise<void>((resolve, reject) => {
+        const progressSpy = vi.spyOn(common, 'sendProgressToDevice').mockImplementation(() => {})
         context.proxyConfig = {
           proxyName: 'proxy1',
           address: 'www.vprodemo.com',
@@ -146,10 +148,66 @@ describe('Proxy Configuration State Machine', () => {
               if (state.matches('SUCCESS') && currentStateIndex === flowStates.length) {
                 const status = devices[clientId].status.Network
                 expect(status).toEqual('Initial. Proxy Configured')
+                // Phase start + completion progress lines (issue #2665)
+                expect(progressSpy).toHaveBeenCalledWith(clientId, 'Configuring proxies')
+                expect(progressSpy).toHaveBeenCalledWith(clientId, 'Proxies configuration completed')
                 expect(devices[clientId].status.Components?.CIRAProxy).toEqual({
                   Result: 'Success',
                   Details: 'Proxy Configured'
                 })
+                progressSpy.mockRestore()
+                service.stop()
+                resolve()
+              }
+            } catch (err) {
+              reject(err)
+            }
+          },
+          error: (err) => {
+            reject(err)
+          }
+        })
+        service.start()
+        service.send({ type: 'PROXYCONFIG', clientId })
+      }))
+
+    it('emits a per-proxy "Failed to add" progress line with the AMT ReturnValue', () =>
+      new Promise<void>((resolve, reject) => {
+        const progressSpy = vi.spyOn(common, 'sendProgressToDevice').mockImplementation(() => {})
+        context.proxyConfig = {
+          proxyName: 'proxy1',
+          address: 'www.vprodemo.com',
+          infoFormat: 201,
+          port: 900,
+          networkDnsSuffix: 'intel.com'
+        }
+        // AMT accepts the call but rejects the proxy (non-zero ReturnValue)
+        config.actors!.addProxyConfigs = fromPromise(
+          async () => await Promise.resolve({ Envelope: { Body: { AddProxyAccessPoint_OUTPUT: { ReturnValue: 1 } } } })
+        )
+        context.proxyConfigName = 'proxy1'
+        context.proxyConfigsCount = 1
+        config.guards = { isMoreProxyConfigs: () => false, isProxyConfigsExist: () => true }
+
+        const machine = proxyConfiguration.machine.provide(config)
+        const flowStates = [
+          'ACTIVATION',
+          'GET_PROXY_CONFIG',
+          'ADD_PROXY_CONFIGS',
+          'SUCCESS'
+        ]
+        const service = createActor(machine, { input: context })
+        service.subscribe({
+          next: (state) => {
+            try {
+              const expectedState: any = flowStates[currentStateIndex++]
+              expect(state.matches(expectedState)).toBe(true)
+              if (state.matches('SUCCESS') && currentStateIndex === flowStates.length) {
+                expect(progressSpy).toHaveBeenCalledWith(
+                  clientId,
+                  'Failed to add proxy configuration proxy1 (ReturnValue 1)'
+                )
+                progressSpy.mockRestore()
                 service.stop()
                 resolve()
               }
