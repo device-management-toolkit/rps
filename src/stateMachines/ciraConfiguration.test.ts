@@ -30,6 +30,7 @@ vi.mock('./common.js', async () => {
     invokeEnterpriseAssistantCall: vi.fn(),
     processTLSTunnelResponse: vi.fn(),
     sendProgressToDevice: vi.fn(),
+    recordComponentResult: actual.recordComponentResult,
     HttpResponseError,
     isDigestRealmValid,
     coalesceMessage
@@ -184,6 +185,10 @@ describe('CIRA Configuration State Machine', () => {
               if (state.matches('SUCCESS') || state.matches('FAILURE') || currentStateIndex === flowStates.length) {
                 const status = devices[clientId].status.CIRAConnection
                 expect(status).toEqual('Configured')
+                expect(devices[clientId].status.Components?.CIRAConnection).toEqual({
+                  Result: 'Success',
+                  Details: 'Configured'
+                })
                 resolve()
               }
             }
@@ -213,6 +218,7 @@ describe('CIRA Configuration State Machine', () => {
           try {
             if (state.matches('SUCCESS') || state.matches('FAILURE')) {
               expect(state.matches('FAILURE')).toBeTruthy()
+              expect(devices[clientId].status.Components?.CIRAConnection?.Result).toEqual('Failure')
               resolve()
             }
           } catch (err) {

@@ -20,6 +20,7 @@ import {
 } from '../utils/constants.js'
 import Logger from '../Logger.js'
 import { type HttpHandler } from '../HttpHandler.js'
+import { type ComponentResult, type ComponentResults } from '../models/RCS.Config.js'
 import pkg, { type HttpZResponseModel } from 'http-z'
 import { parseChunkedMessage } from '../utils/parseChunkedMessage.js'
 import { TLSTunnelManager } from '../TLSTunnelManager.js'
@@ -438,6 +439,183 @@ export function coalesceMessage(prefixMsg: string, err: any): string {
     }
   }
   return msg
+}
+
+// Every component RPS can report on. Used to backfill 'NotApplicable' entries so the
+// Components block always carries the full, predictable key set (issue #2665).
+const ALL_COMPONENTS: (keyof ComponentResults)[] = [
+  'Activation',
+  'WiredNetwork',
+  'WirelessNetwork',
+  'TLS',
+  'CIRAProxy',
+  'CIRAConnection'
+]
+
+const NOT_APPLICABLE_DETAILS: Record<keyof ComponentResults, string> = {
+  Activation: 'Activation not part of this configuration',
+  WiredNetwork: 'Wired network not part of this configuration',
+  WirelessNetwork: 'Wireless network not part of this configuration',
+  TLS: 'TLS not part of this configuration',
+  CIRAProxy: 'CIRA proxy not part of this configuration',
+  CIRAConnection: 'CIRA connection not part of this configuration'
+}
+
+/**
+ * Normalizes a human-readable detail string to sentence-case with no trailing period, so the
+ * structured Components block reads consistently regardless of which child machine produced it.
+ */
+export function normalizeDetails(details: string): string {
+  const trimmed = details.trim().replace(/\.+$/, '')
+  if (trimmed.length === 0) {
+    return trimmed
+  }
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1)
+}
+
+/**
+ * Maps a legacy control-mode status string onto a clean machine-readable mode enum.
+ * Returns undefined when the string is absent or carries no recognizable control mode.
+ */
+export function deriveControlMode(statusMessage: string | undefined): 'ACM' | 'CCM' | undefined {
+  if (statusMessage == null) {
+    return undefined
+  }
+  const normalized = statusMessage.toLowerCase()
+  if (normalized.includes('admin')) {
+    return 'ACM'
+  }
+  if (normalized.includes('client')) {
+    return 'CCM'
+  }
+  return undefined
+}
+
+/** Maps the device-reported AMT control mode (1 = CCM, 2 = ACM) onto the result Mode enum. */
+export function deriveModeFromCurrentMode(currentMode: number | undefined): 'ACM' | 'CCM' | undefined {
+  if (currentMode === 1) {
+    return 'CCM'
+  }
+  if (currentMode === 2) {
+    return 'ACM'
+  }
+  return undefined
+}
+
+/** Builds the proxy/wifi "added N / failed M" status, appends it to status.Network, returns message + failure flag. */
+export function updateNetworkStatus(opts: {
+  clientId: string
+  errorMessage?: string
+  statusMessage?: string
+  added?: string | null
+  failedItems?: string | null
+  itemLabel: string
+}): { message: string | undefined; failed: boolean } {
+  const { clientId, errorMessage, statusMessage, added, failedItems, itemLabel } = opts
+  const device = devices[clientId]
+  const networkStatus = device.status.Network
+  let message: string | undefined
+  if (errorMessage) {
+    message = errorMessage
+  } else if (failedItems) {
+    message =
+      added != null ? `Added ${added} ${itemLabel}. Failed to add ${failedItems}` : `Failed to add ${failedItems}`
+  } else {
+    message = statusMessage
+  }
+  if (message != null) {
+    device.status.Network = networkStatus ? `${networkStatus}. ${message}` : message
+  }
+  return { message, failed: !!errorMessage || !!failedItems }
+}
+
+/**
+ * Records a structured per-component activation result onto the shared device status object
+ * (issue #2665). This is additive: it sits alongside the legacy flat status strings and is
+ * serialized into the final WebSocket `message` payload. Recording a component result never
+ * alters control flow — a failure is captured for visibility but does not change the
+ * activation outcome.
+ *
+ * Shape invariants enforced here: Details are normalized to sentence-case (the failure reason rides
+ * in Details), and undefined optional fields are omitted.
+ */
+export function recordComponentResult(
+  clientId: string,
+  component: keyof ComponentResults,
+  result: ComponentResult
+): void {
+  const clientObj = devices[clientId]
+  if (clientObj?.status == null) {
+    return
+  }
+  if (clientObj.status.Components == null) {
+    clientObj.status.Components = {}
+  }
+  const normalized: ComponentResult = { Result: result.Result }
+  if (result.Mode != null) {
+    normalized.Mode = result.Mode
+  }
+  if (result.Details != null) {
+    normalized.Details = normalizeDetails(result.Details)
+  }
+  clientObj.status.Components[component] = normalized
+}
+
+/**
+ * Finalizes the structured Components block just before it is serialized to the device (issue #2665):
+ * backfills Activation for already-activated devices that skipped the activation steps, and fills every
+ * un-attempted component with a NotApplicable entry so the key set is always complete. Additive only —
+ * the legacy flat status strings are left untouched for backwards compatibility.
+ */
+export function finalizeComponentResults(clientId: string, overallSuccess: boolean): void {
+  const clientObj = devices[clientId]
+  if (clientObj?.status == null) {
+    return
+  }
+  const status = clientObj.status
+  if (status.Components == null) {
+    status.Components = {}
+  }
+  // Backfill Activation for already-activated devices (fresh activations already recorded it).
+  if (overallSuccess && status.Components.Activation == null) {
+    if (status.Status != null) {
+      // Activated this session: prose status carries the mode.
+      recordComponentResult(clientId, 'Activation', {
+        Result: 'Success',
+        Mode: deriveControlMode(status.Status),
+        Details: status.Status
+      })
+    } else {
+      // Pure reconfigure: status.Status unset, so use the reported control mode.
+      const mode = deriveModeFromCurrentMode(clientObj.ClientData?.payload?.currentMode)
+      if (mode != null) {
+        recordComponentResult(clientId, 'Activation', {
+          Result: 'Success',
+          Mode: mode,
+          Details: `Device already activated in ${mode === 'ACM' ? 'admin' : 'client'} control mode`
+        })
+      }
+    }
+  }
+  for (const component of ALL_COMPONENTS) {
+    if (status.Components[component] == null) {
+      status.Components[component] = { Result: 'NotApplicable', Details: NOT_APPLICABLE_DETAILS[component] }
+    }
+  }
+}
+
+/** Drops NotApplicable entries (for logging only — the full set still goes to RPC). */
+export function applicableComponents(components: ComponentResults | undefined): ComponentResults {
+  const result: ComponentResults = {}
+  if (components == null) {
+    return result
+  }
+  for (const [name, entry] of Object.entries(components) as [keyof ComponentResults, ComponentResult][]) {
+    if (entry?.Result !== 'NotApplicable') {
+      result[name] = entry
+    }
+  }
+  return result
 }
 
 const isDigestRealmValid = (realm: string): boolean => {

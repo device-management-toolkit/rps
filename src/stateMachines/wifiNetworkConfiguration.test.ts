@@ -31,6 +31,8 @@ vi.mock('./common.js', async () => {
     invokeEnterpriseAssistantCall: invokeEnterpriseAssistantCallSpy,
     processTLSTunnelResponse: vi.fn(),
     sendProgressToDevice: sendProgressToDeviceSpy,
+    recordComponentResult: actual.recordComponentResult,
+    updateNetworkStatus: actual.updateNetworkStatus,
     HttpResponseError,
     isDigestRealmValid,
     coalesceMessage
@@ -276,6 +278,7 @@ describe('WiFi Network Configuration', () => {
                 expect(status).toEqual(
                   'Wired Network Configured. Failed to put Max Retransmissions to ethernet port settings'
                 )
+                expect(devices[clientId].status.Components?.WirelessNetwork?.Result).toEqual('Failure')
                 resolve()
               }
             } catch (err) {
@@ -889,6 +892,10 @@ describe('WiFi Network Configuration', () => {
                   clientId,
                   'Added wireless profile unsupportedEncryption'
                 )
+                expect(devices[clientId].status.Components?.WirelessNetwork).toEqual({
+                  Result: 'Success',
+                  Details: 'Wireless Configured'
+                })
                 resolve()
               }
             } catch (err) {
@@ -936,6 +943,11 @@ describe('WiFi Network Configuration', () => {
               if (state.matches('SUCCESS_SYNC_ONLY') && currentStateIndex === flowStates.length) {
                 const status = devices[clientId].status.Network
                 expect(status).toEqual('Wired Network Configured. Wireless Only Local Profile Sync Configured')
+                expect(devices[clientId].status.Components?.WirelessNetwork).toEqual({
+                  Result: 'Success',
+                  Mode: 'LocalProfileSync',
+                  Details: 'Local Profile Sync Configured'
+                })
                 resolve()
               }
             } catch (err) {
@@ -1196,6 +1208,10 @@ describe('WiFi Network Configuration', () => {
               if (state.matches('SUCCESS') && currentStateIndex === flowStates.length) {
                 const status = devices[clientId].status.Network
                 expect(status).toEqual('Wired Network Configured. Wireless Configured')
+                expect(devices[clientId].status.Components?.WirelessNetwork).toEqual({
+                  Result: 'Success',
+                  Details: 'Wireless Configured'
+                })
                 resolve()
               }
             } catch (err) {

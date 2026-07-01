@@ -9,11 +9,16 @@ import { assign, fromPromise, setup } from 'xstate'
 import { type ProxyConfig } from '../models/RCS.Config.js'
 import Logger from '../Logger.js'
 import { type AMTConfiguration } from '../models/index.js'
-import { devices } from '../devices.js'
 import { Error } from './error.js'
 import { Configurator } from '../Configurator.js'
 import { DbCreatorFactory } from '../factories/DbCreatorFactory.js'
-import { type CommonContext, invokeWsmanCall, sendProgressToDevice } from './common.js'
+import {
+  type CommonContext,
+  invokeWsmanCall,
+  sendProgressToDevice,
+  recordComponentResult,
+  updateNetworkStatus
+} from './common.js'
 import { UNEXPECTED_PARSE_ERROR } from '../utils/constants.js'
 
 export interface ProxyConfigContext extends CommonContext {
@@ -101,28 +106,26 @@ export class ProxyConfiguration {
           statusMessage,
           errorMessage
         } = context
-        const device = devices[clientId]
-        const networkStatus = device.status.Network
-        let message
-        if (errorMessage) {
-          message = errorMessage
-        } else if (proxyConfigsFailed) {
-          message =
-            proxyConfigsAdded != null
-              ? `Added ${proxyConfigsAdded} Proxy Configurations. Failed to add ${proxyConfigsFailed}`
-              : `Failed to add ${proxyConfigsFailed}`
-        } else {
-          message = statusMessage
-        }
-        device.status.Network = networkStatus ? `${networkStatus}. ${message}` : message
+        const { message, failed } = updateNetworkStatus({
+          clientId,
+          errorMessage,
+          statusMessage,
+          added: proxyConfigsAdded,
+          failedItems: proxyConfigsFailed,
+          itemLabel: 'Proxy Configurations'
+        })
         // Phase completion line — only when proxies were actually processed (something added or failed).
         if (proxyConfigsAdded != null || proxyConfigsFailed != null || errorMessage) {
-          if (errorMessage || proxyConfigsFailed) {
+          if (failed) {
             sendProgressToDevice(clientId, `Proxies configuration failed: ${message}`)
           } else {
             sendProgressToDevice(clientId, 'Proxies configuration completed')
           }
         }
+        recordComponentResult(clientId, 'CIRAProxy', {
+          Result: failed ? 'Failure' : 'Success',
+          Details: message
+        })
       },
       'Reset Retry Count': assign({ retryCount: () => 0 }),
       'Increment Retry Count': assign({ retryCount: ({ context }) => context.retryCount + 1 }),

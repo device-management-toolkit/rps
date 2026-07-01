@@ -25,7 +25,16 @@ import { DbCreatorFactory } from '../factories/DbCreatorFactory.js'
 import { AMTUserName, GATEWAY_TIMEOUT_ERROR, asArray } from '../utils/constants.js'
 import { CIRAConfiguration } from './ciraConfiguration.js'
 import { TLS } from './tls.js'
-import { type CommonContext, invokeWsmanCall, processTLSTunnelResponse, sendProgressToDevice } from './common.js'
+import {
+  type CommonContext,
+  invokeWsmanCall,
+  processTLSTunnelResponse,
+  sendProgressToDevice,
+  recordComponentResult,
+  deriveControlMode,
+  finalizeComponentResults,
+  applicableComponents
+} from './common.js'
 import ClientResponseMsg from '../utils/ClientResponseMsg.js'
 import { Unconfiguration } from './unconfiguration.js'
 import { type DeviceCredentials } from '../interfaces/ISecretManagerService.js'
@@ -137,11 +146,24 @@ export class Activation {
     if (status === 'success') {
       method = 'success'
     } else {
-      clientObj.status.Status = context.errorMessage !== '' ? context.errorMessage : 'Failed'
+      // errorMessage is optional/untyped — guard against undefined, not just '' (issue #2665).
+      clientObj.status.Status = context.errorMessage ? context.errorMessage : 'Failed'
       method = 'failed'
+      // Record the Activation component as a failure when the device never reached an
+      // activated control mode (issue #2665). If it activated but a later component failed,
+      // 'Set activation status' already recorded Activation as a success — don't overwrite it.
+      if (clientObj.activationStatus !== true) {
+        recordComponentResult(clientId, 'Activation', {
+          Result: 'Failure',
+          Details: clientObj.status.Status
+        })
+      }
     }
+    finalizeComponentResults(clientId, status === 'success')
+    // Full status to RPC for backwards compatibility.
     const responseMessage = ClientResponseMsg.get(clientId, null, status, method, JSON.stringify(clientObj.status))
-    this.logger.info(JSON.stringify(responseMessage, null, '\t'))
+    // Log only the components that ran.
+    this.logger.info(JSON.stringify({ Components: applicableComponents(clientObj.status.Components) }, null, '\t'))
     devices[clientId].ClientSocket?.send(JSON.stringify(responseMessage))
   }
 
@@ -433,6 +455,11 @@ export class Activation {
     if (!alreadyActivated) {
       sendProgressToDevice(context.clientId, 'Activation completed')
     }
+    recordComponentResult(context.clientId, 'Activation', {
+      Result: 'Success',
+      Mode: deriveControlMode(clientObj.status.Status),
+      Details: clientObj.status.Status
+    })
     MqttProvider.publishEvent(
       'success',
       ['Activator', 'execute'],

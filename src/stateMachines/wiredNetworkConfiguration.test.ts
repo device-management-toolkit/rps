@@ -31,6 +31,7 @@ vi.mock('./common.js', async () => {
     invokeEnterpriseAssistantCall: invokeEnterpriseAssistantCallSpy,
     processTLSTunnelResponse: vi.fn(),
     sendProgressToDevice: vi.fn(),
+    recordComponentResult: actual.recordComponentResult,
     coalesceMessage,
     isDigestRealmValid,
     HttpResponseError
@@ -453,6 +454,10 @@ describe('Wired Network Configuration', () => {
               if (state.matches('SUCCESS') && currentStateIndex === flowStates.length) {
                 const status = devices[clientId].status.Network
                 expect(status).toEqual('Wired Network Configured')
+                expect(devices[clientId].status.Components?.WiredNetwork).toEqual({
+                  Result: 'Success',
+                  Details: 'Wired Network Configured'
+                })
                 resolve()
               }
             } catch (err) {
@@ -512,6 +517,10 @@ describe('Wired Network Configuration', () => {
               const expectedState: any = flowStates[currentStateIndex++]
               expect(state.matches(expectedState)).toBe(true)
               if (state.matches('FAILED') && currentStateIndex === flowStates.length) {
+                expect(devices[clientId].status.Components?.WiredNetwork).toEqual({
+                  Result: 'Failure',
+                  Details: 'Failed to get 8021x wired profile'
+                })
                 resolve()
               }
             } catch (err) {
