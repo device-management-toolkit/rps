@@ -1,3 +1,10 @@
+## [2.38.1](https://github.com/device-management-toolkit/rps/compare/v2.38.0...v2.38.1) (2026-07-01)
+
+
+### Bug Fixes
+
+* dedupe wifi/proxy added & failed status lists ([#2766](https://github.com/device-management-toolkit/rps/issues/2766)) ([2d5d9a3](https://github.com/device-management-toolkit/rps/commit/2d5d9a30632479d51637efe25509f2f6c47dc492))
+
 # [2.38.0](https://github.com/device-management-toolkit/rps/compare/v2.37.0...v2.38.0) (2026-07-01)
 
 
