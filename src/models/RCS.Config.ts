@@ -88,11 +88,40 @@ export interface RemoteConfig {
   AMTDomains: AMTDomain[]
 }
 
+/**
+ * Per-component activation outcome. Additive structured detail that rides alongside the
+ * legacy flat status strings in the WebSocket `message` field (see issue #2665). Older
+ * clients that do not understand `Components` simply ignore it.
+ */
+export type ComponentResultStatus = 'Success' | 'Failure' | 'NotApplicable'
+
+/** Clean machine-readable mode enum for a component result. Prose belongs in Details. */
+export type ComponentMode = 'ACM' | 'CCM' | 'LocalProfileSync'
+
+export interface ComponentResult {
+  Result: ComponentResultStatus
+  Mode?: ComponentMode
+  /** Human-readable, sentence-case note (no trailing period). On failure this carries the reason. */
+  Details?: string
+}
+
+export interface ComponentResults {
+  Activation?: ComponentResult
+  WiredNetwork?: ComponentResult
+  WirelessNetwork?: ComponentResult
+  TLS?: ComponentResult
+  CIRAProxy?: ComponentResult
+  CIRAConnection?: ComponentResult
+}
+
 export interface Status {
   Status?: string
   Network?: string
   CIRAConnection?: string
   TLSConfiguration?: string
+  // Additive structured per-component results (issue #2665). The legacy flat fields above are
+  // always populated for backwards compatibility; Components carries the granular per-component breakdown.
+  Components?: ComponentResults
 }
 export interface ClientObject {
   ClientId: string
@@ -106,6 +135,10 @@ export interface ClientObject {
   certObj?: ProvisioningCertObj | null
   readyState?: number
   activationStatus?: boolean
+  // Provisioning-status persistence to MPS (issue #2665).
+  activatedAt?: Date // write-once: when RPS itself activated the device this session
+  existingDeviceInfo?: any // deviceInfo last stored in MPS, read at tenant check (carries activatedAt forward)
+  registeredInMPS?: boolean // true once the device is known to MPS (found at tenant check or registered this run)
   delayEndTime?: number
   amtPassword: string | null
   mebxPassword?: string | null

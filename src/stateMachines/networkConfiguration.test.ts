@@ -29,6 +29,9 @@ vi.mock('./common.js', async () => {
     invokeWsmanCall: invokeWsmanCallSpy,
     invokeEnterpriseAssistantCall: invokeEnterpriseAssistantCallSpy,
     processTLSTunnelResponse: vi.fn(),
+    // wired/wifi/proxy machines call this during their flows; mock it so the
+    // partial common.js mock still provides the export they import.
+    sendProgressToDevice: vi.fn(),
     HttpResponseError,
     isDigestRealmValid,
     coalesceMessage
