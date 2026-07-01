@@ -12,7 +12,13 @@ import { devices } from '../devices.js'
 import { Error } from './error.js'
 import { Configurator } from '../Configurator.js'
 import { DbCreatorFactory } from '../factories/DbCreatorFactory.js'
-import { type CommonContext, invokeWsmanCall, recordComponentResult, updateNetworkStatus } from './common.js'
+import {
+  type CommonContext,
+  invokeWsmanCall,
+  sendProgressToDevice,
+  recordComponentResult,
+  updateNetworkStatus
+} from './common.js'
 import { type WifiCredentials } from '../interfaces/ISecretManagerService.js'
 import { UNEXPECTED_PARSE_ERROR, DEFAULT_MAX_TCP_RETRANSMISSIONS } from '../utils/constants.js'
 import {
@@ -343,12 +349,32 @@ export class WiFiConfiguration {
           failedItems: profilesFailed,
           itemLabel: 'WiFi Profiles'
         })
+        if (failed) {
+          sendProgressToDevice(clientId, `Wireless network configuration failed: ${message}`)
+        } else {
+          sendProgressToDevice(clientId, 'Wireless network configuration completed')
+        }
         const isLocalSync = !failed && message === WIRELESS_LOCAL_PROFILE_SYNC_STATUS
         recordComponentResult(clientId, 'WirelessNetwork', {
           Result: failed ? 'Failure' : 'Success',
           Mode: isLocalSync ? 'LocalProfileSync' : undefined,
           Details: isLocalSync ? LOCAL_PROFILE_SYNC_DETAILS : message
         })
+      },
+      'Send WiFi Profile Progress': ({ context, event }) => {
+        // mirror 'Check Return Value' — keep in sync
+        const returnValue = event.output?.Envelope?.Body?.AddWiFiSettings_OUTPUT?.ReturnValue
+        // Note 802.1x per profile (wifi can mix PSK and 802.1x profiles).
+        // Truthy check, not != null — an empty profile name must not be labeled 802.1x.
+        const suffix = context.wifiProfile?.ieee8021xProfileName ? ' (802.1x)' : ''
+        if (returnValue === 0) {
+          sendProgressToDevice(context.clientId, `Added wireless profile ${context.wifiProfileName}${suffix}`)
+        } else {
+          sendProgressToDevice(
+            context.clientId,
+            `Failed to add wireless profile ${context.wifiProfileName}${suffix} (ReturnValue ${returnValue})`
+          )
+        }
       },
       'Reset Retry Count': assign({ retryCount: () => 0 }),
       'Increment Retry Count': assign({ retryCount: ({ context, event }) => context.retryCount + 1 }),
@@ -695,16 +721,20 @@ export class WiFiConfiguration {
           input: ({ context }) => context,
           id: 'add-wifi-settings',
           onDone: {
-            actions: 'Check Return Value',
+            actions: ['Check Return Value', 'Send WiFi Profile Progress'],
             target: 'CHECK_ADD_WIFI_SETTINGS_RESPONSE'
           },
           onError: {
-            actions: assign({
-              profilesFailed: ({ context }) =>
-                context.profilesFailed == null
-                  ? `${context.wifiProfileName}`
-                  : `${context.profilesFailed}, ${context.wifiProfileName}`
-            }),
+            actions: [
+              assign({
+                profilesFailed: ({ context }) =>
+                  context.profilesFailed == null
+                    ? `${context.wifiProfileName}`
+                    : `${context.profilesFailed}, ${context.wifiProfileName}`
+              }),
+              ({ context }) =>
+                sendProgressToDevice(context.clientId, `Failed to add wireless profile ${context.wifiProfileName}`)
+            ],
             target: 'CHECK_ADD_WIFI_SETTINGS_RESPONSE'
           }
         }
