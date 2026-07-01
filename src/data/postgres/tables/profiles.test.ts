@@ -128,11 +128,11 @@ describe('profiles tests', () => {
       tls_signing_authority as "tlsSigningAuthority",
       p.xmin as "version",
       ieee8021x_profile_name as "ieee8021xProfileName",
-      COALESCE(json_agg(json_build_object('profileName',wc.wireless_profile_name, 'priority', wc.priority)) FILTER (WHERE wc.wireless_profile_name IS NOT NULL), '[]') AS "wifiConfigs",
+      COALESCE(jsonb_agg(DISTINCT jsonb_build_object('profileName',wc.wireless_profile_name, 'priority', wc.priority)) FILTER (WHERE wc.wireless_profile_name IS NOT NULL), '[]'::jsonb) AS "wifiConfigs",
       ip_sync_enabled as "ipSyncEnabled",
       local_wifi_sync_enabled as "localWifiSyncEnabled",
       uefi_wifi_sync_enabled as "uefiWifiSyncEnabled",
-      COALESCE(json_agg(json_build_object('name',pc.proxy_config_name, 'priority', pc.priority)) FILTER (WHERE pc.proxy_config_name IS NOT NULL), '[]') AS "proxyConfigs"
+      COALESCE(jsonb_agg(DISTINCT jsonb_build_object('name',pc.proxy_config_name, 'priority', pc.priority)) FILTER (WHERE pc.proxy_config_name IS NOT NULL), '[]'::jsonb) AS "proxyConfigs"
     FROM profiles p
     LEFT JOIN profiles_wirelessconfigs wc ON wc.profile_name = p.profile_name AND wc.tenant_id = p.tenant_id
     LEFT JOIN profiles_proxyconfigs pc ON pc.profile_name = p.profile_name AND pc.tenant_id = p.tenant_id
@@ -189,11 +189,11 @@ describe('profiles tests', () => {
       tls_signing_authority as "tlsSigningAuthority",
       p.xmin as "version",
       ieee8021x_profile_name as "ieee8021xProfileName",
-      COALESCE(json_agg(json_build_object('profileName',wc.wireless_profile_name, 'priority', wc.priority)) FILTER (WHERE wc.wireless_profile_name IS NOT NULL), '[]') AS "wifiConfigs",
+      COALESCE(jsonb_agg(DISTINCT jsonb_build_object('profileName',wc.wireless_profile_name, 'priority', wc.priority)) FILTER (WHERE wc.wireless_profile_name IS NOT NULL), '[]'::jsonb) AS "wifiConfigs",
       ip_sync_enabled as "ipSyncEnabled",
       local_wifi_sync_enabled as "localWifiSyncEnabled",
       uefi_wifi_sync_enabled as "uefiWifiSyncEnabled",
-      COALESCE(json_agg(json_build_object('name',pc.proxy_config_name, 'priority', pc.priority)) FILTER (WHERE pc.proxy_config_name IS NOT NULL), '[]') AS "proxyConfigs"
+      COALESCE(jsonb_agg(DISTINCT jsonb_build_object('name',pc.proxy_config_name, 'priority', pc.priority)) FILTER (WHERE pc.proxy_config_name IS NOT NULL), '[]'::jsonb) AS "proxyConfigs"
     FROM profiles p
     LEFT JOIN profiles_wirelessconfigs wc ON wc.profile_name = p.profile_name AND wc.tenant_id = p.tenant_id
     LEFT JOIN profiles_proxyconfigs pc ON pc.profile_name = p.profile_name AND pc.tenant_id = p.tenant_id
