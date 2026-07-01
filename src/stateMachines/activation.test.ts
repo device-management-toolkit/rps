@@ -606,6 +606,85 @@ describe('Activation State Machine', () => {
       const response = await activation.saveDeviceInfoToMPS({ input: context })
       expect(response).toBe(false)
     })
+    it('should mark the device registered in MPS on a successful post', async () => {
+      gotSpy = vi.spyOn(got, 'post')
+      gotSpy.mockResolvedValue({})
+      await activation.saveDeviceInfoToMPS({ input: context })
+      expect(devices[clientId].registeredInMPS).toBe(true)
+    })
+  })
+
+  describe('persist provisioning status to MPS (issue #2665)', () => {
+    beforeEach(() => {
+      devices[clientId].status = {
+        Components: {
+          TLS: { Result: 'Success' },
+          CIRAConnection: { Result: 'Success' },
+          WiredNetwork: { Result: 'Success' }
+        }
+      }
+    })
+    it('buildMpsDeviceInfo stores the exact structured component status under `status`', () => {
+      devices[clientId].activatedAt = new Date('2026-06-17T00:00:00.000Z')
+      const info = activation.buildMpsDeviceInfo(devices[clientId], context.profile, true)
+      expect(info.status.TLS.Result).toBe('Success')
+      expect(info.status.CIRAConnection.Result).toBe('Success')
+      expect(info.status.WiredNetwork.Result).toBe('Success')
+      // components that did not run are absent (NotApplicable fillers stripped)
+      expect(info.status.WirelessNetwork).toBeUndefined()
+      expect(info.activatedAt).toEqual(new Date('2026-06-17T00:00:00.000Z'))
+    })
+    it('buildMpsDeviceInfo carries a failed component through in `status`', () => {
+      devices[clientId].status = { Components: { TLS: { Result: 'Failure' } } }
+      const info = activation.buildMpsDeviceInfo(devices[clientId], context.profile, false)
+      expect(info.status.TLS.Result).toBe('Failure')
+      expect(info.status.CIRAConnection).toBeUndefined()
+    })
+    it('buildMpsDeviceInfo carries activatedAt forward from MPS, else null', () => {
+      devices[clientId].activatedAt = undefined
+      devices[clientId].existingDeviceInfo = { activatedAt: '2025-01-01T00:00:00.000Z' }
+      expect(activation.buildMpsDeviceInfo(devices[clientId], context.profile, true).activatedAt).toBe(
+        '2025-01-01T00:00:00.000Z'
+      )
+      devices[clientId].existingDeviceInfo = undefined
+      expect(activation.buildMpsDeviceInfo(devices[clientId], context.profile, true).activatedAt).toBeNull()
+    })
+    it('posts the status on a successful run', async () => {
+      gotSpy = vi.spyOn(got, 'post')
+      gotSpy.mockResolvedValue({})
+      await activation.persistProvisioningStatusToMPS({ clientId, profile: context.profile, success: true })
+      expect(gotSpy).toHaveBeenCalled()
+    })
+    it('skips a failure for a device never registered in MPS', async () => {
+      gotSpy = vi.spyOn(got, 'post')
+      gotSpy.mockResolvedValue({})
+      devices[clientId].registeredInMPS = false
+      await activation.persistProvisioningStatusToMPS({ clientId, profile: context.profile, success: false })
+      expect(gotSpy).not.toHaveBeenCalled()
+    })
+    it('posts a failure for a device already registered in MPS', async () => {
+      gotSpy = vi.spyOn(got, 'post')
+      gotSpy.mockResolvedValue({})
+      devices[clientId].registeredInMPS = true
+      await activation.persistProvisioningStatusToMPS({ clientId, profile: context.profile, success: false })
+      expect(gotSpy).toHaveBeenCalled()
+    })
+    it('swallows MPS errors (best-effort)', async () => {
+      gotSpy = vi.spyOn(got, 'post')
+      gotSpy.mockRejectedValue(new Error('SomeError'))
+      await expect(
+        activation.persistProvisioningStatusToMPS({ clientId, profile: context.profile, success: true })
+      ).resolves.toBeUndefined()
+    })
+    it('getDeviceFromMPS stashes the existing deviceInfo and marks the device registered', async () => {
+      vi.mocked(got).mockResolvedValue({
+        body: JSON.stringify({ deviceInfo: { activatedAt: '2025-01-01T00:00:00.000Z' } })
+      } as any)
+      const result = await activation.getDeviceFromMPS({ input: context })
+      expect(result).toBe(true)
+      expect(devices[clientId].registeredInMPS).toBe(true)
+      expect(devices[clientId].existingDeviceInfo).toEqual({ activatedAt: '2025-01-01T00:00:00.000Z' })
+    })
   })
 
   describe('save Device Information to vault', () => {
@@ -846,6 +925,18 @@ describe('Activation State Machine', () => {
       // E2E TLS calls this again (CCM -> ACM upgrade); it must not emit a second time
       activation.setActivationStatus({ context })
       expect(sendProgressToDeviceSpy).toHaveBeenCalledTimes(1)
+    })
+
+    it('should stamp activatedAt write-once (issue #2665)', () => {
+      devices[context.clientId].status.Status = 'Admin control mode.'
+      devices[context.clientId].activationStatus = false
+      devices[clientId].activatedAt = undefined
+      activation.setActivationStatus({ context })
+      const firstStamp = devices[clientId].activatedAt
+      expect(firstStamp).toBeInstanceOf(Date)
+      // CCM -> ACM upgrade calls this again; the original timestamp must not change.
+      activation.setActivationStatus({ context })
+      expect(devices[clientId].activatedAt).toBe(firstStamp)
     })
   })
 
@@ -2159,11 +2250,12 @@ describe('Activation State Machine', () => {
       expect(sentPayload.Components.WiredNetwork.Result).toEqual('NotApplicable')
 
       // Log: the failed TLS stays; the NotApplicable fillers are stripped out.
-      const logged = JSON.parse(loggerSpy.mock.calls.at(-1)?.[0] as string)
-      expect(logged.Components.TLS.Result).toEqual('Failure')
-      expect(logged.Components.Activation.Result).toEqual('Failure')
-      expect(logged.Components.CIRAProxy).toBeUndefined()
-      expect(logged.Components.WiredNetwork).toBeUndefined()
+      const loggedRaw = (loggerSpy.mock.calls.at(-1)?.[0] as string).replace('Provisioning status: ', '')
+      const logged = JSON.parse(loggedRaw)
+      expect(logged.status.TLS.Result).toEqual('Failure')
+      expect(logged.status.Activation.Result).toEqual('Failure')
+      expect(logged.status.CIRAProxy).toBeUndefined()
+      expect(logged.status.WiredNetwork).toBeUndefined()
     })
   })
 

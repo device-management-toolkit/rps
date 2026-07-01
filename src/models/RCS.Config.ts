@@ -135,6 +135,10 @@ export interface ClientObject {
   certObj?: ProvisioningCertObj | null
   readyState?: number
   activationStatus?: boolean
+  // Provisioning-status persistence to MPS (issue #2665).
+  activatedAt?: Date // write-once: when RPS itself activated the device this session
+  existingDeviceInfo?: any // deviceInfo last stored in MPS, read at tenant check (carries activatedAt forward)
+  registeredInMPS?: boolean // true once the device is known to MPS (found at tenant check or registered this run)
   delayEndTime?: number
   amtPassword: string | null
   mebxPassword?: string | null
