@@ -1,3 +1,10 @@
+# [2.39.0](https://github.com/device-management-toolkit/rps/compare/v2.38.2...v2.39.0) (2026-07-01)
+
+
+### Features
+
+* **activation:** persist provisioning status to MPS deviceInfo ([#2771](https://github.com/device-management-toolkit/rps/issues/2771)) ([1a22e3b](https://github.com/device-management-toolkit/rps/commit/1a22e3b6ecb85f391d29ea79bb1ef7e2c489de7b)), closes [#2665](https://github.com/device-management-toolkit/rps/issues/2665) [#2665](https://github.com/device-management-toolkit/rps/issues/2665) [#2665](https://github.com/device-management-toolkit/rps/issues/2665)
+
 ## [2.38.2](https://github.com/device-management-toolkit/rps/compare/v2.38.1...v2.38.2) (2026-07-01)
 
 
