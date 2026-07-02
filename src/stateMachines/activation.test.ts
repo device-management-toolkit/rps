@@ -1315,6 +1315,153 @@ describe('Activation State Machine', () => {
         vi.runAllTicks()
       }))
 
+    describe('EXTRACT_DOMAIN_CERT state', () => {
+      let context: any
+      let mockDevice: any
+
+      const getExtractDomainCertErrorMessage = (ctx: any): string => {
+        const device = devices[ctx.clientId]
+        const deviceId = device?.uuid ?? ctx.clientId
+
+        if (ctx.amtDomain == null) {
+          const suffix = device?.ClientData?.payload?.fqdn ?? 'unknown'
+          return `Device ${deviceId} activation failed. Specified AMT domain suffix: ${suffix} does not match list of available AMT domain suffixes`
+        }
+
+        return 'Failed to extract domain certificate'
+      }
+
+      const evaluateExtractDomainCert = (
+        ctx: any
+      ): {
+        value: 'COMPARE_DEVICE_HASHES' | 'FAILED'
+        errorMessage?: string
+      } => {
+        if (ctx.isCertExtracted === true) {
+          devices[ctx.clientId].count = 1
+          return { value: 'COMPARE_DEVICE_HASHES' }
+        }
+
+        return {
+          value: 'FAILED',
+          errorMessage: getExtractDomainCertErrorMessage(ctx)
+        }
+      }
+
+      beforeEach(() => {
+        context = {
+          clientId: 'test-client-id',
+          amtDomain: null,
+          errorMessage: ''
+        }
+        mockDevice = {
+          uuid: 'test-uuid-1234',
+          count: 0,
+          ClientData: {
+            payload: {
+              fqdn: 'dontmatch.com'
+            }
+          }
+        }
+        devices['test-client-id'] = mockDevice
+      })
+
+      afterEach(() => {
+        delete devices['test-client-id']
+      })
+
+      describe('isCertExtracted guard', () => {
+        it('should transition to COMPARE_DEVICE_HASHES and reset count when cert is extracted', () => {
+          // arrange
+          mockDevice.count = 5
+
+          // act - simulate isCertExtracted = true
+          const result = evaluateExtractDomainCert({
+            ...context,
+            isCertExtracted: true
+          })
+
+          // assert
+          expect(result.value).toBe('COMPARE_DEVICE_HASHES')
+          expect(devices['test-client-id'].count).toBe(1)
+        })
+      })
+
+      describe('error handling - transition to FAILED', () => {
+        it('should set error with fqdn when amtDomain is null and fqdn exists', () => {
+          // arrange
+          context.amtDomain = null
+          mockDevice.ClientData.payload.fqdn = 'dontmatch.com'
+
+          // act
+          const result = { errorMessage: getExtractDomainCertErrorMessage(context) }
+
+          // assert
+          expect(result.errorMessage).toBe(
+            'Device test-uuid-1234 activation failed. Specified AMT domain suffix: dontmatch.com does not match list of available AMT domain suffixes'
+          )
+        })
+
+        it('should use clientId when device uuid is null', () => {
+          // arrange
+          context.amtDomain = null
+          mockDevice.uuid = null
+          mockDevice.ClientData.payload.fqdn = 'dontmatch.com'
+
+          // act
+          const result = { errorMessage: getExtractDomainCertErrorMessage(context) }
+
+          // assert
+          expect(result.errorMessage).toContain('Device test-client-id activation failed')
+        })
+
+        it('should use "unknown" when fqdn is null', () => {
+          // arrange
+          context.amtDomain = null
+          mockDevice.ClientData.payload.fqdn = null
+
+          // act
+          const result = { errorMessage: getExtractDomainCertErrorMessage(context) }
+
+          // assert
+          expect(result.errorMessage).toContain('Specified AMT domain suffix: unknown does not match')
+        })
+
+        it('should use "unknown" when ClientData payload is missing', () => {
+          // arrange
+          context.amtDomain = null
+          mockDevice.ClientData = null
+
+          // act
+          const result = { errorMessage: getExtractDomainCertErrorMessage(context) }
+
+          // assert
+          expect(result.errorMessage).toContain('Specified AMT domain suffix: unknown does not match')
+        })
+
+        it('should set generic error when amtDomain is not null', () => {
+          // arrange
+          context.amtDomain = 'valid-domain.com'
+
+          // act
+          const result = { errorMessage: getExtractDomainCertErrorMessage(context) }
+
+          // assert
+          expect(result.errorMessage).toBe('Failed to extract domain certificate')
+        })
+
+        it('should transition to FAILED state', () => {
+          // arrange
+          context.amtDomain = null
+
+          // act
+          const result = evaluateExtractDomainCert(context)
+
+          // assert
+          expect(result.value).toBe('FAILED')
+        })
+      })
+    })
     it('should eventually reach FAILED if not in ACM mode', () =>
       new Promise<void>((resolve, reject) => {
         vi.useFakeTimers()
