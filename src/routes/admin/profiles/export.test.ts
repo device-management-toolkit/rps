@@ -8,7 +8,7 @@ import { exportProfile } from './export.js'
 import { Environment } from '../../../utils/Environment.js'
 
 import { vi, type MockInstance } from 'vitest'
-import yaml from 'js-yaml'
+import { load } from 'js-yaml'
 import crypto from 'crypto'
 
 describe('Profiles - Export', () => {
@@ -41,7 +41,7 @@ describe('Profiles - Export', () => {
     decipher.setAuthTag(tag)
     const decrypted = Buffer.concat([decipher.update(ct), decipher.final()])
     const pt = decrypted.toString('utf8')
-    return yaml.load(pt)
+    return load(pt)
   }
 
   beforeEach(() => {
