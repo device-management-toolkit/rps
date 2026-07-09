@@ -29,6 +29,7 @@ import {
 } from './activation.js'
 
 const invokeWsmanCallSpy = vi.hoisted(() => vi.fn<any>())
+const sendProgressToDeviceSpy = vi.hoisted(() => vi.fn<any>())
 vi.mock('./common.js', async () => {
   const actual = await vi.importActual<typeof import('./common.js')>('./common.js')
   const { HttpResponseError, coalesceMessage, isDigestRealmValid } = actual
@@ -36,6 +37,11 @@ vi.mock('./common.js', async () => {
     invokeWsmanCall: invokeWsmanCallSpy,
     invokeEnterpriseAssistantCall: vi.fn(),
     processTLSTunnelResponse: vi.fn(),
+    sendProgressToDevice: sendProgressToDeviceSpy,
+    recordComponentResult: actual.recordComponentResult,
+    deriveControlMode: actual.deriveControlMode,
+    finalizeComponentResults: actual.finalizeComponentResults,
+    applicableComponents: actual.applicableComponents,
     HttpResponseError,
     isDigestRealmValid,
     coalesceMessage
@@ -600,6 +606,85 @@ describe('Activation State Machine', () => {
       const response = await activation.saveDeviceInfoToMPS({ input: context })
       expect(response).toBe(false)
     })
+    it('should mark the device registered in MPS on a successful post', async () => {
+      gotSpy = vi.spyOn(got, 'post')
+      gotSpy.mockResolvedValue({})
+      await activation.saveDeviceInfoToMPS({ input: context })
+      expect(devices[clientId].registeredInMPS).toBe(true)
+    })
+  })
+
+  describe('persist provisioning status to MPS (issue #2665)', () => {
+    beforeEach(() => {
+      devices[clientId].status = {
+        Components: {
+          TLS: { Result: 'Success' },
+          CIRAConnection: { Result: 'Success' },
+          WiredNetwork: { Result: 'Success' }
+        }
+      }
+    })
+    it('buildMpsDeviceInfo stores the exact structured component status under `status`', () => {
+      devices[clientId].activatedAt = new Date('2026-06-17T00:00:00.000Z')
+      const info = activation.buildMpsDeviceInfo(devices[clientId], context.profile, true)
+      expect(info.status.TLS.Result).toBe('Success')
+      expect(info.status.CIRAConnection.Result).toBe('Success')
+      expect(info.status.WiredNetwork.Result).toBe('Success')
+      // components that did not run are absent (NotApplicable fillers stripped)
+      expect(info.status.WirelessNetwork).toBeUndefined()
+      expect(info.activatedAt).toEqual(new Date('2026-06-17T00:00:00.000Z'))
+    })
+    it('buildMpsDeviceInfo carries a failed component through in `status`', () => {
+      devices[clientId].status = { Components: { TLS: { Result: 'Failure' } } }
+      const info = activation.buildMpsDeviceInfo(devices[clientId], context.profile, false)
+      expect(info.status.TLS.Result).toBe('Failure')
+      expect(info.status.CIRAConnection).toBeUndefined()
+    })
+    it('buildMpsDeviceInfo carries activatedAt forward from MPS, else null', () => {
+      devices[clientId].activatedAt = undefined
+      devices[clientId].existingDeviceInfo = { activatedAt: '2025-01-01T00:00:00.000Z' }
+      expect(activation.buildMpsDeviceInfo(devices[clientId], context.profile, true).activatedAt).toBe(
+        '2025-01-01T00:00:00.000Z'
+      )
+      devices[clientId].existingDeviceInfo = undefined
+      expect(activation.buildMpsDeviceInfo(devices[clientId], context.profile, true).activatedAt).toBeNull()
+    })
+    it('posts the status on a successful run', async () => {
+      gotSpy = vi.spyOn(got, 'post')
+      gotSpy.mockResolvedValue({})
+      await activation.persistProvisioningStatusToMPS({ clientId, profile: context.profile, success: true })
+      expect(gotSpy).toHaveBeenCalled()
+    })
+    it('skips a failure for a device never registered in MPS', async () => {
+      gotSpy = vi.spyOn(got, 'post')
+      gotSpy.mockResolvedValue({})
+      devices[clientId].registeredInMPS = false
+      await activation.persistProvisioningStatusToMPS({ clientId, profile: context.profile, success: false })
+      expect(gotSpy).not.toHaveBeenCalled()
+    })
+    it('posts a failure for a device already registered in MPS', async () => {
+      gotSpy = vi.spyOn(got, 'post')
+      gotSpy.mockResolvedValue({})
+      devices[clientId].registeredInMPS = true
+      await activation.persistProvisioningStatusToMPS({ clientId, profile: context.profile, success: false })
+      expect(gotSpy).toHaveBeenCalled()
+    })
+    it('swallows MPS errors (best-effort)', async () => {
+      gotSpy = vi.spyOn(got, 'post')
+      gotSpy.mockRejectedValue(new Error('SomeError'))
+      await expect(
+        activation.persistProvisioningStatusToMPS({ clientId, profile: context.profile, success: true })
+      ).resolves.toBeUndefined()
+    })
+    it('getDeviceFromMPS stashes the existing deviceInfo and marks the device registered', async () => {
+      vi.mocked(got).mockResolvedValue({
+        body: JSON.stringify({ deviceInfo: { activatedAt: '2025-01-01T00:00:00.000Z' } })
+      } as any)
+      const result = await activation.getDeviceFromMPS({ input: context })
+      expect(result).toBe(true)
+      expect(devices[clientId].registeredInMPS).toBe(true)
+      expect(devices[clientId].existingDeviceInfo).toEqual({ activatedAt: '2025-01-01T00:00:00.000Z' })
+    })
   })
 
   describe('save Device Information to vault', () => {
@@ -825,10 +910,33 @@ describe('Activation State Machine', () => {
       expect(devices[clientId].ClientData.payload.modes).toBeDefined()
     })
 
-    it('should set activation status', () => {
+    it('should set activation status and emit "Activation completed" only once', () => {
       devices[context.clientId].status.Status = 'Admin control mode.'
+      devices[context.clientId].activationStatus = false
+      sendProgressToDeviceSpy.mockClear()
       activation.setActivationStatus({ context })
       expect(devices[clientId].activationStatus).toBeTruthy()
+      expect(sendProgressToDeviceSpy).toHaveBeenCalledWith(clientId, 'Activation completed')
+      expect(devices[clientId].status.Components?.Activation).toEqual({
+        Result: 'Success',
+        Mode: 'ACM',
+        Details: 'Admin control mode'
+      })
+      // E2E TLS calls this again (CCM -> ACM upgrade); it must not emit a second time
+      activation.setActivationStatus({ context })
+      expect(sendProgressToDeviceSpy).toHaveBeenCalledTimes(1)
+    })
+
+    it('should stamp activatedAt write-once (issue #2665)', () => {
+      devices[context.clientId].status.Status = 'Admin control mode.'
+      devices[context.clientId].activationStatus = false
+      devices[clientId].activatedAt = undefined
+      activation.setActivationStatus({ context })
+      const firstStamp = devices[clientId].activatedAt
+      expect(firstStamp).toBeInstanceOf(Date)
+      // CCM -> ACM upgrade calls this again; the original timestamp must not change.
+      activation.setActivationStatus({ context })
+      expect(devices[clientId].activatedAt).toBe(firstStamp)
     })
   })
 
@@ -894,6 +1002,11 @@ describe('Activation State Machine', () => {
           if (state.matches('DELAYED_TRANSITION')) {
             vi.advanceTimersByTime(10000)
           } else if (state.matches('PROVISIONED') && currentStateIndex === flowStates.length) {
+            // progress fired at each milestone
+            expect(sendProgressToDeviceSpy).toHaveBeenCalledWith(clientId, 'Starting provisioning')
+            expect(sendProgressToDeviceSpy).toHaveBeenCalledWith(clientId, 'Clearing previous configuration')
+            expect(sendProgressToDeviceSpy).toHaveBeenCalledWith(clientId, 'Configuring network settings')
+            expect(sendProgressToDeviceSpy).toHaveBeenCalledWith(clientId, 'Configuring AMT features')
             resolve()
           }
         })
@@ -2082,8 +2195,18 @@ describe('Activation State Machine', () => {
       }))
 
     it('should send success message to device', () => {
+      context.status = 'success'
+      devices[clientId].status = { Status: 'Admin control mode.' }
       activation.sendMessageToDevice({ context })
       expect(sendSpy).toHaveBeenCalled()
+      expect(devices[clientId].status.Components?.Activation?.Result).toEqual('Success')
+      // The full status is sent to RPC, keeping the legacy prose Status for backwards compatibility
+      // alongside the structured Components block. The confusing roll-up/version fields are gone.
+      const sentPayload = JSON.parse(responseMessageSpy.mock.calls[0][4])
+      expect(sentPayload.Status).toEqual('Admin control mode.')
+      expect(sentPayload.Components?.Activation?.Result).toEqual('Success')
+      expect(sentPayload.ComponentsRollup).toBeUndefined()
+      expect(sentPayload.ComponentsVersion).toBeUndefined()
     })
     it('should update Credentials', () => {
       activation.updateCredentials({ context })
@@ -2093,7 +2216,10 @@ describe('Activation State Machine', () => {
     it('should send error message to device', () => {
       context.status = 'error'
       context.message = null
+      // Device never reached an activated control mode, so Activation is recorded as a Failure.
+      devices[clientId].activationStatus = false
       activation.sendMessageToDevice({ context })
+      // The full status object is serialized to RPC unchanged for backwards compatibility (issue #2665).
       expect(responseMessageSpy).toHaveBeenCalledWith(
         context.clientId,
         context.message,
@@ -2101,7 +2227,35 @@ describe('Activation State Machine', () => {
         'failed',
         JSON.stringify(devices[clientId].status)
       )
+      const sentPayload = JSON.parse(responseMessageSpy.mock.calls[0][4])
+      expect(sentPayload.ComponentsRollup).toBeUndefined()
+      expect(sentPayload.ComponentsVersion).toBeUndefined()
+      expect(devices[clientId].status.Components?.Activation?.Result).toEqual('Failure')
       expect(sendSpy).toHaveBeenCalled()
+    })
+
+    it('on a component failure, sends the full NotApplicable set to RPC but logs only the components that ran', () => {
+      context.status = 'error'
+      context.message = null
+      devices[clientId].activationStatus = false
+      // TLS genuinely ran and failed; nothing else was attempted.
+      devices[clientId].status = { Components: { TLS: { Result: 'Failure', Details: 'TLS handshake failed' } } }
+      const loggerSpy = vi.spyOn(activation.logger, 'info')
+      activation.sendMessageToDevice({ context })
+
+      // Wire to RPC: full set incl. the NotApplicable backfill (backwards compatibility).
+      const sentPayload = JSON.parse(responseMessageSpy.mock.calls[0][4])
+      expect(sentPayload.Components.TLS.Result).toEqual('Failure')
+      expect(sentPayload.Components.CIRAProxy.Result).toEqual('NotApplicable')
+      expect(sentPayload.Components.WiredNetwork.Result).toEqual('NotApplicable')
+
+      // Log: the failed TLS stays; the NotApplicable fillers are stripped out.
+      const loggedRaw = (loggerSpy.mock.calls.at(-1)?.[0] as string).replace('Provisioning status: ', '')
+      const logged = JSON.parse(loggedRaw)
+      expect(logged.status.TLS.Result).toEqual('Failure')
+      expect(logged.status.Activation.Result).toEqual('Failure')
+      expect(logged.status.CIRAProxy).toBeUndefined()
+      expect(logged.status.WiredNetwork).toBeUndefined()
     })
   })
 

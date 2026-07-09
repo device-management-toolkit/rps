@@ -1,3 +1,40 @@
+## [2.39.1](https://github.com/device-management-toolkit/rps/compare/v2.39.0...v2.39.1) (2026-07-01)
+
+# [2.39.0](https://github.com/device-management-toolkit/rps/compare/v2.38.2...v2.39.0) (2026-07-01)
+
+
+### Features
+
+* **activation:** persist provisioning status to MPS deviceInfo ([#2771](https://github.com/device-management-toolkit/rps/issues/2771)) ([1a22e3b](https://github.com/device-management-toolkit/rps/commit/1a22e3b6ecb85f391d29ea79bb1ef7e2c489de7b)), closes [#2665](https://github.com/device-management-toolkit/rps/issues/2665) [#2665](https://github.com/device-management-toolkit/rps/issues/2665) [#2665](https://github.com/device-management-toolkit/rps/issues/2665)
+
+## [2.38.2](https://github.com/device-management-toolkit/rps/compare/v2.38.1...v2.38.2) (2026-07-01)
+
+
+### Bug Fixes
+
+* **db:** dedupe profile wifi/proxy configs in Cartesian-product join ([#2770](https://github.com/device-management-toolkit/rps/issues/2770)) ([630f666](https://github.com/device-management-toolkit/rps/commit/630f666574c4c7913bd555def41f92bf68dc9679)), closes [#2665](https://github.com/device-management-toolkit/rps/issues/2665)
+
+## [2.38.1](https://github.com/device-management-toolkit/rps/compare/v2.38.0...v2.38.1) (2026-07-01)
+
+
+### Bug Fixes
+
+* dedupe wifi/proxy added & failed status lists ([#2766](https://github.com/device-management-toolkit/rps/issues/2766)) ([2d5d9a3](https://github.com/device-management-toolkit/rps/commit/2d5d9a30632479d51637efe25509f2f6c47dc492))
+
+# [2.38.0](https://github.com/device-management-toolkit/rps/compare/v2.37.0...v2.38.0) (2026-07-01)
+
+
+### Features
+
+* **activation:** stream real-time provisioning progress to rpc-go ([#2765](https://github.com/device-management-toolkit/rps/issues/2765)) ([4416fbb](https://github.com/device-management-toolkit/rps/commit/4416fbbfa4cd46494a7efd1ee5b0b073a4e3a86c)), closes [device-management-toolkit/rps#2665](https://github.com/device-management-toolkit/rps/issues/2665)
+
+# [2.37.0](https://github.com/device-management-toolkit/rps/compare/v2.36.7...v2.37.0) (2026-07-01)
+
+
+### Features
+
+* **activation:** structured per-component provisioning result ([#2744](https://github.com/device-management-toolkit/rps/issues/2744)) ([47f1166](https://github.com/device-management-toolkit/rps/commit/47f1166fb5be9cd590694ef0e2787af347d80683)), closes [#2665](https://github.com/device-management-toolkit/rps/issues/2665)
+
 ## [2.36.7](https://github.com/device-management-toolkit/rps/compare/v2.36.6...v2.36.7) (2026-06-30)
 
 
