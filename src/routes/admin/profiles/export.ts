@@ -5,7 +5,7 @@ import { NOT_FOUND_EXCEPTION, NOT_FOUND_MESSAGE } from '../../../utils/constants
 import handleError from '../../../utils/handleError.js'
 import { RPSError } from '../../../utils/RPSError.js'
 import { type Request, type Response } from 'express'
-import yaml from 'js-yaml'
+import { dump } from 'js-yaml'
 import { encryptWithRandomKey } from '../../../utils/encryptWithRandomKey.js'
 import { type CertCredentials } from '../../../interfaces/ISecretManagerService.js'
 import { Environment } from '../../../utils/Environment.js'
@@ -203,7 +203,7 @@ export async function exportProfile(req: Request, res: Response): Promise<void> 
       }
     }
 
-    const yamlStr = yaml.dump(output)
+    const yamlStr = dump(output)
     // Encrypt the YAML string and provide the key
     const { cipherText, key } = encryptWithRandomKey(yamlStr)
 
