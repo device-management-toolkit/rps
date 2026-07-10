@@ -1429,6 +1429,165 @@ describe('Activation State Machine', () => {
         vi.runAllTicks()
       }))
 
+    describe('EXTRACT_DOMAIN_CERT state', () => {
+      const createExtractDomainCertTestDevice = (testClientId: string): any => ({
+        unauthCount: 0,
+        ClientId: testClientId,
+        ClientSocket: { send: vi.fn() },
+        ClientData: {
+          payload: {
+            fqdn: 'dontmatch.com',
+            profile: { profileName: 'profile1' }
+          }
+        },
+        status: {},
+        certObj: null,
+        count: 0,
+        uuid: 'test-uuid-1234'
+      })
+
+      const runExtractDomainCertFailureFlow = async ({
+        testClientId,
+        amtDomainOutput,
+        tlsCCMComplete = false
+      }: {
+        testClientId: string
+        amtDomainOutput: any
+        tlsCCMComplete?: boolean
+      }): Promise<{ errorMessage: string; statusMessage: string; statesVisited: string[] }> => {
+        return await new Promise((resolve, reject) => {
+          const statesVisited: string[] = []
+          const providedMachine = activation.machine.provide({
+            actors: {
+              getAMTProfile: fromPromise(
+                async () =>
+                  await Promise.resolve({
+                    profileName: 'acm-profile',
+                    activation: ClientAction.ADMINCTLMODE,
+                    amtPassword: 'Intel123!'
+                  })
+              ),
+              evaluateLegacyLmsNonTlsOverride: fromPromise(async () => await Promise.resolve(true)),
+              getAMTDomainCert: fromPromise(async () => await Promise.resolve(amtDomainOutput)),
+              invokeUnprovision: fromPromise(async () => await Promise.resolve(true))
+            }
+          })
+
+          const testContext = {
+            ...context,
+            clientId: testClientId,
+            amtDomain: null,
+            certChainPfx: null,
+            errorMessage: '',
+            tlsCCMComplete,
+            status: 'success' as const
+          }
+
+          const service = createActor(providedMachine, { input: testContext })
+          const timeout = setTimeout(() => {
+            service.stop()
+            reject(new Error('Timed out waiting for FINAL state from EXTRACT_DOMAIN_CERT flow'))
+          }, 2000)
+
+          service.subscribe((state) => {
+            statesVisited.push(String(state.value))
+
+            if (state.matches('FINAL')) {
+              clearTimeout(timeout)
+              const statusMessage = devices[testClientId]?.status?.Status
+              service.stop()
+              resolve({
+                errorMessage: state.context.errorMessage,
+                statusMessage,
+                statesVisited
+              })
+            }
+          })
+
+          service.start()
+          service.send({ type: 'ACTIVATION', clientId: testClientId, tenantId: '', friendlyName: null as any })
+        })
+      }
+
+      afterEach(() => {
+        delete devices['extract-domain-cert-client']
+      })
+
+      it('should set production error with fqdn when amtDomain is null', async () => {
+        const testClientId = 'extract-domain-cert-client'
+        devices[testClientId] = createExtractDomainCertTestDevice(testClientId)
+
+        const result = await runExtractDomainCertFailureFlow({
+          testClientId,
+          amtDomainOutput: null
+        })
+
+        expect(result.statesVisited).toContain('FINAL')
+        expect(result.errorMessage).toBe(
+          'Device test-uuid-1234 activation failed. Specified AMT domain suffix: dontmatch.com does not match list of available AMT domain suffixes'
+        )
+        expect(result.statusMessage).toBe(result.errorMessage)
+      })
+
+      it('should use clientId in production error when device uuid is null', async () => {
+        const testClientId = 'extract-domain-cert-client'
+        devices[testClientId] = createExtractDomainCertTestDevice(testClientId)
+        devices[testClientId].uuid = null
+
+        const result = await runExtractDomainCertFailureFlow({
+          testClientId,
+          amtDomainOutput: null
+        })
+
+        expect(result.statesVisited).toContain('FINAL')
+        expect(result.errorMessage).toContain('Device extract-domain-cert-client activation failed')
+      })
+
+      it('should use unknown suffix in production error when fqdn is missing', async () => {
+        const testClientId = 'extract-domain-cert-client'
+        devices[testClientId] = createExtractDomainCertTestDevice(testClientId)
+        devices[testClientId].ClientData = null
+
+        const result = await runExtractDomainCertFailureFlow({
+          testClientId,
+          amtDomainOutput: null
+        })
+
+        expect(result.statesVisited).toContain('FINAL')
+        expect(result.errorMessage).toContain('Specified AMT domain suffix: unknown does not match')
+      })
+
+      it('should set generic production error when amtDomain exists but cert extraction fails', async () => {
+        const testClientId = 'extract-domain-cert-client'
+        devices[testClientId] = createExtractDomainCertTestDevice(testClientId)
+
+        const result = await runExtractDomainCertFailureFlow({
+          testClientId,
+          amtDomainOutput: { provisioningCert: null, provisioningCertPassword: null }
+        })
+
+        expect(result.statesVisited).toContain('FINAL')
+        expect(result.errorMessage).toBe('Failed to extract domain certificate')
+      })
+
+      it('should append ACM activation failed suffix when deactivation path is taken', async () => {
+        const testClientId = 'extract-domain-cert-client'
+        devices[testClientId] = createExtractDomainCertTestDevice(testClientId)
+
+        const result = await runExtractDomainCertFailureFlow({
+          testClientId,
+          amtDomainOutput: null,
+          tlsCCMComplete: true
+        })
+
+        expect(result.statesVisited).toContain('DEACTIVATION')
+        expect(result.statesVisited).toContain('FINAL')
+        expect(result.errorMessage).toBe(
+          'Device test-uuid-1234 activation failed. Specified AMT domain suffix: dontmatch.com does not match list of available AMT domain suffixes.ACM activation failed.'
+        )
+        expect(result.statusMessage).toBe(result.errorMessage)
+      })
+    })
     it('should eventually reach FAILED if not in ACM mode', () =>
       new Promise<void>((resolve, reject) => {
         vi.useFakeTimers()

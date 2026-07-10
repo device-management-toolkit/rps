@@ -1585,7 +1585,19 @@ export class Activation {
             target: 'COMPARE_DEVICE_HASHES'
           },
           {
-            actions: assign({ errorMessage: 'Failed to extract domain certificate' }),
+            actions: assign(({ context }) => {
+              const device = devices[context.clientId]
+              const deviceId = device?.uuid ?? context.clientId
+
+              if (context.amtDomain == null) {
+                const suffix = device?.ClientData?.payload?.fqdn ?? 'unknown'
+                return {
+                  errorMessage: `Device ${deviceId} activation failed. Specified AMT domain suffix: ${suffix} does not match list of available AMT domain suffixes`
+                }
+              }
+
+              return { errorMessage: 'Failed to extract domain certificate' }
+            }),
             target: 'FAILED'
           }
         ]
