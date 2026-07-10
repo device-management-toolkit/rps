@@ -1,3 +1,10 @@
+## [2.39.2](https://github.com/device-management-toolkit/rps/compare/v2.39.1...v2.39.2) (2026-07-10)
+
+
+### Bug Fixes
+
+* match error string with given domain suffix does not match any A… ([#2788](https://github.com/device-management-toolkit/rps/issues/2788)) ([bd2f122](https://github.com/device-management-toolkit/rps/commit/bd2f1228891b4c6d39f5131615c63d67ad25d6c3))
+
 ## [2.39.1](https://github.com/device-management-toolkit/rps/compare/v2.39.0...v2.39.1) (2026-07-01)
 
 # [2.39.0](https://github.com/device-management-toolkit/rps/compare/v2.38.2...v2.39.0) (2026-07-01)
