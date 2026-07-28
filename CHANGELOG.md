@@ -1,3 +1,10 @@
+## [2.39.3](https://github.com/device-management-toolkit/rps/compare/v2.39.2...v2.39.3) (2026-07-28)
+
+
+### Bug Fixes
+
+* **deps:** bump js-yaml from 5.2.1 to 5.2.2 ([#2842](https://github.com/device-management-toolkit/rps/issues/2842)) ([fc09b59](https://github.com/device-management-toolkit/rps/commit/fc09b5977d8b4026d9f3a549e6eb2e177b4ed622))
+
 ## [2.39.2](https://github.com/device-management-toolkit/rps/compare/v2.39.1...v2.39.2) (2026-07-10)
 
 
