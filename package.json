@@ -1,6 +1,6 @@
 {
   "name": "@open-amt-cloud-toolkit/rps",
-  "version": "2.39.2",
+  "version": "2.39.3",
   "description": "Containerized RPS service for activating and configuring Intel&reg; AMT devices",
   "homepage": "https://github.com/device-management-toolkit/rps",
   "contributors": [
@@ -59,7 +59,7 @@
     "express-ws": "^5.0.2",
     "got": "^15.1.0",
     "http-z": "^7.0.0",
-    "js-yaml": "^5.2.1",
+    "js-yaml": "^5.2.2",
     "minimist": "^1.2.8",
     "mqtt": "^5.15.2",
     "node-forge": "^1.4.0",
@@ -79,7 +79,7 @@
     "@types/pg": "^8.20.0",
     "@types/ws": "^8.18.1",
     "@vitest/coverage-v8": "^4.1.10",
-    "eslint": "^10.7.0",
+    "eslint": "^10.8.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-license-header": "^0.9.0",
     "genversion": "^3.2.0",
