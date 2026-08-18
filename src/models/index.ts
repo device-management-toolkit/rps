@@ -116,6 +116,7 @@ export interface RPSConfig {
   amt_post_tls_reject: boolean
   amt_legacy_tls_compatibility?: boolean
   amt_tls_tunnel_persistent?: boolean
+  prevent_orphaned_devices?: boolean
 }
 export enum AMTRedirectionServiceEnabledStates {
   DISABLED = 32768,

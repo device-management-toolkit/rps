@@ -15,8 +15,10 @@ import { VersionChecker } from './VersionChecker.js'
 import { devices } from './devices.js'
 import { ClientAction, type ClientObject } from './models/RCS.Config.js'
 import { type DeviceCredentials } from './interfaces/ISecretManagerService.js'
+import got from 'got'
 
 import { vi } from 'vitest'
+vi.mock('got')
 Environment.Config = config
 const configurator: Configurator = new Configurator()
 const validator = new Validator(new Logger('Validator'), configurator)
@@ -533,9 +535,45 @@ describe('validator', () => {
       }
       setNextStepsForConfigurationSpy = vi.spyOn(validator, 'setNextStepsForConfiguration')
     })
-    test('should set nothing when current mode is 0', async () => {
+    afterEach(() => {
+      Environment.Config.prevent_orphaned_devices = false
+    })
+    test('should set nothing when current mode is 0 and orphan prevention is disabled (default)', async () => {
       msg.payload.currentMode = 0
+      Environment.Config.prevent_orphaned_devices = false
+      vi.mocked(got).mockClear()
       devices[clientId] = { ClientId: clientId, ClientSocket: null as any, unauthCount: 0, status: {} } as any
+      await validator.verifyCurrentModeForActivation(msg, profile, clientId)
+      expect(devices[clientId].status.Status).toBeUndefined()
+      expect(got).not.toHaveBeenCalled()
+    })
+    test('should set nothing when current mode is 0 and device has no MPS record', async () => {
+      msg.payload.currentMode = 0
+      Environment.Config.prevent_orphaned_devices = true
+      devices[clientId] = { ClientId: clientId, ClientSocket: null as any, unauthCount: 0, status: {} } as any
+      vi.mocked(got).mockResolvedValue({ body: '' } as any)
+      await validator.verifyCurrentModeForActivation(msg, profile, clientId)
+      expect(devices[clientId].status.Status).toBeUndefined()
+    })
+    test('should throw when current mode is 0 but a device record still exists in MPS', async () => {
+      msg.payload.currentMode = 0
+      Environment.Config.prevent_orphaned_devices = true
+      devices[clientId] = { ClientId: clientId, ClientSocket: null as any, unauthCount: 0, status: {} } as any
+      vi.mocked(got).mockResolvedValue({ body: JSON.stringify({ guid: msg.payload.uuid }) } as any)
+      let rpsError: any = null
+      try {
+        await validator.verifyCurrentModeForActivation(msg, profile, clientId)
+      } catch (error) {
+        rpsError = error
+      }
+      expect(rpsError).toBeInstanceOf(RPSError)
+      expect(rpsError.message).toContain('already has a record in MPS')
+    })
+    test('should proceed when current mode is 0 and MPS has no record (fails open)', async () => {
+      msg.payload.currentMode = 0
+      Environment.Config.prevent_orphaned_devices = true
+      devices[clientId] = { ClientId: clientId, ClientSocket: null as any, unauthCount: 0, status: {} } as any
+      vi.mocked(got).mockRejectedValue(new Error('Response code 404'))
       await validator.verifyCurrentModeForActivation(msg, profile, clientId)
       expect(devices[clientId].status.Status).toBeUndefined()
     })
