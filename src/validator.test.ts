@@ -223,6 +223,39 @@ describe('validator', () => {
       expect(rpsError).toBeInstanceOf(RPSError)
       expect(rpsError.message).toEqual(`${clientId} - Missing uuid from payload`)
     })
+
+    test('Should accept a canonical uuid', async () => {
+      msg.payload.uuid = '4bac9510-04a6-4321-bae2-d45ddf07b684'
+      expect(validator.verifyPayload(msg, clientId)).toEqual(msg.payload)
+    })
+
+    test.each([
+      ['../profiles/default#xxxxxxxxxxxxxxxx', 'slash and hash'],
+      ['../certs/acm-domain#xxxxxxxxxxxxxxxx', 'slash characters'],
+      ['..%2fprofiles%2fdefault#xxxxxxxxxxxx', 'percent character'],
+      ['4bac9510-04a6-4321-bae2-d45ddf07b6#4', 'hash character'],
+      ['4bac9510-04a6-4321-bae2-d45ddf07b6?4', 'question mark'],
+      ['4bac9510-04a6-4321-bae2-d45ddf07b6..', 'consecutive dots']
+    ])('Should reject uuid %s (%s)', async (uuid) => {
+      let rpsError: any = null
+      try {
+        msg.payload.uuid = uuid
+        validator.verifyPayload(msg, clientId)
+      } catch (error) {
+        rpsError = error
+      }
+      expect(rpsError).toBeInstanceOf(RPSError)
+      expect(rpsError.message).toEqual(`${clientId} - uuid contains invalid characters`)
+    })
+
+    test('Should reject a 36-character value that contains invalid characters', async () => {
+      const value = '../profiles/default#xxxxxxxxxxxxxxxx'
+      expect(value).toHaveLength(36)
+      expect(() => {
+        msg.payload.uuid = value
+        validator.verifyPayload(msg, clientId)
+      }).toThrow(`${clientId} - uuid contains invalid characters`)
+    })
   })
 
   describe('validate maintenance message', () => {
