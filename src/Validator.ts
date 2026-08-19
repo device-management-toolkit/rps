@@ -18,6 +18,10 @@ import { devices } from './devices.js'
 import { type AMTConfiguration } from './models/index.js'
 import { type Configurator } from './Configurator.js'
 import { type DeviceCredentials } from './interfaces/ISecretManagerService.js'
+
+// device identifiers are alphanumerics, dots, hyphens, and underscores
+const SAFE_IDENTIFIER = /^[A-Za-z0-9._-]+$/
+
 export class Validator implements IValidator {
   jsonParser: ClientMsgJsonParser
 
@@ -276,6 +280,10 @@ export class Validator implements IValidator {
     }
     if (msg.payload.uuid.length !== 36) {
       throw new RPSError(`${clientId} - uuid not valid length`)
+    }
+    // kept independent of the length check so a future identifier scheme can relax length
+    if (!SAFE_IDENTIFIER.test(msg.payload.uuid) || msg.payload.uuid.includes('..')) {
+      throw new RPSError(`${clientId} - uuid contains invalid characters`)
     }
     return msg.payload
   }
