@@ -336,7 +336,10 @@ export class Validator implements IValidator {
   }
 
   /**
-   * When `prevent_orphaned_devices` is enabled, refuse to re-provision a currentMode=0 device that still has an MPS record; fails open on 404 or unreachable MPS.
+   * When `prevent_orphaned_devices` is enabled, refuse to re-provision a currentMode=0 device that still has an MPS record.
+   * Fails open on any lookup failure (404, unreachable MPS, auth/server errors) so the flag never blocks activation
+   * when MPS cannot answer. A non-empty response that is not parseable JSON is treated as "registered" (fail closed),
+   * matching getDeviceFromMPS in the activation state machine.
    */
   async verifyDeviceNotAlreadyRegistered(msg: ClientMsg, profile: AMTConfiguration): Promise<void> {
     if (Environment.Config.prevent_orphaned_devices !== true) {
@@ -345,15 +348,20 @@ export class Validator implements IValidator {
     let isRegistered = false
     try {
       const result = await got(
-        `${Environment.Config.mps_server}/api/v1/devices/${msg.payload.uuid}?tenantId=${profile.tenantId}`,
+        `${Environment.Config.mps_server}/api/v1/devices/${msg.payload.uuid}?tenantId=${encodeURIComponent(profile.tenantId ?? '')}`,
         { method: 'GET' }
       )
       if (result?.body != null && result.body !== '') {
-        const existing = typeof result.body === 'string' ? JSON.parse(result.body) : result.body
-        isRegistered = existing?.guid != null
+        try {
+          const existing = typeof result.body === 'string' ? JSON.parse(result.body) : result.body
+          isRegistered = existing?.guid != null
+        } catch {
+          // MPS returned a non-empty but unparseable body for this GUID: assume a record exists.
+          isRegistered = true
+        }
       }
     } catch (err) {
-      // Device not registered in MPS (404) or MPS unreachable: nothing to reconcile, allow.
+      this.logger.debug(`MPS lookup for ${msg.payload.uuid} failed (${err?.message ?? err}); allowing activation`)
       return
     }
     if (isRegistered) {

@@ -551,8 +551,10 @@ describe('validator', () => {
       msg.payload.currentMode = 0
       Environment.Config.prevent_orphaned_devices = true
       devices[clientId] = { ClientId: clientId, ClientSocket: null as any, unauthCount: 0, status: {} } as any
+      vi.mocked(got).mockClear()
       vi.mocked(got).mockResolvedValue({ body: '' } as any)
       await validator.verifyCurrentModeForActivation(msg, profile, clientId)
+      expect(got).toHaveBeenCalledTimes(1)
       expect(devices[clientId].status.Status).toBeUndefined()
     })
     test('should throw when current mode is 0 but a device record still exists in MPS', async () => {
@@ -573,9 +575,30 @@ describe('validator', () => {
       msg.payload.currentMode = 0
       Environment.Config.prevent_orphaned_devices = true
       devices[clientId] = { ClientId: clientId, ClientSocket: null as any, unauthCount: 0, status: {} } as any
+      vi.mocked(got).mockClear()
       vi.mocked(got).mockRejectedValue(new Error('Response code 404'))
       await validator.verifyCurrentModeForActivation(msg, profile, clientId)
+      expect(got).toHaveBeenCalledTimes(1)
       expect(devices[clientId].status.Status).toBeUndefined()
+    })
+    test('should throw when current mode is 0 and MPS returns a non-empty unparseable body (fails closed)', async () => {
+      msg.payload.currentMode = 0
+      Environment.Config.prevent_orphaned_devices = true
+      devices[clientId] = { ClientId: clientId, ClientSocket: null as any, unauthCount: 0, status: {} } as any
+      vi.mocked(got).mockResolvedValue({ body: 'not json' } as any)
+      await expect(validator.verifyCurrentModeForActivation(msg, profile, clientId)).rejects.toThrow(
+        'already has a record in MPS'
+      )
+    })
+    test('should URL-encode tenantId in the MPS lookup', async () => {
+      msg.payload.currentMode = 0
+      Environment.Config.prevent_orphaned_devices = true
+      profile.tenantId = 'a b/c'
+      devices[clientId] = { ClientId: clientId, ClientSocket: null as any, unauthCount: 0, status: {} } as any
+      vi.mocked(got).mockClear()
+      vi.mocked(got).mockResolvedValue({ body: '' } as any)
+      await validator.verifyCurrentModeForActivation(msg, profile, clientId)
+      expect(vi.mocked(got).mock.calls[0][0]).toContain('tenantId=a%20b%2Fc')
     })
     test('should set status as already enabled in client mode, when current mode is 1', async () => {
       msg.payload.currentMode = 1
