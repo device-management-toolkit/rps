@@ -304,6 +304,7 @@ export class Validator implements IValidator {
     switch (msg.payload.currentMode) {
       case 0: {
         this.logger.debug(`Device ${msg.payload.uuid} is in pre-provisioning mode`)
+        await this.verifyDeviceNotAlreadyRegistered(msg, profile)
         break
       }
       case 1: {
@@ -331,6 +332,43 @@ export class Validator implements IValidator {
       default: {
         throw new RPSError(`Device ${msg.payload.uuid} activation failed. It is in unknown mode.`)
       }
+    }
+  }
+
+  /**
+   * When `prevent_orphaned_devices` is enabled, refuse to re-provision a currentMode=0 device that still has an MPS record.
+   * Fails open on any lookup failure (404, unreachable MPS, auth/server errors) so the flag never blocks activation
+   * when MPS cannot answer. A non-empty response that is not parseable JSON is treated as "registered" (fail closed),
+   * matching getDeviceFromMPS in the activation state machine.
+   */
+  async verifyDeviceNotAlreadyRegistered(msg: ClientMsg, profile: AMTConfiguration): Promise<void> {
+    if (Environment.Config.prevent_orphaned_devices !== true) {
+      return
+    }
+    let isRegistered = false
+    try {
+      const result = await got(
+        `${Environment.Config.mps_server}/api/v1/devices/${msg.payload.uuid}?tenantId=${encodeURIComponent(profile.tenantId ?? '')}`,
+        { method: 'GET' }
+      )
+      if (result?.body != null && result.body !== '') {
+        try {
+          const existing = typeof result.body === 'string' ? JSON.parse(result.body) : result.body
+          isRegistered = existing?.guid != null
+        } catch {
+          // MPS returned a non-empty but unparseable body for this GUID: assume a record exists.
+          isRegistered = true
+        }
+      }
+    } catch (err) {
+      this.logger.debug(`MPS lookup for ${msg.payload.uuid} failed (${err?.message ?? err}); allowing activation`)
+      return
+    }
+    if (isRegistered) {
+      throw new RPSError(
+        `Device ${msg.payload.uuid} already has a record in MPS and cannot be re-provisioned from ` +
+          `pre-provisioning mode. Remove the device (rpc-go deactivation or the REST API) before re-adding it.`
+      )
     }
   }
 
