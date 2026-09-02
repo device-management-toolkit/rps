@@ -14,6 +14,23 @@ import { type ILogger } from '../../interfaces/ILogger.js'
 import { Environment } from '../../utils/Environment.js'
 import got, { HTTPError, type Got } from 'got'
 
+// reject path traversal before it reaches vault. characters the REST validators already accept
+// in profile names (#, ?, %, & ...) stay legal so existing profiles and secrets keep resolving.
+export const assertSafeSecretPath = (path: string): void => {
+  const candidates = [path]
+  try {
+    candidates.push(decodeURIComponent(path))
+  } catch {
+    // not valid percent-encoding, so the raw value is all vault will ever see
+  }
+  const isUnsafe = candidates.some(
+    (candidate) => candidate.startsWith('/') || candidate.includes('\\') || candidate.split('/').includes('..')
+  )
+  if (isUnsafe) {
+    throw new Error(`invalid secret path: ${path}`)
+  }
+}
+
 export class VaultService implements ISecretManagerService {
   gotClient: Got
   logger: ILogger
@@ -28,6 +45,7 @@ export class VaultService implements ISecretManagerService {
   }
 
   async getSecretFromKey(path: string, key: string): Promise<string | null> {
+    assertSafeSecretPath(path)
     try {
       this.logger.verbose(`getting secret from vault: ${path}, ${key}`)
       const rspJson: any = await this.gotClient.get(path).json()
@@ -45,6 +63,7 @@ export class VaultService implements ISecretManagerService {
   async getSecretAtPath(
     path: string
   ): Promise<DeviceCredentials | TLSCredentials | WifiCredentials | CiraConfigSecrets | null> {
+    assertSafeSecretPath(path)
     try {
       this.logger.verbose(`getting secrets from ${path}`)
       const rspJson: any = await this.gotClient.get(path).json()
@@ -66,6 +85,7 @@ export class VaultService implements ISecretManagerService {
   }
 
   async writeSecretWithObject(path: string, data: any): Promise<any> {
+    assertSafeSecretPath(path)
     try {
       const json = {
         data
@@ -82,6 +102,7 @@ export class VaultService implements ISecretManagerService {
   }
 
   async deleteSecretAtPath(path: string): Promise<boolean> {
+    assertSafeSecretPath(path)
     try {
       // to permanently delete the key, we use metadata path
       const basePath = Environment.Config.secrets_path.replace('/data/', '/metadata/')
