@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { VaultService } from './index.js'
+import { VaultService, assertSafeSecretPath } from './index.js'
 import Logger from '../../Logger.js'
 import { type ILogger } from '../../interfaces/ILogger.js'
 import { config } from '../../test/helper/Config.js'
@@ -154,5 +154,40 @@ it('should get health of vault', async () => {
   expect(result).toEqual(data)
   expect(gotHealthSpy).toHaveBeenCalledWith('sys/health?standbyok=true', {
     prefixUrl: `${Environment.Config.vault_address}/v1/`
+  })
+})
+
+describe('assertSafeSecretPath', () => {
+  it.each([
+    'devices/../profiles/default',
+    'devices/../certs/acm-domain',
+    'devices/..%2fprofiles%2fdefault',
+    'devices\\abc',
+    '/v1/secret/data/profiles/default'
+  ])('should reject %s', (path) => {
+    expect(() => assertSafeSecretPath(path)).toThrow(`invalid secret path: ${path}`)
+  })
+
+  // the REST validators accept these characters in profile names, so existing secrets must resolve
+  it.each([
+    'devices/4bac9510-04a6-4321-bae2-d45ddf07b684',
+    'profiles/corp-fleet-ccm',
+    'profiles/corp#fleet',
+    'profiles/corp?fleet',
+    'profiles/100%',
+    'profiles/corp%20fleet',
+    'certs/acm-domain',
+    'sys/health'
+  ])('should allow %s', (path) => {
+    expect(() => assertSafeSecretPath(path)).not.toThrow()
+  })
+
+  it('should reject a malformed path passed to the secret provider', async () => {
+    await expect(secretManagerService.getSecretAtPath('devices/../profiles/default')).rejects.toThrow(
+      'invalid secret path'
+    )
+    await expect(secretManagerService.deleteSecretAtPath('devices/../certs/acm-domain')).rejects.toThrow(
+      'invalid secret path'
+    )
   })
 })
