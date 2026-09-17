@@ -69,7 +69,7 @@
     "winston": "^3.19.0",
     "ws": "^8.21.3",
     "xml2js": "^0.6.2",
-    "xstate": "^5.32.6"
+    "xstate": "^5.33.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
