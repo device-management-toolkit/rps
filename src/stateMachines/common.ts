@@ -134,7 +134,7 @@ const invokeWsmanCallViaTLSTunnel = async <T>(context: any, message: string): Pr
     const caCert: string | undefined = clientObj.tls?.mpsRootCertPEM ?? clientObj.tls?.issuedCertPEM
     const hasTrustAnchor = caCert != null && caCert !== ''
 
-    // Phase A (post-CCM transition): CCM complete but issued cert not yet installed on AMT.
+    // Phase A (post-CCM transition): CCM complete but the issued cert is not yet bound on AMT.
     // If no trust anchor is available, skip verification as before.
     // If MPS root trust anchor exists, enforce verification and allow temporary
     // self-signed fallback for AMT's brief post-CCM transition period.

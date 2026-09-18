@@ -1222,9 +1222,9 @@ export class Activation {
       clientObj.tlsResponseBuffer = undefined
       clientObj.tlsTunnelNeedsReset = false
 
-      // Post-CCM: the device presents the cert RPS just generated and uploaded. Pin
-      // against issuedCertPEM (self-signed case). If the cert was signed by an MPS root
-      // CA, mpsRootCertPEM holds that CA and wins.
+      // Post-CCM: AMT may still present its temporary self-signed cert while RPS
+      // generates, uploads, and binds the replacement certificate. Once bound, pin
+      // against issuedCertPEM or its MPS root CA.
       const hasIssuedCert = clientObj.tls?.issuedCertPEM != null && clientObj.tls.issuedCertPEM !== ''
       const caCert: string | undefined = clientObj.tls?.mpsRootCertPEM ?? clientObj.tls?.issuedCertPEM
       const hasTrustAnchor = caCert != null && caCert !== ''
@@ -2366,6 +2366,10 @@ export class Activation {
         }
       },
       FETCH_MPS_ROOT_KEY: {
+        // CommitChanges can make AMT present its temporary self-signed certificate.
+        // Mark the transition before validating the live TLS certificate so tunnel
+        // creation and retries allow that certificate until provisioning completes.
+        entry: assign({ tlsNeedsProvisioning: () => true }),
         invoke: {
           src: 'fetchMPSRootKey',
           input: ({ context }) => context,
@@ -2639,6 +2643,10 @@ export class Activation {
         }
       },
       FETCH_POST_PROVISIONING_ROOT_KEY: {
+        // CommitChanges can make AMT present its temporary self-signed certificate.
+        // Keep the transition allowance active while the TLS child replaces and
+        // binds the final MPS-root-signed certificate.
+        entry: assign({ tlsNeedsProvisioning: () => true }),
         invoke: {
           src: 'fetchMPSRootKey',
           input: ({ context }) => context,

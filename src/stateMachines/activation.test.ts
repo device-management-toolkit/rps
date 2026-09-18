@@ -3104,6 +3104,13 @@ describe('Activation State Machine', () => {
     })
 
     describe('initializeTlsTunnelConnection', () => {
+      it('should mark TLS provisioning before both post-commit certificate paths', () => {
+        const states = activation.machine.config.states as any
+
+        expect(states.FETCH_MPS_ROOT_KEY.entry).toBeDefined()
+        expect(states.FETCH_POST_PROVISIONING_ROOT_KEY.entry).toBeDefined()
+      })
+
       it('should set tlsEnforced on the client object', () => {
         // initializeTlsTunnelConnection creates a TLSTunnelManager and sets tlsEnforced = true on success.
         // We verify that the state machine correctly routes failures via onError by checking the state definition.
