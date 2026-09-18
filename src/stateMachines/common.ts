@@ -139,7 +139,8 @@ const invokeWsmanCallViaTLSTunnel = async <T>(context: any, message: string): Pr
     // If MPS root trust anchor exists, enforce verification and allow temporary
     // self-signed fallback for AMT's brief post-CCM transition period.
     const inPostCcmTransitionNoAnchor = clientObj.activationStatus === true && !hasIssuedCert && !hasTrustAnchor
-    const inPostCcmTransitionSelfSignedPhase = clientObj.activationStatus === true && !hasIssuedCert && hasTrustAnchor
+    const inPostCcmTransitionSelfSignedPhase =
+      clientObj.activationStatus === true && context.tlsNeedsProvisioning === true && hasTrustAnchor
     const skipVerify = context.skipTlsVerification === true || inPostCcmTransitionNoAnchor
     const rejectUnauthorized = skipVerify ? false : Environment.Config.amt_post_tls_reject === true
 
@@ -643,6 +644,7 @@ export interface CommonContext {
   // verification for this call. The factory self-signed cert on a TLS-enforced box has no
   // trust anchor we could validate against, and we already hold the admin credential.
   skipTlsVerification?: boolean
+  tlsNeedsProvisioning?: boolean
 }
 
 export interface CommonMaintenanceContext extends CommonContext {

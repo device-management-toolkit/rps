@@ -12,6 +12,7 @@ import { config } from '../test/helper/Config.js'
 import { vi, type Mock } from 'vitest'
 import { GATEWAY_TIMEOUT_ERROR, UNEXPECTED_PARSE_ERROR } from '../utils/constants.js'
 import { processTLSTunnelResponse, invokeWsmanCall } from './common.js'
+import { TLSTunnelManager } from '../TLSTunnelManager.js'
 
 Environment.Config = config
 
@@ -199,5 +200,33 @@ describe('invokeWsmanCall TLS error cleanup', () => {
 
     expect(closeSpy).not.toHaveBeenCalled()
     expect(devices[clientId].tlsTunnelManager).toBeDefined()
+  })
+
+  it('should preserve the post-CCM self-signed allowance when rebuilding the TLS tunnel', async () => {
+    const originalPostTlsReject = Environment.Config.amt_post_tls_reject
+    Environment.Config.amt_post_tls_reject = true
+    devices[clientId].activationStatus = true
+    devices[clientId].tls = {
+      mpsRootCertPEM: 'test-ca',
+      issuedCertPEM: 'generated-but-not-bound'
+    } as any
+    devices[clientId].tlsTunnelManager = undefined
+    devices[clientId].tlsTunnelNeedsReset = true
+    context.tlsNeedsProvisioning = true
+
+    const connectSpy = vi.spyOn(TLSTunnelManager.prototype, 'connect').mockResolvedValue(undefined)
+    const onDataSpy = vi.spyOn(TLSTunnelManager.prototype, 'onData').mockImplementation(() => {})
+    const sendSpy = vi.spyOn(TLSTunnelManager.prototype, 'send').mockImplementation(async () => {
+      devices[clientId].resolve({})
+    })
+
+    await invokeWsmanCall(context)
+
+    expect((devices[clientId].tlsTunnelManager as any).allowPostCcmTransitionSelfSigned).toBe(true)
+
+    Environment.Config.amt_post_tls_reject = originalPostTlsReject
+    connectSpy.mockRestore()
+    onDataSpy.mockRestore()
+    sendSpy.mockRestore()
   })
 })

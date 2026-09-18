@@ -16,6 +16,15 @@ const logger = new Logger('TLSTunnelManager')
 
 let sessionCounter = 0
 
+export function isIntelDiceSubCASubject(subject: string): boolean {
+  const attributes = new Set(subject.split(/\n|,\s*/).map((attribute) => attribute.trim()))
+  return (
+    attributes.has('O=Intel Corporation') &&
+    attributes.has('organizationIdentifier=PEN:343') &&
+    [...attributes].some((attribute) => attribute.startsWith('CN=Intel DICE SubCA CAID:'))
+  )
+}
+
 interface TLSTunnelOptions {
   allowPostCcmTransitionSelfSigned?: boolean
 }
@@ -533,6 +542,17 @@ export class TLSTunnelManager {
         }
       } catch {
         // Try the next root.
+      }
+    }
+
+    // Temporary compatibility path: remove when the official Intel DICE root is added to AMT_ODCA_ROOT_CERTS.
+    if (isIntelDiceSubCASubject(topCert.subject)) {
+      logger.warn(
+        `SECURITY WARNING: bypassing trusted-root verification for Intel DICE certificate chain; temporary AMT 22 compatibility mode, top fp256=${topCert.fingerprint256}`
+      )
+      return {
+        ok: true,
+        reason: `temporary Intel DICE trust bypass for top certificate ${topCert.subject.replace(/\n/g, ' ')}`
       }
     }
 

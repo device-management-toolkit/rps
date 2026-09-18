@@ -312,13 +312,22 @@ export class CertManager {
     certAttributes: CertAttributes,
     issuerAttributes: CertAttributes,
     extKeyUsage: AMTKeyUsage,
-    rootCertPem?: string
+    rootCertPem?: string,
+    hashAlgorithm: 'sha256' | 'sha384' = 'sha256'
   ): CertCreationResult {
     if (!caPrivateKey || caPrivateKey == null) {
       const certAndKey = this.createCertificate(issuerAttributes)
       caPrivateKey = certAndKey.key
     }
-    return this.createCertificate(certAttributes, caPrivateKey, DERKey, issuerAttributes, extKeyUsage, rootCertPem)
+    return this.createCertificate(
+      certAttributes,
+      caPrivateKey,
+      DERKey,
+      issuerAttributes,
+      extKeyUsage,
+      rootCertPem,
+      hashAlgorithm
+    )
   }
 
   // Generate a certificate with a set of attributes signed by a rootCert. If the rootCert is omitted, the generated certificate is self-signed.
@@ -329,13 +338,15 @@ export class CertManager {
     DERKey: string | null = null,
     issuerAttributes: CertAttributes | null = null,
     extKeyUsage: AMTKeyUsage | null = null,
-    rootCertPem?: string
+    rootCertPem?: string,
+    hashAlgorithm: 'sha256' | 'sha384' = 'sha256',
+    rsaKeySize: 2048 | 3072 = 2048
   ): CertCreationResult {
     // Generate a keypair and create an X.509v3 certificate
     let keys
     let cert = this.nodeForge.createCert()
     if (!DERKey) {
-      keys = this.nodeForge.rsaGenerateKeyPair(2048)
+      keys = this.nodeForge.rsaGenerateKeyPair(rsaKeySize)
       cert.publicKey = keys.publicKey
     } else {
       cert.publicKey = this.nodeForge.publicKeyFromPem(`-----BEGIN PUBLIC KEY-----${DERKey}-----END PUBLIC KEY-----`)
@@ -384,12 +395,14 @@ export class CertManager {
       if (issuerAttributes?.O) rootattrs.push({ name: 'organizationName', value: issuerAttributes.O })
       cert.setIssuer(rootattrs)
       cert = this.generateLeafCertificate(cert, extKeyUsage)
-      cert.sign(caPrivateKey as pki.rsa.PrivateKey, this.nodeForge.sha256Create())
+      const digest = hashAlgorithm === 'sha384' ? this.nodeForge.sha384Create() : this.nodeForge.sha256Create()
+      cert.sign(caPrivateKey as pki.rsa.PrivateKey, digest)
     } else {
       // Use our own attributes
       cert.setIssuer(attrs)
       cert = this.generateRootCertificate(cert)
-      cert.sign(keys.privateKey, this.nodeForge.sha256Create())
+      const digest = hashAlgorithm === 'sha384' ? this.nodeForge.sha384Create() : this.nodeForge.sha256Create()
+      cert.sign(keys.privateKey, digest)
     }
 
     return {

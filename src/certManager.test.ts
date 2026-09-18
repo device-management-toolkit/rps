@@ -201,6 +201,26 @@ describe('certManager tests', () => {
       expect(leafCert.cert.subject.attributes[3].value).toEqual(certAttr.O)
     })
 
+    test('should sign a leaf certificate with SHA384 when requested', () => {
+      const nodeForge = new NodeForge()
+      const certManager = new CertManager(new Logger('CertManager'), nodeForge)
+      const certAttr: CertAttributes = { CN: 'AMT', O: 'None', ST: 'None', C: 'None' }
+      const keyUsage: AMTKeyUsage = { name: 'extKeyUsage', serverAuth: true } as any
+      const rootCert = certManager.createCertificate(certAttr)
+
+      const leafCert = certManager.createCertificate(
+        certAttr,
+        rootCert.key,
+        null,
+        certAttr,
+        keyUsage,
+        undefined,
+        'sha384'
+      )
+
+      expect(leafCert.cert.md.algorithm).toBe('sha384')
+    })
+
     test('should generate root certificate', () => {
       const nodeForge = new NodeForge()
       const certManager = new CertManager(new Logger('CertManager'), nodeForge)
@@ -217,6 +237,8 @@ describe('certManager tests', () => {
       expect(rootCert.cert.serialNumber).toBeDefined()
       expect(rootCert.cert.serialNumber).toMatch(/^[0-7][0-9a-f]{31}$/)
       expect(rootCert.cert.publicKey).toBeDefined()
+      expect(rootCert.cert.md.algorithm).toBe('sha256')
+      expect((rootCert.cert.publicKey as forge.pki.rsa.PublicKey).n.bitLength()).toBe(2048)
       expect(rootCert.cert.validity.notBefore).toEqual(new Date(2018, 0, 1))
       expect(rootCert.cert.validity.notAfter).toEqual(new Date(2049, 11, 31))
       expect(rootCert.cert.issuer.attributes.length).toEqual(4)
@@ -236,6 +258,17 @@ describe('certManager tests', () => {
       expect(rootCert.cert.extensions[1].emailCA).toBe(true)
       expect(rootCert.cert.extensions[1].objCA).toBe(true)
       expect(rootCert.cert.extensions[2].name).toEqual('subjectKeyIdentifier')
+    })
+
+    test('should generate an AMT 22 root certificate with SHA384 and a 3072-bit key', () => {
+      const nodeForge = new NodeForge()
+      const certManager = new CertManager(new Logger('CertManager'), nodeForge)
+      const certAttr: CertAttributes = { CN: 'AMT 22 Root', O: 'Intel', ST: 'California', C: 'US' }
+
+      const rootCert = certManager.createCertificate(certAttr, null, null, null, null, undefined, 'sha384', 3072)
+
+      expect(rootCert.cert.md.algorithm).toBe('sha384')
+      expect((rootCert.cert.publicKey as forge.pki.rsa.PublicKey).n.bitLength()).toBe(3072)
     })
   })
 

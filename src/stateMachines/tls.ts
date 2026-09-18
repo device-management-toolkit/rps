@@ -23,6 +23,7 @@ import {
   sendEnterpriseAssistantKeyPairResponse
 } from './enterpriseAssistant.js'
 import { type CommonContext, invokeWsmanCall, sendProgressToDevice, recordComponentResult } from './common.js'
+import { getAMTCertificatePolicy } from '../utils/amtCertificatePolicy.js'
 
 export interface TLSContext extends CommonContext {
   amtProfile: AMTConfiguration | null
@@ -118,7 +119,17 @@ export class TLS {
       if (clientObj.tls?.rootCertKey) {
         rootKey = clientObj.tls.rootCertKey
       } else {
-        const rootCert = this.certManager.createCertificate(issuerAttributes)
+        const policy = getAMTCertificatePolicy(clientObj.ClientData?.payload?.ver)
+        const rootCert = this.certManager.createCertificate(
+          issuerAttributes,
+          null,
+          null,
+          null,
+          null,
+          undefined,
+          policy.hashAlgorithm,
+          policy.rsaKeySize
+        )
         rootKey = rootCert.key
       }
 
@@ -128,7 +139,8 @@ export class TLS {
         certAttributes,
         issuerAttributes,
         keyUsages,
-        clientObj.tls?.mpsRootCertPEM
+        clientObj.tls?.mpsRootCertPEM,
+        getAMTCertificatePolicy(clientObj.ClientData?.payload?.ver).hashAlgorithm
       )
       cert = certResult.pem.substring(27, certResult.pem.length - 25)
 
@@ -147,7 +159,15 @@ export class TLS {
   }
 
   generateKeyPair = async ({ input }: { input: TLSContext }): Promise<any> => {
-    input.xmlMessage = input.amt.PublicKeyManagementService.GenerateKeyPair({ KeyAlgorithm: 0, KeyLength: 2048 })
+    const amtVersion = devices[input.clientId].ClientData?.payload?.ver
+    const policy = getAMTCertificatePolicy(amtVersion)
+    this.logger.debug(
+      `AMT certificate policy: version=${amtVersion ?? 'unknown'} hashAlgorithm=${policy.hashAlgorithm} rsaKeySize=${policy.rsaKeySize}`
+    )
+    input.xmlMessage = input.amt.PublicKeyManagementService.GenerateKeyPair({
+      KeyAlgorithm: 0,
+      KeyLength: policy.rsaKeySize
+    })
     return await invokeWsmanCall(input, 2)
   }
 
@@ -364,7 +384,8 @@ export class TLS {
       statusMessage: input.statusMessage,
       retryCount: input.retryCount,
       amt: input.amt,
-      tlsSettingData: input.tlsSettingData
+      tlsSettingData: input.tlsSettingData,
+      tlsNeedsProvisioning: input.tlsNeedsProvisioning
     }),
     output: ({ context }) => ({ status: context.status, errorMessage: context.errorMessage }),
     states: {

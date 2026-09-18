@@ -320,8 +320,36 @@ describe('TLS State Machine', () => {
     expect(invokeWsmanCallSpy).toHaveBeenCalled()
   })
 
-  it('should generateKeyPair', async () => {
+  it('should sign an AMT 22 TLS certificate with SHA384', async () => {
+    const event: TLSEvent = {
+      type: 'CONFIGURE_TLS',
+      clientId: clientId as string,
+      output: { response: '' }
+    }
+    devices[clientId].ClientData = { payload: { ver: '22.0.0' } }
+    context.message = { Envelope: { Body: { PullResponse: { Items: { AMT_PublicPrivateKeyPair: {} } } } } }
+    const signSpy = vi.spyOn(tls.certManager, 'amtCertSignWithCAKey')
+    const createCertificateSpy = vi.spyOn(tls.certManager, 'createCertificate')
+
+    await tls.addCertificate({ input: { context, event } })
+
+    expect(signSpy.mock.calls[0][6]).toBe('sha384')
+    expect(createCertificateSpy.mock.calls[0][6]).toBe('sha384')
+    expect(createCertificateSpy.mock.calls[0][7]).toBe(3072)
+  })
+
+  it.each([
+    { version: '21.0.6', expectedKeyLength: 2048 },
+    { version: '22.0.0', expectedKeyLength: 3072 }
+  ])('should generate a $expectedKeyLength-bit key for AMT $version', async ({ version, expectedKeyLength }) => {
+    devices[clientId].ClientData = { payload: { ver: version } }
+    const generateKeyPairSpy = vi
+      .spyOn(context.amt.PublicKeyManagementService, 'GenerateKeyPair')
+      .mockReturnValue({} as any)
+
     await tls.generateKeyPair({ input: context })
+
+    expect(generateKeyPairSpy).toHaveBeenCalledWith({ KeyAlgorithm: 0, KeyLength: expectedKeyLength })
     expect(invokeWsmanCallSpy).toHaveBeenCalled()
   })
   it('should addTrustedRootCertificate with pre-configured cert', async () => {

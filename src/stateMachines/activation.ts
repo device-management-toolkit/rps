@@ -43,6 +43,7 @@ import { NetworkConfiguration } from './networkConfiguration.js'
 import { error } from 'console'
 import { TLSTunnelManager } from '../TLSTunnelManager.js'
 import { ensurePemCertificate } from '../utils/certHelpers.js'
+import { getAMTCertificatePolicy } from '../utils/amtCertificatePolicy.js'
 import crypto from 'node:crypto'
 
 export interface ActivationContext extends CommonContext {
@@ -187,15 +188,30 @@ export class Activation {
 
   createSignedString(clientId: string, hashAlgorithm: string): boolean {
     const clientObj = devices[clientId]
+    const amtVersion = clientObj.ClientData?.payload?.ver
+    const policy = getAMTCertificatePolicy(amtVersion)
+    const certificateHashAlgorithm = hashAlgorithm?.toLowerCase()
+    clientObj.signature = undefined
+
+    this.logger.debug(
+      `AMT certificate policy: version=${amtVersion ?? 'unknown'} expectedHashAlgorithm=${policy.hashAlgorithm} expectedRsaKeySize=${policy.rsaKeySize} certificateHashAlgorithm=${certificateHashAlgorithm ?? 'unknown'}`
+    )
+
+    if (policy.hashAlgorithm === 'sha384' && certificateHashAlgorithm !== 'sha384') {
+      this.logger.error(
+        `AMT ${amtVersion} requires a SHA384 provisioning certificate; received ${certificateHashAlgorithm ?? 'unknown'}`
+      )
+      return false
+    }
+
     clientObj.nonce = PasswordHelper.generateNonce()
     const arr: Buffer[] = [clientObj.ClientData.payload.fwNonce, clientObj.nonce]
     try {
       if (clientObj.certObj != null) {
-        // firmware does not support sha384 yet, always use sha256
         clientObj.signature = this.signatureHelper.signString(
           Buffer.concat(arr),
           clientObj.certObj.privateKey,
-          'sha256'
+          hashAlgorithm
         )
         return true
       } else {
@@ -317,11 +333,12 @@ export class Activation {
     this.createSignedString(clientId, certChainPfx.hashAlgorithm)
     const clientObj = devices[clientId]
     if (clientObj.nonce != null && clientObj.signature != null) {
+      const signingAlgorithm = certChainPfx.hashAlgorithm?.toLowerCase() === 'sha384' ? 3 : 2
       input.xmlMessage = ips.HostBasedSetupService.AdminSetup(
         2,
         password,
         clientObj.nonce.toString('base64'),
-        2,
+        signingAlgorithm,
         clientObj.signature
       )
       // One-shot: ACM activation drops the session on success; don't retry (state machine re-checks status).
@@ -336,9 +353,10 @@ export class Activation {
     this.createSignedString(clientId, certChainPfx.hashAlgorithm)
     const clientObj = devices[clientId]
     if (clientObj.nonce != null && clientObj.signature != null) {
+      const signingAlgorithm = certChainPfx.hashAlgorithm?.toLowerCase() === 'sha384' ? 3 : 2
       input.xmlMessage = ips.HostBasedSetupService.UpgradeClientToAdmin(
         clientObj.nonce.toString('base64'),
-        2,
+        signingAlgorithm,
         clientObj.signature
       )
       // One-shot: CCM->ACM upgrade drops the session on success; don't retry (state machine re-checks status).
@@ -1210,7 +1228,8 @@ export class Activation {
       const hasIssuedCert = clientObj.tls?.issuedCertPEM != null && clientObj.tls.issuedCertPEM !== ''
       const caCert: string | undefined = clientObj.tls?.mpsRootCertPEM ?? clientObj.tls?.issuedCertPEM
       const hasTrustAnchor = caCert != null && caCert !== ''
-      const inPostCcmTransitionSelfSignedPhase = clientObj.activationStatus === true && !hasIssuedCert && hasTrustAnchor
+      const inPostCcmTransitionSelfSignedPhase =
+        clientObj.activationStatus === true && input.tlsNeedsProvisioning === true && hasTrustAnchor
 
       clientObj.tlsTunnelManager = new TLSTunnelManager(
         clientObj.ClientSocket,
@@ -2379,7 +2398,7 @@ export class Activation {
         }
       },
       TLS_TUNNEL_PROVISIONING: {
-        entry: sendTo('tls-tunnel-machine', { type: 'CONFIGURE_TLS' }),
+        entry: [assign({ tlsNeedsProvisioning: () => true }), sendTo('tls-tunnel-machine', { type: 'CONFIGURE_TLS' })],
         invoke: {
           src: 'tlsTunnelProvisioning',
           id: 'tls-tunnel-machine',
@@ -2394,7 +2413,8 @@ export class Activation {
             statusMessage: '',
             retryCount: 0,
             amt: context.amt,
-            tlsSettingData: []
+            tlsSettingData: [],
+            tlsNeedsProvisioning: context.tlsNeedsProvisioning
           }),
           onDone: [
             {
@@ -2649,7 +2669,8 @@ export class Activation {
             statusMessage: '',
             retryCount: 0,
             amt: context.amt,
-            tlsSettingData: []
+            tlsSettingData: [],
+            tlsNeedsProvisioning: context.tlsNeedsProvisioning
           }),
           onDone: [
             {

@@ -347,11 +347,13 @@ describe('Wired Network Configuration', () => {
   })
 
   it('should generate a key pair', async () => {
+    const generateKeyPairSpy = vi.fn()
     wiredNetworkConfigContext = {
-      amt: { PublicKeyManagementService: { GenerateKeyPair: vi.fn() } },
+      amt: { PublicKeyManagementService: { GenerateKeyPair: generateKeyPairSpy } },
       xmlMessage: ''
     }
     await wiredConfig.generateKeyPair({ input: wiredNetworkConfigContext })
+    expect(generateKeyPairSpy).toHaveBeenCalledWith({ KeyAlgorithm: 0, KeyLength: 2048 })
     expect(invokeWsmanCallSpy).toHaveBeenCalled()
   })
 

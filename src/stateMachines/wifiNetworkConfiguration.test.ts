@@ -1455,8 +1455,10 @@ describe('WiFi Network Configuration', () => {
 
   describe('certificates', () => {
     it('should generate a key pair', async () => {
-      context.amt = { PublicKeyManagementService: { GenerateKeyPair: vi.fn<any>().mockResolvedValue({}) } }
+      const generateKeyPairSpy = vi.fn<any>().mockResolvedValue({})
+      context.amt = { PublicKeyManagementService: { GenerateKeyPair: generateKeyPairSpy } }
       await wifiConfiguration.generateKeyPair({ input: context })
+      expect(generateKeyPairSpy).toHaveBeenCalledWith({ KeyAlgorithm: 0, KeyLength: 2048 })
       expect(invokeWsmanCallSpy).toHaveBeenCalled()
     })
 

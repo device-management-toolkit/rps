@@ -407,6 +407,27 @@ describe('Activation State Machine', () => {
       const result = activation.createSignedString(clientId, null as any)
       expect(result).toBeFalsy()
     })
+    it('should use the provisioning certificate hash algorithm', () => {
+      const clientObj: any = devices[clientId]
+      clientObj.ClientData.payload.fwNonce = PasswordHelper.generateNonce()
+      clientObj.nonce = PasswordHelper.generateNonce()
+
+      const result = activation.createSignedString(clientId, 'sha384')
+
+      expect(result).toBeTruthy()
+      expect(signStringSpy).toHaveBeenCalledWith(expect.any(Buffer), clientObj.certObj.privateKey, 'sha384')
+    })
+    it('should reject a SHA256 provisioning certificate for AMT 22', () => {
+      const clientObj: any = devices[clientId]
+      clientObj.ClientData.payload.ver = '22.0.0'
+      clientObj.ClientData.payload.fwNonce = PasswordHelper.generateNonce()
+
+      const result = activation.createSignedString(clientId, 'sha256')
+
+      expect(result).toBe(false)
+      expect(clientObj.signature).toBeUndefined()
+      expect(signStringSpy).not.toHaveBeenCalled()
+    })
     it('should throw error message when certificate is invalid', () => {
       signStringSpy = vi.spyOn(activation.signatureHelper, 'signString').mockImplementation(() => {
         throw new Error('Unable to create Digital Signature')
@@ -470,8 +491,10 @@ describe('Activation State Machine', () => {
           ], privateKey:
             null }, fingerprint: { sha256: '82f2ed575db4abe462499cf550dbff9584980d70a0272894639c3653b9ad932c', sha384: 'bb00173b0fb55bc1b24fff5a32a02d210d2bbe16dc6ba4f8300729c1d545313a66930bcd1bcf9ed5a76e82ce602ef04a', sha1: '47d7b7db23f3e300189f54802482b1bd18b945ef' }, hashAlgorithm: 'sha256' }
       devices[clientId].nonce = PasswordHelper.generateNonce()
+      const adminSetupSpy = vi.spyOn(context.ips.HostBasedSetupService, 'AdminSetup')
       await activation.sendAdminSetup({ input: context })
       expect(createSignedStringSpy).toHaveBeenCalled()
+      expect(adminSetupSpy.mock.calls[0][3]).toBe(2)
       // AdminSetup is one-shot: AMT drops the session on success without replying.
       expect(invokeWsmanCallSpy).toHaveBeenCalledWith(context, 0, undefined, true)
     })
@@ -495,14 +518,17 @@ describe('Activation State Machine', () => {
           return true
         })
       devices[clientId].nonce = PasswordHelper.generateNonce()
+      devices[clientId].ClientData.payload.ver = '22.0.0'
       context.certChainPfx = { provisioningCertificateObj: { certChain: [
             'leaf',
             'inter1',
             'root'
           ], privateKey:
-            null }, fingerprint: { sha256: '82f2ed575db4abe462499cf550dbff9584980d70a0272894639c3653b9ad932c', sha384: 'bb00173b0fb55bc1b24fff5a32a02d210d2bbe16dc6ba4f8300729c1d545313a66930bcd1bcf9ed5a76e82ce602ef04a', sha1: '47d7b7db23f3e300189f54802482b1bd18b945ef' }, hashAlgorithm: 'sha256' }
+            null }, fingerprint: { sha256: '82f2ed575db4abe462499cf550dbff9584980d70a0272894639c3653b9ad932c', sha384: 'bb00173b0fb55bc1b24fff5a32a02d210d2bbe16dc6ba4f8300729c1d545313a66930bcd1bcf9ed5a76e82ce602ef04a', sha1: '47d7b7db23f3e300189f54802482b1bd18b945ef' }, hashAlgorithm: 'sha384' }
+      const upgradeSpy = vi.spyOn(context.ips.HostBasedSetupService, 'UpgradeClientToAdmin')
       await activation.sendUpgradeClientToAdmin({ input: context })
       expect(createSignedStringSpy).toHaveBeenCalled()
+      expect(upgradeSpy.mock.calls[0][1]).toBe(3)
       expect(invokeWsmanCallSpy).toHaveBeenCalledWith(context, 0, undefined, true)
     })
     it('should send WSMan to change AMT password', async () => {
@@ -3088,13 +3114,16 @@ describe('Activation State Machine', () => {
       })
 
       it('should clear stale TLS reset state before reconnecting', async () => {
+        const originalPostTlsReject = Environment.Config.amt_post_tls_reject
+        Environment.Config.amt_post_tls_reject = true
         const clientObj = devices[clientId]
         clientObj.uuid = 'test-uuid'
         clientObj.activationStatus = true
-        clientObj.tls = { mpsRootCertPEM: 'test-ca' } as any
+        clientObj.tls = { mpsRootCertPEM: 'test-ca', issuedCertPEM: 'generated-but-not-bound' } as any
         clientObj.tlsTunnelNeedsReset = true
         clientObj.tlsResponseBuffer = Buffer.from('stale')
         clientObj.tlsTunnelSessionId = 'old-session'
+        context.tlsNeedsProvisioning = true
 
         const oldCloseSpy = vi.fn()
         clientObj.tlsTunnelManager = { close: oldCloseSpy } as any
@@ -3114,7 +3143,9 @@ describe('Activation State Machine', () => {
         expect(clientObj.tlsTunnelSessionId).toBeTruthy()
         expect(clientObj.tlsEnforced).toBe(true)
         expect(clientObj.amtReconfiguring).toBe(false)
+        expect((clientObj.tlsTunnelManager as any).allowPostCcmTransitionSelfSigned).toBe(true)
 
+        Environment.Config.amt_post_tls_reject = originalPostTlsReject
         connectSpy.mockRestore()
         onDataSpy.mockRestore()
       })
