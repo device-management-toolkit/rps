@@ -2,7 +2,7 @@ openapi: 3.0.0
 info:
   title: Remote Provisioning  (RPS) API
   contact: {}
-  version: 2.29.1
+  version: 2.40.2
   description: |
     Open AMT Cloud Toolkit supports RPS API methods for domains, CIRA configuration, wireless, profiles, and version information.
 
