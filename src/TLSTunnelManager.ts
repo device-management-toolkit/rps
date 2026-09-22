@@ -9,12 +9,24 @@ import { Duplex } from 'node:stream'
 import type Server from 'ws'
 import ClientResponseMsg from './utils/ClientResponseMsg.js'
 import { AMT_ODCA_ROOT_CERTS } from './certs/amt-odca.js'
+import { AMT_DICE_ROOT_CERTS } from './certs/amt-dice.js'
 import Logger from './Logger.js'
 import { ensurePemCertificate } from './utils/certHelpers.js'
 
 const logger = new Logger('TLSTunnelManager')
 
 let sessionCounter = 0
+
+/**
+ * Whether to accept an Intel DICE chain that reaches no trusted root.
+ *
+ * Defaults to enabled so AMT 22 keeps activating until AMT_DICE_ROOT_CERTS is
+ * populated with the official roots. Set RPS_ALLOW_INTEL_DICE_BYPASS=false to
+ * enforce real verification.
+ */
+export function allowIntelDiceTrustBypass(): boolean {
+  return process.env.RPS_ALLOW_INTEL_DICE_BYPASS?.toLowerCase() !== 'false'
+}
 
 export function isIntelDiceSubCASubject(subject: string): boolean {
   const attributes = new Set(subject.split(/\n|,\s*/).map((attribute) => attribute.trim()))
@@ -513,16 +525,16 @@ export class TLSTunnelManager {
     }
 
     const trustedRoots: crypto.X509Certificate[] = []
-    for (const pem of AMT_ODCA_ROOT_CERTS) {
+    for (const pem of [...AMT_ODCA_ROOT_CERTS, ...AMT_DICE_ROOT_CERTS]) {
       try {
         trustedRoots.push(new crypto.X509Certificate(pem))
       } catch (err) {
-        logger.warn(`Failed to parse trusted ODCA root: ${(err as Error).message}`)
+        logger.warn(`Failed to parse trusted AMT root: ${(err as Error).message}`)
       }
     }
 
     if (trustedRoots.length === 0) {
-      return { ok: false, reason: 'no trusted ODCA roots available' }
+      return { ok: false, reason: 'no trusted AMT roots available' }
     }
 
     const topCert = chain[chain.length - 1]
@@ -530,14 +542,14 @@ export class TLSTunnelManager {
       if (topCert.fingerprint256 === root.fingerprint256) {
         return {
           ok: true,
-          reason: `chain terminates at trusted ODCA root (fp=${root.fingerprint256})`
+          reason: `chain terminates at trusted AMT root (fp=${root.fingerprint256})`
         }
       }
       try {
         if (topCert.verify(root.publicKey)) {
           return {
             ok: true,
-            reason: `top of chain signed by trusted ODCA root (fp=${root.fingerprint256})`
+            reason: `top of chain signed by trusted AMT root (fp=${root.fingerprint256})`
           }
         }
       } catch {
@@ -545,8 +557,18 @@ export class TLSTunnelManager {
       }
     }
 
-    // Temporary compatibility path: remove when the official Intel DICE root is added to AMT_ODCA_ROOT_CERTS.
+    // Temporary compatibility path. Populate AMT_DICE_ROOT_CERTS with the official
+    // Intel DICE root(s), then set RPS_ALLOW_INTEL_DICE_BYPASS=false to enforce real
+    // verification for AMT 22, and finally delete this branch.
     if (isIntelDiceSubCASubject(topCert.subject)) {
+      if (!allowIntelDiceTrustBypass()) {
+        return {
+          ok: false,
+          reason:
+            `Intel DICE chain does not terminate at any trusted root (${trustedRoots.length} root(s) checked) ` +
+            'and the temporary DICE bypass is disabled'
+        }
+      }
       logger.warn(
         `SECURITY WARNING: bypassing trusted-root verification for Intel DICE certificate chain; temporary AMT 22 compatibility mode, top fp256=${topCert.fingerprint256}`
       )
@@ -558,7 +580,7 @@ export class TLSTunnelManager {
 
     return {
       ok: false,
-      reason: `chain does not terminate at any trusted ODCA root (${trustedRoots.length} root(s) checked, top subject=${topCert.subject.replace(/\n/g, ' ')})`
+      reason: `chain does not terminate at any trusted AMT root (${trustedRoots.length} root(s) checked, top subject=${topCert.subject.replace(/\n/g, ' ')})`
     }
   }
 

@@ -4,7 +4,7 @@
  **********************************************************************/
 
 import { randomBytes } from 'node:crypto'
-import { type pkcs12, type pki } from 'node-forge'
+import { type asn1, type md, type pkcs12, type pki } from 'node-forge'
 import { type ILogger } from './interfaces/ILogger.js'
 import type Logger from './Logger.js'
 import {
@@ -306,6 +306,88 @@ export class CertManager {
     return str
   }
 
+  /**
+   * Index of the SubjectPublicKeyInfo inside a forge TBSCertificate.
+   * forge.pki.getTBSCertificate always emits version, serialNumber, signature,
+   * issuer, validity, subject, subjectPublicKeyInfo in that order, with the
+   * version tag unconditional (node-forge lib/x509.js, getTBSCertificate).
+   */
+  private static readonly TBS_SPKI_INDEX = 6
+
+  /**
+   * Accept a device public key node-forge cannot represent.
+   *
+   * AMT returns AMT_PublicPrivateKeyPair.DERKey as a DER SubjectPublicKeyInfo.
+   * For an RSA key forge parses it directly; for the ECC-384 key AMT 22
+   * generates, publicKeyFromPem throws because forge is RSA-only. It does not
+   * need to understand the key: the leaf is signed with the RPS root's *RSA*
+   * key, and the device key is only ever embedded. So the SPKI is kept as an
+   * opaque ASN.1 node and copied into the certificate byte-for-byte.
+   */
+  parseExternalPublicKey(DERKey: string, forgeError: unknown): asn1.Asn1 {
+    let spki: asn1.Asn1
+    try {
+      spki = this.nodeForge.asn1FromDer(Buffer.from(DERKey, 'base64').toString('binary'))
+    } catch (err) {
+      throw new UnsupportedCertificateError(
+        `AMT returned a public key that is neither a parsable RSA key (${String(forgeError)}) ` +
+          `nor valid DER (${String(err)})`
+      )
+    }
+    if (!Array.isArray(spki.value) || spki.value.length !== 2) {
+      throw new UnsupportedCertificateError('AMT returned a public key that is not a SubjectPublicKeyInfo')
+    }
+    this.logger.debug('AMT public key is not RSA; embedding its SubjectPublicKeyInfo verbatim')
+    return spki
+  }
+
+  /**
+   * Give forge a stand-in public key so it can build a TBSCertificate and derive
+   * a subjectKeyIdentifier. The CA's own RSA key is used because it is already
+   * to hand and costs nothing to reuse; it never reaches the output, because
+   * signWithExternalPublicKey replaces the SubjectPublicKeyInfo before the
+   * digest is taken.
+   *
+   * The subjectKeyIdentifier would otherwise be computed over the stand-in, so
+   * it is overridden here with the real one: RFC 5280 §4.2.1.2 method (1),
+   * SHA-1 over the subjectPublicKey BIT STRING contents, excluding the
+   * unused-bits octet.
+   */
+  standInForExternalPublicKey(cert: pki.Certificate, spki: asn1.Asn1, caPrivateKey: pki.rsa.PrivateKey): void {
+    cert.publicKey = this.nodeForge.setRsaPublicKey(caPrivateKey.n, caPrivateKey.e)
+    const bitString = (spki.value as asn1.Asn1[])[1]
+    const keyBits = (bitString.value as string).replace(/^\0/, '')
+    cert.generateSubjectKeyIdentifier = () => {
+      const digest = this.nodeForge.sha1Create()
+      digest.update(keyBits)
+      return digest.digest()
+    }
+  }
+
+  /**
+   * cert.sign() would regenerate the TBSCertificate from cert.publicKey and so
+   * sign over the stand-in key. Do the same steps by hand with the real
+   * SubjectPublicKeyInfo spliced in, and cache the result on the certificate —
+   * forge.pki.certificateToAsn1 prefers a cached cert.tbsCertificate, so both
+   * the PEM and the DER emitted below carry the device's key and a signature
+   * that actually covers it.
+   */
+  signWithExternalPublicKey(
+    cert: pki.Certificate,
+    spki: asn1.Asn1,
+    caPrivateKey: pki.rsa.PrivateKey,
+    digest: md.MessageDigest,
+    hashAlgorithm: 'sha256' | 'sha384'
+  ): void {
+    cert.signatureOid = cert.siginfo.algorithmOid = this.nodeForge.rsaSignatureOid(hashAlgorithm)
+    const tbs = this.nodeForge.getTBSCertificate(cert)
+    ;(tbs.value as asn1.Asn1[])[CertManager.TBS_SPKI_INDEX] = spki
+    cert.tbsCertificate = tbs
+    cert.md = digest
+    digest.update(this.nodeForge.asn1ToDer(tbs).getBytes())
+    cert.signature = caPrivateKey.sign(digest)
+  }
+
   amtCertSignWithCAKey(
     DERKey: string,
     caPrivateKey: pki.PrivateKey | null,
@@ -313,10 +395,22 @@ export class CertManager {
     issuerAttributes: CertAttributes,
     extKeyUsage: AMTKeyUsage,
     rootCertPem?: string,
-    hashAlgorithm: 'sha256' | 'sha384' = 'sha256'
+    hashAlgorithm: 'sha256' | 'sha384' = 'sha256',
+    rsaKeySize: 2048 | 3072 = 2048
   ): CertCreationResult {
     if (!caPrivateKey || caPrivateKey == null) {
-      const certAndKey = this.createCertificate(issuerAttributes)
+      // Fallback CA: honour the policy key size here too, otherwise an AMT 22
+      // profile silently gets a 2048-bit signing key.
+      const certAndKey = this.createCertificate(
+        issuerAttributes,
+        null,
+        null,
+        null,
+        null,
+        undefined,
+        hashAlgorithm,
+        rsaKeySize
+      )
       caPrivateKey = certAndKey.key
     }
     return this.createCertificate(
@@ -326,7 +420,8 @@ export class CertManager {
       issuerAttributes,
       extKeyUsage,
       rootCertPem,
-      hashAlgorithm
+      hashAlgorithm,
+      rsaKeySize
     )
   }
 
@@ -344,12 +439,19 @@ export class CertManager {
   ): CertCreationResult {
     // Generate a keypair and create an X.509v3 certificate
     let keys
+    // Set when the AMT-supplied key is not RSA (AMT 22 generates ECC-384). Holds
+    // the device's SubjectPublicKeyInfo, to be spliced in below.
+    let externalSpki: asn1.Asn1 | null = null
     let cert = this.nodeForge.createCert()
     if (!DERKey) {
       keys = this.nodeForge.rsaGenerateKeyPair(rsaKeySize)
       cert.publicKey = keys.publicKey
     } else {
-      cert.publicKey = this.nodeForge.publicKeyFromPem(`-----BEGIN PUBLIC KEY-----${DERKey}-----END PUBLIC KEY-----`)
+      try {
+        cert.publicKey = this.nodeForge.publicKeyFromPem(`-----BEGIN PUBLIC KEY-----${DERKey}-----END PUBLIC KEY-----`)
+      } catch (err) {
+        externalSpki = this.parseExternalPublicKey(DERKey, err)
+      }
     }
     // RFC 5280: serialNumber must be a positive integer. node-forge reads this as a hex string and
     // DER-encodes it as a signed two's-complement INTEGER, so the high bit of the first byte must
@@ -362,14 +464,17 @@ export class CertManager {
 
     // If creating a leaf cert with MPS root cert provided, base validity on root cert validity dates.
     // Accept both PEM and base64 DER to avoid silently falling back to legacy dates.
+    // The parsed root is also the authoritative source for the issuer DN below.
+    let parsedRootCert: pki.Certificate | null = null
     if (caPrivateKey && rootCertPem) {
       try {
-        const rootCert = this.parseCertificateFlexible(rootCertPem)
+        parsedRootCert = this.parseCertificateFlexible(rootCertPem)
         const oneMinuteMs = 1 * 60 * 1000
-        cert.validity.notBefore = new Date(rootCert.validity.notBefore.getTime() + oneMinuteMs)
-        cert.validity.notAfter = new Date(rootCert.validity.notAfter.getTime() - oneMinuteMs)
+        cert.validity.notBefore = new Date(parsedRootCert.validity.notBefore.getTime() + oneMinuteMs)
+        cert.validity.notAfter = new Date(parsedRootCert.validity.notAfter.getTime() - oneMinuteMs)
       } catch (err) {
         // Fallback to default dates if root cert parsing fails
+        parsedRootCert = null
         cert.validity.notBefore = new Date(2018, 0, 1)
         cert.validity.notAfter = new Date(2049, 11, 31)
       }
@@ -387,16 +492,35 @@ export class CertManager {
     cert.setSubject(attrs)
 
     if (caPrivateKey) {
-      // Use root attributes
-      const rootattrs: Attribute[] = []
-      if (issuerAttributes?.CN) rootattrs.push({ name: 'commonName', value: issuerAttributes.CN })
-      if (issuerAttributes?.C) rootattrs.push({ name: 'countryName', value: issuerAttributes.C })
-      if (issuerAttributes?.ST) rootattrs.push({ shortName: 'ST', value: issuerAttributes.ST })
-      if (issuerAttributes?.O) rootattrs.push({ name: 'organizationName', value: issuerAttributes.O })
-      cert.setIssuer(rootattrs)
+      if (parsedRootCert) {
+        // Copy the issuing CA's subject DN verbatim. RFC 5280 chain building compares
+        // the DER-encoded Name, so attribute ORDER and string encoding must match
+        // exactly. Rebuilding the DN from parsed CN/C/ST/O fields reorders it:
+        // a root with subject "CN, O, C" produced a leaf with issuer "CN, C, O".
+        // AMT 21 tolerated the mismatch (RPS logs "issuer formatting mismatch
+        // tolerated" when verifying its own leaf); AMT 22 rejects the credential
+        // bind with HTTP 500 / AMT-STATUS 1 (PT_STATUS_INTERNAL_ERROR).
+        cert.setIssuer(parsedRootCert.subject.attributes)
+      } else {
+        // No parsable root cert: fall back to the supplied attributes. The DN is
+        // whatever we say it is here, so ordering cannot mismatch anything.
+        const rootattrs: Attribute[] = []
+        if (issuerAttributes?.CN) rootattrs.push({ name: 'commonName', value: issuerAttributes.CN })
+        if (issuerAttributes?.C) rootattrs.push({ name: 'countryName', value: issuerAttributes.C })
+        if (issuerAttributes?.ST) rootattrs.push({ shortName: 'ST', value: issuerAttributes.ST })
+        if (issuerAttributes?.O) rootattrs.push({ name: 'organizationName', value: issuerAttributes.O })
+        cert.setIssuer(rootattrs)
+      }
+      if (externalSpki) {
+        this.standInForExternalPublicKey(cert, externalSpki, caPrivateKey as pki.rsa.PrivateKey)
+      }
       cert = this.generateLeafCertificate(cert, extKeyUsage)
       const digest = hashAlgorithm === 'sha384' ? this.nodeForge.sha384Create() : this.nodeForge.sha256Create()
-      cert.sign(caPrivateKey as pki.rsa.PrivateKey, digest)
+      if (externalSpki) {
+        this.signWithExternalPublicKey(cert, externalSpki, caPrivateKey as pki.rsa.PrivateKey, digest, hashAlgorithm)
+      } else {
+        cert.sign(caPrivateKey as pki.rsa.PrivateKey, digest)
+      }
     } else {
       // Use our own attributes
       cert.setIssuer(attrs)

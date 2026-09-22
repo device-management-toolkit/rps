@@ -31,6 +31,38 @@ const { TLS } = await import('./tls.js')
 
 Environment.Config = config
 
+// AMT returns the public half of the firmware-held key pair as a bare base64
+// SubjectPublicKeyInfo. RPS must sign the TLS leaf over exactly this key, so
+// tests have to supply a real one rather than an empty object.
+const TEST_KEY_PAIR_HANDLE = 'Intel(r) AMT Key: Handle: 0'
+const TEST_DER_KEY = forge.pki
+  .publicKeyToPem(forge.pki.rsa.generateKeyPair(2048).publicKey)
+  .replace(/-----(BEGIN|END) PUBLIC KEY-----/g, '')
+  .replace(/\s/g, '')
+
+const testKeyPairPullResponse = {
+  Envelope: {
+    Body: {
+      PullResponse: {
+        Items: {
+          AMT_PublicPrivateKeyPair: { InstanceID: TEST_KEY_PAIR_HANDLE, DERKey: TEST_DER_KEY }
+        }
+      }
+    }
+  }
+}
+
+const generateKeyPairSuccess = {
+  Envelope: {
+    Body: {
+      GenerateKeyPair_OUTPUT: {
+        ReturnValue: 0,
+        KeyPair: { ReferenceParameters: { SelectorSet: { Selector: { _: TEST_KEY_PAIR_HANDLE } } } }
+      }
+    }
+  }
+}
+
 describe('TLS State Machine', () => {
   let tls: TLSType
   let config
@@ -73,12 +105,14 @@ describe('TLS State Machine', () => {
             await Promise.resolve({ Envelope: { Body: { PullResponse: { Items: { AMT_TLSSettingData: {} } } } } })
         ),
         addTrustedRootCertificate: fromPromise(async ({ input }) => await Promise.resolve({})),
-        generateKeyPair: fromPromise(async ({ input }) => await Promise.resolve({})),
-        enumeratePublicPrivateKeyPair: fromPromise(async ({ input }) => await Promise.resolve({})),
-        pullPublicPrivateKeyPair: fromPromise(
-          async ({ input }) =>
-            await Promise.resolve({ Envelope: { Body: { PullResponse: { Items: { AMT_PublicPrivateKeyPair: {} } } } } })
-        ),
+        generateKeyPair: fromPromise(async ({ input }) => await Promise.resolve(generateKeyPairSuccess)),
+        enumeratePublicPrivateKeyPair: fromPromise(async ({ input }: { input: TLSContext }) => {
+          // Mirror the real actor: it records the handle GenerateKeyPair returned.
+          input.keyPairHandle =
+            input.message?.Envelope?.Body?.GenerateKeyPair_OUTPUT?.KeyPair?.ReferenceParameters?.SelectorSet?.Selector?._
+          return await Promise.resolve({})
+        }),
+        pullPublicPrivateKeyPair: fromPromise(async ({ input }) => await Promise.resolve(testKeyPairPullResponse)),
         addCertificate: fromPromise(async ({ input }) => await Promise.resolve({})),
         enumerateTLSCredentialContext: fromPromise(
           async ({ input }) =>
@@ -136,10 +170,10 @@ describe('TLS State Machine', () => {
         'ENUMERATE_PUBLIC_PRIVATE_KEY_PAIR',
         'PULL_PUBLIC_PRIVATE_KEY_PAIR',
         'ADD_CERTIFICATE',
+        'SYNC_TIME',
         'ENUMERATE_TLS_CREDENTIAL_CONTEXT',
         'PULL_TLS_CREDENTIAL_CONTEXT',
         'CREATE_TLS_CREDENTIAL_CONTEXT',
-        'SYNC_TIME',
         'ENUMERATE_TLS_DATA',
         'PULL_TLS_DATA',
         'PUT_REMOTE_TLS_DATA',
@@ -205,10 +239,10 @@ describe('TLS State Machine', () => {
         'ENUMERATE_PUBLIC_PRIVATE_KEY_PAIR',
         'PULL_PUBLIC_PRIVATE_KEY_PAIR',
         'ADD_CERTIFICATE',
+        'SYNC_TIME',
         'ENUMERATE_TLS_CREDENTIAL_CONTEXT',
         'PULL_TLS_CREDENTIAL_CONTEXT',
         'PUT_TLS_CREDENTIAL_CONTEXT',
-        'SYNC_TIME',
         'ENUMERATE_TLS_DATA',
         'PULL_TLS_DATA',
         'PUT_REMOTE_TLS_DATA',
@@ -315,33 +349,55 @@ describe('TLS State Machine', () => {
         response: ''
       }
     }
-    context.message = { Envelope: { Body: { PullResponse: { Items: { AMT_PublicPrivateKeyPair: {} } } } } }
+    context.keyPairHandle = TEST_KEY_PAIR_HANDLE
+    context.message = testKeyPairPullResponse
     await tls.addCertificate({ input: { context, event } })
     expect(invokeWsmanCallSpy).toHaveBeenCalled()
   })
 
-  it('should sign an AMT 22 TLS certificate with SHA384', async () => {
+  it('should refuse to addCertificate when AMT returned no key pair', async () => {
+    // AMT 22 rejected GenerateKeyPair with 2066, so no handle and no DERKey.
+    // Signing a locally invented key here is what produced the HTTP 400 on
+    // Put AMT_TLSCredentialContext three requests later.
+    const event: TLSEvent = { type: 'CONFIGURE_TLS', clientId, output: { response: '' } }
+    context.keyPairHandle = undefined
+    context.message = { Envelope: { Body: { PullResponse: { Items: { AMT_PublicPrivateKeyPair: {} } } } } }
+
+    await expect(tls.addCertificate({ input: { context, event } })).rejects.toThrow(/No AMT public key available/)
+    expect(invokeWsmanCallSpy).not.toHaveBeenCalled()
+  })
+
+  it('should sign an AMT 22 TLS certificate with the AMT 22 policy', async () => {
     const event: TLSEvent = {
       type: 'CONFIGURE_TLS',
       clientId: clientId as string,
       output: { response: '' }
     }
     devices[clientId].ClientData = { payload: { ver: '22.0.0' } }
-    context.message = { Envelope: { Body: { PullResponse: { Items: { AMT_PublicPrivateKeyPair: {} } } } } }
+    context.keyPairHandle = TEST_KEY_PAIR_HANDLE
+    context.message = testKeyPairPullResponse
     const signSpy = vi.spyOn(tls.certManager, 'amtCertSignWithCAKey')
     const createCertificateSpy = vi.spyOn(tls.certManager, 'createCertificate')
 
     await tls.addCertificate({ input: { context, event } })
 
+    // sha384: AMT 22's TlsProvisionVerifyLeafCertificate() no longer accepts a
+    // SHA-256 leaf, and rejects it at Put AMT_TLSCredentialContext with a bare
+    // AMT-STATUS 1. The digest must reach both the leaf and the root RPS mints.
     expect(signSpy.mock.calls[0][6]).toBe('sha384')
+    // rsaKeySize must reach amtCertSignWithCAKey, not just createCertificate for
+    // the root, otherwise the AMT 22 policy size is silently dropped.
+    expect(signSpy.mock.calls[0][7]).toBe(3072)
     expect(createCertificateSpy.mock.calls[0][6]).toBe('sha384')
     expect(createCertificateSpy.mock.calls[0][7]).toBe(3072)
   })
 
   it.each([
-    { version: '21.0.6', expectedKeyLength: 2048 },
-    { version: '22.0.0', expectedKeyLength: 3072 }
-  ])('should generate a $expectedKeyLength-bit key for AMT $version', async ({ version, expectedKeyLength }) => {
+    // The SDK allows exactly two key pairs: KeyAlgorithm 0 / RSA-2048 and
+    // KeyAlgorithm 1 / ECC-384. Any other size returns 2066 PT_STATUS_UNSUPPORTED.
+    { version: '21.0.6', expected: { KeyAlgorithm: 0, KeyLength: 2048 } },
+    { version: '22.0.0', expected: { KeyAlgorithm: 1, KeyLength: 384 } }
+  ])('should ask AMT $version for the key pair its generation binds', async ({ version, expected }) => {
     devices[clientId].ClientData = { payload: { ver: version } }
     const generateKeyPairSpy = vi
       .spyOn(context.amt.PublicKeyManagementService, 'GenerateKeyPair')
@@ -349,8 +405,28 @@ describe('TLS State Machine', () => {
 
     await tls.generateKeyPair({ input: context })
 
-    expect(generateKeyPairSpy).toHaveBeenCalledWith({ KeyAlgorithm: 0, KeyLength: expectedKeyLength })
+    expect(generateKeyPairSpy).toHaveBeenCalledWith(expected)
     expect(invokeWsmanCallSpy).toHaveBeenCalled()
+  })
+
+  describe('getGenerateKeyPairFailure', () => {
+    it('accepts a successful response that carries a key pair handle', () => {
+      expect(TLS.getGenerateKeyPairFailure(generateKeyPairSuccess)).toBeNull()
+    })
+
+    it('reports the decoded PT status for the AMT 22 RSA-3072 rejection', () => {
+      const response = { Envelope: { Body: { GenerateKeyPair_OUTPUT: { ReturnValue: 2066 } } } }
+      expect(TLS.getGenerateKeyPairFailure(response)).toContain('2066 (PT_STATUS_UNSUPPORTED)')
+    })
+
+    it('rejects a zero ReturnValue with no key pair handle', () => {
+      const response = { Envelope: { Body: { GenerateKeyPair_OUTPUT: { ReturnValue: 0 } } } }
+      expect(TLS.getGenerateKeyPairFailure(response)).toContain('no key pair handle')
+    })
+
+    it('rejects a response with no GenerateKeyPair_OUTPUT at all', () => {
+      expect(TLS.getGenerateKeyPairFailure({ Envelope: { Body: {} } })).toContain('no GenerateKeyPair_OUTPUT')
+    })
   })
   it('should addTrustedRootCertificate with pre-configured cert', async () => {
     devices[clientId].ClientData = { payload: { profile: { tlsCerts: { ROOT_CERTIFICATE: { certbin: 'dGVzdA==' } } } } }
@@ -394,6 +470,39 @@ describe('TLS State Machine', () => {
     const event: any = { output: {} }
     await tls.putTLSCredentialContext({ input: { context, event } })
     expect(invokeWsmanCallSpy).toHaveBeenCalled()
+  })
+
+  it('should forward the pulled credential context to Put so the device instance is echoed', async () => {
+    // A Put has no header SelectorSet; AMT matches the instance from the body.
+    // Hand-building ElementProvidingContext instead of echoing what the device
+    // reported is rejected with HTTP 500 on AMT 22.
+    const deviceContext = {
+      ElementInContext: {
+        Address: 'http://schemas.xmlsoap.org/ws/2004/08/addressing/role/anonymous',
+        ReferenceParameters: {
+          ResourceURI: 'http://intel.com/wbem/wscim/1/amt-schema/1/AMT_PublicKeyCertificate',
+          SelectorSet: { Selector: { _: 'Intel(r) AMT Certificate: Handle: 0', $: { Name: 'InstanceID' } } }
+        }
+      },
+      ElementProvidingContext: {
+        Address: 'http://schemas.xmlsoap.org/ws/2004/08/addressing/role/anonymous',
+        ReferenceParameters: {
+          ResourceURI: 'http://intel.com/wbem/wscim/1/amt-schema/1/AMT_TLSProtocolEndpointCollection',
+          SelectorSet: { Selector: { _: 'TLSProtocolEndpoint Instances Collection', $: { Name: 'ElementName' } } }
+        }
+      }
+    }
+    context.certHandle = 'Intel(r) AMT Certificate: Handle: 2'
+    context.message = {
+      Envelope: { Body: { PullResponse: { Items: { AMT_TLSCredentialContext: deviceContext } } } }
+    }
+    const putSpy = vi.spyOn(context.amt.TLSCredentialContext, 'Put')
+
+    await tls.putTLSCredentialContext({ input: { context, event: { output: {} } as any } })
+
+    expect(putSpy).toHaveBeenCalledWith('Intel(r) AMT Certificate: Handle: 2', deviceContext)
+    expect(context.xmlMessage).toContain('TLSProtocolEndpoint Instances Collection')
+    expect(context.xmlMessage).not.toContain('TLSProtocolEndpointInstances Collection')
   })
 
   it('should enumerateTLSCredentialContext', async () => {
@@ -547,10 +656,10 @@ describe('TLS State Machine', () => {
         'ENUMERATE_PUBLIC_PRIVATE_KEY_PAIR',
         'PULL_PUBLIC_PRIVATE_KEY_PAIR',
         'ADD_CERTIFICATE',
+        'SYNC_TIME',
         'ENUMERATE_TLS_CREDENTIAL_CONTEXT',
         'PULL_TLS_CREDENTIAL_CONTEXT',
         'CREATE_TLS_CREDENTIAL_CONTEXT',
-        'SYNC_TIME',
         'ENUMERATE_TLS_DATA',
         'PULL_TLS_DATA',
         'PUT_REMOTE_TLS_DATA',

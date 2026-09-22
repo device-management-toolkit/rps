@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { X509Certificate } from 'node:crypto'
 import { type AMT } from '@device-management-toolkit/wsman-messages'
 import { assign, sendTo, fromPromise, setup } from 'xstate'
 import { CertManager } from '../certManager.js'
@@ -24,6 +25,7 @@ import {
 } from './enterpriseAssistant.js'
 import { type CommonContext, invokeWsmanCall, sendProgressToDevice, recordComponentResult } from './common.js'
 import { getAMTCertificatePolicy } from '../utils/amtCertificatePolicy.js'
+import { getPTStatusName } from '../utils/PTStatus.js'
 
 export interface TLSContext extends CommonContext {
   amtProfile: AMTConfiguration | null
@@ -81,6 +83,16 @@ export class TLS {
         (x) => x.InstanceID === input.context.keyPairHandle
       )[0]
       const DERKey = PublicPrivateKeyPair?.DERKey
+      if (DERKey == null || DERKey === '') {
+        // Without the AMT-held public key, createCertificate would mint an RSA key
+        // inside RPS and throw the private half away. AddCertificate accepts such a
+        // leaf, but Put AMT_TLSCredentialContext then fails with HTTP 400 because
+        // the ME holds no matching private key. Fail here, where the cause is clear.
+        throw new globalThis.Error(
+          `No AMT public key available for key pair handle '${input.context.keyPairHandle ?? 'undefined'}'; ` +
+            'refusing to issue a TLS leaf certificate whose private key is not held by the device'
+        )
+      }
       const certAttributes: CertAttributes = {
         CN: `AMT-${clientObj.hostname ?? clientObj.uuid}`,
         O: 'None',
@@ -115,11 +127,11 @@ export class TLS {
       }
       // Use the MPS root key or pre-stored root key if available,
       // otherwise create a new root cert (backwards compatibility)
+      const policy = getAMTCertificatePolicy(clientObj.ClientData?.payload?.ver)
       let rootKey: any
       if (clientObj.tls?.rootCertKey) {
         rootKey = clientObj.tls.rootCertKey
       } else {
-        const policy = getAMTCertificatePolicy(clientObj.ClientData?.payload?.ver)
         const rootCert = this.certManager.createCertificate(
           issuerAttributes,
           null,
@@ -140,7 +152,8 @@ export class TLS {
         issuerAttributes,
         keyUsages,
         clientObj.tls?.mpsRootCertPEM,
-        getAMTCertificatePolicy(clientObj.ClientData?.payload?.ver).hashAlgorithm
+        policy.hashAlgorithm,
+        policy.rsaKeySize
       )
       cert = certResult.pem.substring(27, certResult.pem.length - 25)
 
@@ -154,19 +167,50 @@ export class TLS {
     }
 
     input.context.xmlMessage = input.context.amt.PublicKeyManagementService.AddCertificate({ CertificateBlob: cert })
+    this.logTlsLeafIdentity(clientObj.uuid, cert)
 
     return await invokeWsmanCall(input.context, 2)
+  }
+
+  /**
+   * Log what RPS is actually about to hand the firmware.
+   *
+   * AMT rejects an unusable TLS leaf only later, at Put AMT_TLSCredentialContext,
+   * and says nothing more useful than "AMT-STATUS 1". Recovering the subject,
+   * issuer (including attribute ORDER, which has to match the root's subject
+   * byte-for-byte for chain building) and serial otherwise means hand-decoding
+   * the base64 blob out of the WSMAN trace. Never fail activation over logging.
+   */
+  logTlsLeafIdentity = (uuid: string | undefined, base64Der: string): void => {
+    try {
+      const parsed = new X509Certificate(Buffer.from(base64Der, 'base64'))
+      const oneLine = (dn: string): string => dn.split('\n').join(', ')
+      const key = parsed.publicKey
+      const keyType =
+        key.asymmetricKeyType === 'ec'
+          ? `ec-${key.asymmetricKeyDetails?.namedCurve ?? 'unknown'}`
+          : `${key.asymmetricKeyType ?? 'unknown'}-${key.asymmetricKeyDetails?.modulusLength ?? '?'}`
+      this.logger.info(
+        `TLS leaf for device ${uuid ?? 'unknown'}: subject=[${oneLine(parsed.subject)}] ` +
+          `issuer=[${oneLine(parsed.issuer)}] serial=${parsed.serialNumber} ` +
+          `key=${keyType} validity=${parsed.validFrom}..${parsed.validTo}`
+      )
+    } catch (err) {
+      this.logger.debug(`Could not parse the issued TLS leaf for device ${uuid ?? 'unknown'}: ${err}`)
+    }
   }
 
   generateKeyPair = async ({ input }: { input: TLSContext }): Promise<any> => {
     const amtVersion = devices[input.clientId].ClientData?.payload?.ver
     const policy = getAMTCertificatePolicy(amtVersion)
+    const { keyAlgorithm, keyLength } = policy.deviceKeyPair
     this.logger.debug(
-      `AMT certificate policy: version=${amtVersion ?? 'unknown'} hashAlgorithm=${policy.hashAlgorithm} rsaKeySize=${policy.rsaKeySize}`
+      `AMT certificate policy: version=${amtVersion ?? 'unknown'} hashAlgorithm=${policy.hashAlgorithm} ` +
+        `rsaKeySize(RPS root)=${policy.rsaKeySize} deviceKey=${keyAlgorithm === 1 ? 'ECC' : 'RSA'}-${keyLength}`
     )
     input.xmlMessage = input.amt.PublicKeyManagementService.GenerateKeyPair({
-      KeyAlgorithm: 0,
-      KeyLength: policy.rsaKeySize
+      KeyAlgorithm: keyAlgorithm,
+      KeyLength: keyLength
     })
     return await invokeWsmanCall(input, 2)
   }
@@ -208,7 +252,13 @@ export class TLS {
 
   putTLSCredentialContext = async ({ input }: { input: { context: TLSContext; event: TLSEvent } }): Promise<any> => {
     const certHandle = input.context.certHandle ?? 'Intel(r) AMT Certificate: Handle: 1'
-    input.context.xmlMessage = input.context.amt.TLSCredentialContext.Put(certHandle)
+    // Echo back the instance the device just reported. A Put has no header
+    // SelectorSet, so AMT resolves the target from the body; a hand-built
+    // ElementProvidingContext that does not match what the device returned is
+    // rejected with HTTP 500 on AMT 22 (AMT 21 tolerated it).
+    const existing = input.context.message?.Envelope?.Body?.PullResponse?.Items?.AMT_TLSCredentialContext
+    const existingContext = Array.isArray(existing) ? existing[0] : existing
+    input.context.xmlMessage = input.context.amt.TLSCredentialContext.Put(certHandle, existingContext)
     return await invokeWsmanCall(input.context, 2)
   }
 
@@ -241,6 +291,34 @@ export class TLS {
       input.message?.Envelope?.Body?.GenerateKeyPair_OUTPUT?.KeyPair?.ReferenceParameters?.SelectorSet?.Selector?._
     input.xmlMessage = input.amt.PublicPrivateKeyPair.Enumerate()
     return await invokeWsmanCall(input, 2)
+  }
+
+  /**
+   * GenerateKeyPair reports failure in-band: HTTP 200 with a non-zero ReturnValue
+   * and no KeyPair element. Treating that as success leaves keyPairHandle
+   * undefined and lets the flow fabricate a key locally, which only surfaces
+   * three requests later as an HTTP 400 on Put AMT_TLSCredentialContext.
+   */
+  static getGenerateKeyPairFailure(message: any): string | null {
+    const output = message?.Envelope?.Body?.GenerateKeyPair_OUTPUT
+    if (output == null) {
+      return 'AMT returned no GenerateKeyPair_OUTPUT'
+    }
+
+    const returnValue = Number(output.ReturnValue)
+    if (Number.isNaN(returnValue)) {
+      return 'AMT returned a non-numeric GenerateKeyPair ReturnValue'
+    }
+    if (returnValue !== 0) {
+      return `AMT rejected GenerateKeyPair with ${returnValue} (${getPTStatusName(returnValue)})`
+    }
+
+    const handle = output.KeyPair?.ReferenceParameters?.SelectorSet?.Selector?._
+    if (handle == null || handle === '') {
+      return 'AMT reported GenerateKeyPair success but returned no key pair handle'
+    }
+
+    return null
   }
 
   pullPublicPrivateKeyPair = async ({ input }: { input: TLSContext }): Promise<any> => {
@@ -344,7 +422,32 @@ export class TLS {
       DELAY_TIME_TLS_PUT_DATA_SYNC: () => Environment.Config.delay_tls_put_data_sync
     },
     guards: {
-      hasPublicPrivateKeyPairs: ({ context }) => context.message.Envelope.Body.PullResponse.Items !== '',
+      generateKeyPairFailed: ({ event }) => TLS.getGenerateKeyPairFailure((event as any).output) != null,
+      // The pull must contain the handle GenerateKeyPair actually returned. A
+      // non-empty Items list is not enough: AMT ships with a factory key pair,
+      // which satisfied the old check even when our key was never created.
+      hasPublicPrivateKeyPairs: ({ context }) => {
+        const items = context.message?.Envelope?.Body?.PullResponse?.Items
+        if (items == null || items === '') {
+          return false
+        }
+        if (context.keyPairHandle == null || context.keyPairHandle === '') {
+          this.logger.error('No key pair handle from GenerateKeyPair; refusing to use a pre-existing AMT key')
+          return false
+        }
+        const keyPairs = Array.isArray(items.AMT_PublicPrivateKeyPair)
+          ? items.AMT_PublicPrivateKeyPair
+          : items.AMT_PublicPrivateKeyPair != null
+            ? [items.AMT_PublicPrivateKeyPair]
+            : []
+        const matched = keyPairs.some((pair: any) => pair?.InstanceID === context.keyPairHandle && pair?.DERKey != null)
+        if (!matched) {
+          this.logger.error(
+            `Generated key pair '${context.keyPairHandle}' is not present with a DERKey in AMT_PublicPrivateKeyPair`
+          )
+        }
+        return matched
+      },
       useTLSEnterpriseAssistantCert: ({ context }) =>
         context.amtProfile?.tlsSigningAuthority === TlsSigningAuthority.MICROSOFT_CA,
       hasTLSCredentialContext: ({ context }) =>
@@ -567,12 +670,31 @@ export class TLS {
           src: 'generateKeyPair',
           input: ({ context }) => context,
           id: 'generate-key-pair',
-          onDone: {
-            actions: [
-              assign({ message: ({ event }) => event.output })
-            ],
-            target: 'ENUMERATE_PUBLIC_PRIVATE_KEY_PAIR'
-          },
+          onDone: [
+            {
+              // Non-zero ReturnValue means the firmware created no key. Stop here
+              // rather than letting addCertificate invent one that AMT has no
+              // private key for.
+              guard: 'generateKeyPairFailed',
+              actions: [
+                assign({
+                  message: ({ event }) => event.output,
+                  errorMessage: ({ event }) =>
+                    `Failed to generate key pair: ${TLS.getGenerateKeyPairFailure(event.output)}`
+                }),
+                ({ event }) => {
+                  this.logger.error(`GenerateKeyPair failed: ${TLS.getGenerateKeyPairFailure(event.output)}`)
+                }
+              ],
+              target: 'FAILED'
+            },
+            {
+              actions: [
+                assign({ message: ({ event }) => event.output })
+              ],
+              target: 'ENUMERATE_PUBLIC_PRIVATE_KEY_PAIR'
+            }
+          ],
           onError: {
             actions: assign({
               errorMessage: 'Failed to generate key pair'
@@ -631,7 +753,15 @@ export class TLS {
             guard: 'hasPublicPrivateKeyPairs',
             target: 'CHECK_CERT_MODE_AFTER_REQUEST'
           },
-          'CREATE_TLS_CREDENTIAL_CONTEXT'
+          {
+            // Previously fell through to CREATE_TLS_CREDENTIAL_CONTEXT, which bound
+            // whatever credential AMT already had. Without our own key pair there is
+            // nothing valid to bind, so fail with a clear reason instead.
+            actions: assign({
+              errorMessage: 'Generated key pair not found in AMT key store'
+            }),
+            target: 'FAILED'
+          }
         ]
       },
       ADD_CERTIFICATE: {
@@ -648,7 +778,12 @@ export class TLS {
                     ?.SelectorSet?.Selector?._ ?? 'Intel(r) AMT Certificate: Handle: 1'
               })
             ],
-            target: 'ENUMERATE_TLS_CREDENTIAL_CONTEXT'
+            // Sync the clock BEFORE binding the credential, not after. AMT cannot
+            // use a certificate whose validity window does not contain the
+            // firmware's own clock, and a factory-fresh device has no correct
+            // clock until RPS sets it. Binding first meant the bind was evaluated
+            // against whatever time the ME happened to hold.
+            target: 'SYNC_TIME'
           },
           onError: {
             actions: assign({
@@ -718,12 +853,12 @@ export class TLS {
             actions: [
               assign({ message: ({ event }) => event.output })
             ],
-            target: 'SYNC_TIME'
+            target: 'ENUMERATE_TLS_DATA'
           },
           onError: [
             {
               guard: 'alreadyExists',
-              target: 'SYNC_TIME'
+              target: 'ENUMERATE_TLS_DATA'
             },
             {
               actions: assign({ errorMessage: 'Failed to put TLS credential context' }),
@@ -741,12 +876,12 @@ export class TLS {
             actions: [
               assign({ message: ({ event }) => event.output })
             ],
-            target: 'SYNC_TIME'
+            target: 'ENUMERATE_TLS_DATA'
           },
           onError: [
             {
               guard: 'alreadyExists',
-              target: 'SYNC_TIME'
+              target: 'ENUMERATE_TLS_DATA'
             },
             {
               actions: assign({ errorMessage: 'Failed to create TLS credential context' }),
@@ -761,7 +896,7 @@ export class TLS {
           src: 'timeSync',
           input: ({ context }) => context,
           id: 'time-machine',
-          onDone: 'ENUMERATE_TLS_DATA'
+          onDone: 'ENUMERATE_TLS_CREDENTIAL_CONTEXT'
         },
         on: {
           ONFAILED: 'FAILED'

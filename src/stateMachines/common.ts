@@ -285,6 +285,20 @@ export const processTLSTunnelResponse = (clientId: string, data: Buffer, httpHan
       // handles the retry/auth flow consistently with the non-TLS path. The error machine
       // installs the digest challenge from Www-Authenticate and bounds retries via unauthCount.
       invokeWsmanLogger.warn(`WSMAN RESPONSE: HTTP ${statusCode}`)
+      // Log the fault body too. AMT returns the reason it rejected a request in a
+      // SOAP Fault, and discarding it turns a diagnosable error into a bare status
+      // code. 401 challenges carry no useful body, so skip those.
+      if (statusCode !== 401) {
+        try {
+          const isChunkedError = /Transfer-Encoding:\s*chunked/i.test(responseData.toString())
+          const errorBody = isChunkedError ? parseChunkedMessage(httpRsp.body.text) : httpRsp.body.text
+          if (errorBody != null && errorBody !== '') {
+            invokeWsmanLogger.warn(`WSMAN FAULT BODY:\n${errorBody}`)
+          }
+        } catch (bodyErr) {
+          invokeWsmanLogger.debug(`Could not extract fault body: ${(bodyErr as Error).message}`)
+        }
+      }
       clientObj.reject(httpRsp)
     }
   } catch (err) {

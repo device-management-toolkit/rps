@@ -43,7 +43,7 @@ import { NetworkConfiguration } from './networkConfiguration.js'
 import { error } from 'console'
 import { TLSTunnelManager } from '../TLSTunnelManager.js'
 import { ensurePemCertificate } from '../utils/certHelpers.js'
-import { getAMTCertificatePolicy } from '../utils/amtCertificatePolicy.js'
+import { getAMTCertificatePolicy, getSigningAlgorithm } from '../utils/amtCertificatePolicy.js'
 import crypto from 'node:crypto'
 
 export interface ActivationContext extends CommonContext {
@@ -194,10 +194,10 @@ export class Activation {
     clientObj.signature = undefined
 
     this.logger.debug(
-      `AMT certificate policy: version=${amtVersion ?? 'unknown'} expectedHashAlgorithm=${policy.hashAlgorithm} expectedRsaKeySize=${policy.rsaKeySize} certificateHashAlgorithm=${certificateHashAlgorithm ?? 'unknown'}`
+      `AMT certificate policy: version=${amtVersion ?? 'unknown'} requiresSha384ProvisioningCert=${policy.requiresSha384ProvisioningCert} certificateHashAlgorithm=${certificateHashAlgorithm ?? 'unknown'}`
     )
 
-    if (policy.hashAlgorithm === 'sha384' && certificateHashAlgorithm !== 'sha384') {
+    if (policy.requiresSha384ProvisioningCert && certificateHashAlgorithm !== 'sha384') {
       this.logger.error(
         `AMT ${amtVersion} requires a SHA384 provisioning certificate; received ${certificateHashAlgorithm ?? 'unknown'}`
       )
@@ -333,7 +333,7 @@ export class Activation {
     this.createSignedString(clientId, certChainPfx.hashAlgorithm)
     const clientObj = devices[clientId]
     if (clientObj.nonce != null && clientObj.signature != null) {
-      const signingAlgorithm = certChainPfx.hashAlgorithm?.toLowerCase() === 'sha384' ? 3 : 2
+      const signingAlgorithm = getSigningAlgorithm(certChainPfx.hashAlgorithm)
       input.xmlMessage = ips.HostBasedSetupService.AdminSetup(
         2,
         password,
@@ -353,7 +353,7 @@ export class Activation {
     this.createSignedString(clientId, certChainPfx.hashAlgorithm)
     const clientObj = devices[clientId]
     if (clientObj.nonce != null && clientObj.signature != null) {
-      const signingAlgorithm = certChainPfx.hashAlgorithm?.toLowerCase() === 'sha384' ? 3 : 2
+      const signingAlgorithm = getSigningAlgorithm(certChainPfx.hashAlgorithm)
       input.xmlMessage = ips.HostBasedSetupService.UpgradeClientToAdmin(
         clientObj.nonce.toString('base64'),
         signingAlgorithm,
@@ -1108,9 +1108,26 @@ export class Activation {
         ? credentialContext.length > 0
         : credentialContext != null
 
-      this.logger.info(
-        `Device ${clientObj.uuid} TLS state: enabled=${tlsEnabled}, credentialContext=${hasCredentialContext}`
-      )
+      // A credential context on its own proves nothing: AMT ships with a factory
+      // self-signed credential that satisfies this check. Log which leaf is
+      // actually bound so this line cannot be mistaken for "our cert is in use".
+      // The binding decision itself is made by validateDeviceTlsCert, which
+      // compares against the fingerprint stored in the vault.
+      if (hasCredentialContext) {
+        try {
+          const boundFingerprints = await this.getActiveTlsCertificateFingerprints(input)
+          this.logger.info(
+            `Device ${clientObj.uuid} TLS state: enabled=${tlsEnabled}, credentialContext=true, ` +
+              `bound leaf fp256=[${boundFingerprints.join(', ') || 'none resolvable'}] (identity not yet verified)`
+          )
+        } catch (err: unknown) {
+          const errMsg = err instanceof globalThis.Error ? err.message : String(err)
+          this.logger.debug(`Could not resolve bound TLS leaf for device ${clientObj.uuid}: ${errMsg}`)
+        }
+      } else {
+        this.logger.info(`Device ${clientObj.uuid} TLS state: enabled=${tlsEnabled}, credentialContext=false`)
+      }
+
       return { tlsEnabled, hasCredentialContext }
     } catch (err: unknown) {
       const errMsg = err instanceof globalThis.Error ? err.message : String(err)
@@ -1381,9 +1398,15 @@ export class Activation {
           !context.tlsACMComplete
         )
       },
-      hasIssuedTlsCert: ({ context }) => {
+      // Only true when the TLS child machine reported success AND left a cert
+      // behind. A cert alone is not enough: the leaf is generated before
+      // Put AMT_TLSCredentialContext, so on a failed bind it exists but the
+      // device is not using it. Storing it then poisons the vault and makes
+      // every later fingerprint comparison mismatch.
+      hasIssuedTlsCert: ({ context, event }) => {
         const device = devices[context.clientId]
-        return device?.tls?.issuedCertPEM != null && device.tls.issuedCertPEM !== ''
+        const hasCert = device?.tls?.issuedCertPEM != null && device.tls.issuedCertPEM !== ''
+        return hasCert && (event as any)?.output?.status === 'success'
       },
       isDeviceCommittedInCCMMode: ({ context }) =>
         context.message.Envelope.Body?.CommitChanges_OUTPUT?.ReturnValue === 0,
@@ -2682,11 +2705,26 @@ export class Activation {
           }),
           onDone: [
             {
-              // Save issued DMT cert to vault when TLS provisioning generated one.
+              // Save issued DMT cert to vault only when the whole TLS flow,
+              // including Put AMT_TLSCredentialContext, succeeded.
               guard: 'hasIssuedTlsCert',
               target: 'SAVE_POST_PROVISIONING_CERTS'
             },
-            { target: 'PROVISIONED' }
+            {
+              // TLS provisioning failed. Drop the leaf we generated so it is
+              // never written to the vault or compared against the live device.
+              actions: ({ context, event }) => {
+                const clientObj = devices[context.clientId]
+                if (clientObj?.tls?.issuedCertPEM != null) {
+                  this.logger.warn(
+                    `Discarding unbound TLS leaf cert for device ${clientObj.uuid}: ` +
+                      `${(event.output as any)?.errorMessage ?? 'TLS provisioning did not succeed'}`
+                  )
+                  clientObj.tls.issuedCertPEM = undefined
+                }
+              },
+              target: 'PROVISIONED'
+            }
           ]
         }
       },
