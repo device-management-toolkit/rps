@@ -6,9 +6,6 @@
 import { AMT } from '@device-management-toolkit/wsman-messages'
 import { assign, fromPromise, setup } from 'xstate'
 import { type CommonContext, invokeWsmanCall } from './common.js'
-import Logger from '../Logger.js'
-
-const timeSyncLogger = new Logger('TimeSync')
 
 export interface TimeSyncContext extends CommonContext {
   status: string
@@ -24,13 +21,6 @@ export class TimeSync {
   setHighAccuracyTimeSync = async ({ input }: { input: TimeSyncContext }): Promise<any> => {
     const Tm1 = Math.round(new Date().getTime() / 1000)
     const Ta0: number = input.message.Envelope.Body.GetLowAccuracyTimeSynch_OUTPUT.Ta0
-    // Report the device clock before correcting it. A firmware clock outside a
-    // certificate's validity window makes that certificate unusable, and AMT
-    // reports the refusal only as a generic internal error.
-    timeSyncLogger.info(
-      `Device clock before sync: Ta0=${Ta0} (${new Date(Ta0 * 1000).toISOString()}), ` +
-        `RPS=${Tm1} (${new Date(Tm1 * 1000).toISOString()}), skew=${Tm1 - Ta0}s`
-    )
     const amt = new AMT.Messages()
     input.xmlMessage = amt.TimeSynchronizationService.SetHighAccuracyTimeSynch(Ta0, Tm1, Tm1)
     return await invokeWsmanCall(input)

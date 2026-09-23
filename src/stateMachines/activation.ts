@@ -1108,26 +1108,9 @@ export class Activation {
         ? credentialContext.length > 0
         : credentialContext != null
 
-      // A credential context on its own proves nothing: AMT ships with a factory
-      // self-signed credential that satisfies this check. Log which leaf is
-      // actually bound so this line cannot be mistaken for "our cert is in use".
-      // The binding decision itself is made by validateDeviceTlsCert, which
-      // compares against the fingerprint stored in the vault.
-      if (hasCredentialContext) {
-        try {
-          const boundFingerprints = await this.getActiveTlsCertificateFingerprints(input)
-          this.logger.info(
-            `Device ${clientObj.uuid} TLS state: enabled=${tlsEnabled}, credentialContext=true, ` +
-              `bound leaf fp256=[${boundFingerprints.join(', ') || 'none resolvable'}] (identity not yet verified)`
-          )
-        } catch (err: unknown) {
-          const errMsg = err instanceof globalThis.Error ? err.message : String(err)
-          this.logger.debug(`Could not resolve bound TLS leaf for device ${clientObj.uuid}: ${errMsg}`)
-        }
-      } else {
-        this.logger.info(`Device ${clientObj.uuid} TLS state: enabled=${tlsEnabled}, credentialContext=false`)
-      }
-
+      this.logger.info(
+        `Device ${clientObj.uuid} TLS state: enabled=${tlsEnabled}, credentialContext=${hasCredentialContext}`
+      )
       return { tlsEnabled, hasCredentialContext }
     } catch (err: unknown) {
       const errMsg = err instanceof globalThis.Error ? err.message : String(err)
@@ -1398,15 +1381,9 @@ export class Activation {
           !context.tlsACMComplete
         )
       },
-      // Only true when the TLS child machine reported success AND left a cert
-      // behind. A cert alone is not enough: the leaf is generated before
-      // Put AMT_TLSCredentialContext, so on a failed bind it exists but the
-      // device is not using it. Storing it then poisons the vault and makes
-      // every later fingerprint comparison mismatch.
-      hasIssuedTlsCert: ({ context, event }) => {
+      hasIssuedTlsCert: ({ context }) => {
         const device = devices[context.clientId]
-        const hasCert = device?.tls?.issuedCertPEM != null && device.tls.issuedCertPEM !== ''
-        return hasCert && (event as any)?.output?.status === 'success'
+        return device?.tls?.issuedCertPEM != null && device.tls.issuedCertPEM !== ''
       },
       isDeviceCommittedInCCMMode: ({ context }) =>
         context.message.Envelope.Body?.CommitChanges_OUTPUT?.ReturnValue === 0,
@@ -2705,26 +2682,11 @@ export class Activation {
           }),
           onDone: [
             {
-              // Save issued DMT cert to vault only when the whole TLS flow,
-              // including Put AMT_TLSCredentialContext, succeeded.
+              // Save issued DMT cert to vault when TLS provisioning generated one.
               guard: 'hasIssuedTlsCert',
               target: 'SAVE_POST_PROVISIONING_CERTS'
             },
-            {
-              // TLS provisioning failed. Drop the leaf we generated so it is
-              // never written to the vault or compared against the live device.
-              actions: ({ context, event }) => {
-                const clientObj = devices[context.clientId]
-                if (clientObj?.tls?.issuedCertPEM != null) {
-                  this.logger.warn(
-                    `Discarding unbound TLS leaf cert for device ${clientObj.uuid}: ` +
-                      `${(event.output as any)?.errorMessage ?? 'TLS provisioning did not succeed'}`
-                  )
-                  clientObj.tls.issuedCertPEM = undefined
-                }
-              },
-              target: 'PROVISIONED'
-            }
+            { target: 'PROVISIONED' }
           ]
         }
       },

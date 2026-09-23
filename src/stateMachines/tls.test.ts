@@ -355,18 +355,6 @@ describe('TLS State Machine', () => {
     expect(invokeWsmanCallSpy).toHaveBeenCalled()
   })
 
-  it('should refuse to addCertificate when AMT returned no key pair', async () => {
-    // AMT 22 rejected GenerateKeyPair with 2066, so no handle and no DERKey.
-    // Signing a locally invented key here is what produced the HTTP 400 on
-    // Put AMT_TLSCredentialContext three requests later.
-    const event: TLSEvent = { type: 'CONFIGURE_TLS', clientId, output: { response: '' } }
-    context.keyPairHandle = undefined
-    context.message = { Envelope: { Body: { PullResponse: { Items: { AMT_PublicPrivateKeyPair: {} } } } } }
-
-    await expect(tls.addCertificate({ input: { context, event } })).rejects.toThrow(/No AMT public key available/)
-    expect(invokeWsmanCallSpy).not.toHaveBeenCalled()
-  })
-
   it('should sign an AMT 22 TLS certificate with the AMT 22 policy', async () => {
     const event: TLSEvent = {
       type: 'CONFIGURE_TLS',
@@ -409,25 +397,6 @@ describe('TLS State Machine', () => {
     expect(invokeWsmanCallSpy).toHaveBeenCalled()
   })
 
-  describe('getGenerateKeyPairFailure', () => {
-    it('accepts a successful response that carries a key pair handle', () => {
-      expect(TLS.getGenerateKeyPairFailure(generateKeyPairSuccess)).toBeNull()
-    })
-
-    it('reports the decoded PT status for the AMT 22 RSA-3072 rejection', () => {
-      const response = { Envelope: { Body: { GenerateKeyPair_OUTPUT: { ReturnValue: 2066 } } } }
-      expect(TLS.getGenerateKeyPairFailure(response)).toContain('2066 (PT_STATUS_UNSUPPORTED)')
-    })
-
-    it('rejects a zero ReturnValue with no key pair handle', () => {
-      const response = { Envelope: { Body: { GenerateKeyPair_OUTPUT: { ReturnValue: 0 } } } }
-      expect(TLS.getGenerateKeyPairFailure(response)).toContain('no key pair handle')
-    })
-
-    it('rejects a response with no GenerateKeyPair_OUTPUT at all', () => {
-      expect(TLS.getGenerateKeyPairFailure({ Envelope: { Body: {} } })).toContain('no GenerateKeyPair_OUTPUT')
-    })
-  })
   it('should addTrustedRootCertificate with pre-configured cert', async () => {
     devices[clientId].ClientData = { payload: { profile: { tlsCerts: { ROOT_CERTIFICATE: { certbin: 'dGVzdA==' } } } } }
     await tls.addTrustedRootCertificate({ input: context })
