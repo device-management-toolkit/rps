@@ -778,12 +778,7 @@ export class TLS {
                     ?.SelectorSet?.Selector?._ ?? 'Intel(r) AMT Certificate: Handle: 1'
               })
             ],
-            // Sync the clock BEFORE binding the credential, not after. AMT cannot
-            // use a certificate whose validity window does not contain the
-            // firmware's own clock, and a factory-fresh device has no correct
-            // clock until RPS sets it. Binding first meant the bind was evaluated
-            // against whatever time the ME happened to hold.
-            target: 'SYNC_TIME'
+            target: 'ENUMERATE_TLS_CREDENTIAL_CONTEXT'
           },
           onError: {
             actions: assign({
@@ -853,12 +848,12 @@ export class TLS {
             actions: [
               assign({ message: ({ event }) => event.output })
             ],
-            target: 'ENUMERATE_TLS_DATA'
+            target: 'SYNC_TIME'
           },
           onError: [
             {
               guard: 'alreadyExists',
-              target: 'ENUMERATE_TLS_DATA'
+              target: 'SYNC_TIME'
             },
             {
               actions: assign({ errorMessage: 'Failed to put TLS credential context' }),
@@ -876,12 +871,12 @@ export class TLS {
             actions: [
               assign({ message: ({ event }) => event.output })
             ],
-            target: 'ENUMERATE_TLS_DATA'
+            target: 'SYNC_TIME'
           },
           onError: [
             {
               guard: 'alreadyExists',
-              target: 'ENUMERATE_TLS_DATA'
+              target: 'SYNC_TIME'
             },
             {
               actions: assign({ errorMessage: 'Failed to create TLS credential context' }),
@@ -896,7 +891,7 @@ export class TLS {
           src: 'timeSync',
           input: ({ context }) => context,
           id: 'time-machine',
-          onDone: 'ENUMERATE_TLS_CREDENTIAL_CONTEXT'
+          onDone: 'ENUMERATE_TLS_DATA'
         },
         on: {
           ONFAILED: 'FAILED'
