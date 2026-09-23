@@ -472,39 +472,6 @@ describe('TLS State Machine', () => {
     expect(invokeWsmanCallSpy).toHaveBeenCalled()
   })
 
-  it('should forward the pulled credential context to Put so the device instance is echoed', async () => {
-    // A Put has no header SelectorSet; AMT matches the instance from the body.
-    // Hand-building ElementProvidingContext instead of echoing what the device
-    // reported is rejected with HTTP 500 on AMT 22.
-    const deviceContext = {
-      ElementInContext: {
-        Address: 'http://schemas.xmlsoap.org/ws/2004/08/addressing/role/anonymous',
-        ReferenceParameters: {
-          ResourceURI: 'http://intel.com/wbem/wscim/1/amt-schema/1/AMT_PublicKeyCertificate',
-          SelectorSet: { Selector: { _: 'Intel(r) AMT Certificate: Handle: 0', $: { Name: 'InstanceID' } } }
-        }
-      },
-      ElementProvidingContext: {
-        Address: 'http://schemas.xmlsoap.org/ws/2004/08/addressing/role/anonymous',
-        ReferenceParameters: {
-          ResourceURI: 'http://intel.com/wbem/wscim/1/amt-schema/1/AMT_TLSProtocolEndpointCollection',
-          SelectorSet: { Selector: { _: 'TLSProtocolEndpoint Instances Collection', $: { Name: 'ElementName' } } }
-        }
-      }
-    }
-    context.certHandle = 'Intel(r) AMT Certificate: Handle: 2'
-    context.message = {
-      Envelope: { Body: { PullResponse: { Items: { AMT_TLSCredentialContext: deviceContext } } } }
-    }
-    const putSpy = vi.spyOn(context.amt.TLSCredentialContext, 'Put')
-
-    await tls.putTLSCredentialContext({ input: { context, event: { output: {} } as any } })
-
-    expect(putSpy).toHaveBeenCalledWith('Intel(r) AMT Certificate: Handle: 2', deviceContext)
-    expect(context.xmlMessage).toContain('TLSProtocolEndpoint Instances Collection')
-    expect(context.xmlMessage).not.toContain('TLSProtocolEndpointInstances Collection')
-  })
-
   it('should enumerateTLSCredentialContext', async () => {
     await tls.enumerateTLSCredentialContext({ input: context })
     expect(invokeWsmanCallSpy).toHaveBeenCalled()

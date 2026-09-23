@@ -252,13 +252,7 @@ export class TLS {
 
   putTLSCredentialContext = async ({ input }: { input: { context: TLSContext; event: TLSEvent } }): Promise<any> => {
     const certHandle = input.context.certHandle ?? 'Intel(r) AMT Certificate: Handle: 1'
-    // Echo back the instance the device just reported. A Put has no header
-    // SelectorSet, so AMT resolves the target from the body; a hand-built
-    // ElementProvidingContext that does not match what the device returned is
-    // rejected with HTTP 500 on AMT 22 (AMT 21 tolerated it).
-    const existing = input.context.message?.Envelope?.Body?.PullResponse?.Items?.AMT_TLSCredentialContext
-    const existingContext = Array.isArray(existing) ? existing[0] : existing
-    input.context.xmlMessage = input.context.amt.TLSCredentialContext.Put(certHandle, existingContext)
+    input.context.xmlMessage = input.context.amt.TLSCredentialContext.Put(certHandle)
     return await invokeWsmanCall(input.context, 2)
   }
 
