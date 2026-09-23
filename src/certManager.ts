@@ -464,17 +464,14 @@ export class CertManager {
 
     // If creating a leaf cert with MPS root cert provided, base validity on root cert validity dates.
     // Accept both PEM and base64 DER to avoid silently falling back to legacy dates.
-    // The parsed root is also the authoritative source for the issuer DN below.
-    let parsedRootCert: pki.Certificate | null = null
     if (caPrivateKey && rootCertPem) {
       try {
-        parsedRootCert = this.parseCertificateFlexible(rootCertPem)
+        const rootCert = this.parseCertificateFlexible(rootCertPem)
         const oneMinuteMs = 1 * 60 * 1000
-        cert.validity.notBefore = new Date(parsedRootCert.validity.notBefore.getTime() + oneMinuteMs)
-        cert.validity.notAfter = new Date(parsedRootCert.validity.notAfter.getTime() - oneMinuteMs)
+        cert.validity.notBefore = new Date(rootCert.validity.notBefore.getTime() + oneMinuteMs)
+        cert.validity.notAfter = new Date(rootCert.validity.notAfter.getTime() - oneMinuteMs)
       } catch (err) {
         // Fallback to default dates if root cert parsing fails
-        parsedRootCert = null
         cert.validity.notBefore = new Date(2018, 0, 1)
         cert.validity.notAfter = new Date(2049, 11, 31)
       }
@@ -492,25 +489,13 @@ export class CertManager {
     cert.setSubject(attrs)
 
     if (caPrivateKey) {
-      if (parsedRootCert) {
-        // Copy the issuing CA's subject DN verbatim. RFC 5280 chain building compares
-        // the DER-encoded Name, so attribute ORDER and string encoding must match
-        // exactly. Rebuilding the DN from parsed CN/C/ST/O fields reorders it:
-        // a root with subject "CN, O, C" produced a leaf with issuer "CN, C, O".
-        // AMT 21 tolerated the mismatch (RPS logs "issuer formatting mismatch
-        // tolerated" when verifying its own leaf); AMT 22 rejects the credential
-        // bind with HTTP 500 / AMT-STATUS 1 (PT_STATUS_INTERNAL_ERROR).
-        cert.setIssuer(parsedRootCert.subject.attributes)
-      } else {
-        // No parsable root cert: fall back to the supplied attributes. The DN is
-        // whatever we say it is here, so ordering cannot mismatch anything.
-        const rootattrs: Attribute[] = []
-        if (issuerAttributes?.CN) rootattrs.push({ name: 'commonName', value: issuerAttributes.CN })
-        if (issuerAttributes?.C) rootattrs.push({ name: 'countryName', value: issuerAttributes.C })
-        if (issuerAttributes?.ST) rootattrs.push({ shortName: 'ST', value: issuerAttributes.ST })
-        if (issuerAttributes?.O) rootattrs.push({ name: 'organizationName', value: issuerAttributes.O })
-        cert.setIssuer(rootattrs)
-      }
+      // Use root attributes
+      const rootattrs: Attribute[] = []
+      if (issuerAttributes?.CN) rootattrs.push({ name: 'commonName', value: issuerAttributes.CN })
+      if (issuerAttributes?.C) rootattrs.push({ name: 'countryName', value: issuerAttributes.C })
+      if (issuerAttributes?.ST) rootattrs.push({ shortName: 'ST', value: issuerAttributes.ST })
+      if (issuerAttributes?.O) rootattrs.push({ name: 'organizationName', value: issuerAttributes.O })
+      cert.setIssuer(rootattrs)
       if (externalSpki) {
         this.standInForExternalPublicKey(cert, externalSpki, caPrivateKey as pki.rsa.PrivateKey)
       }
