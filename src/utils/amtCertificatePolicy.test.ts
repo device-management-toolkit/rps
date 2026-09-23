@@ -4,7 +4,7 @@
  **********************************************************************/
 
 import { describe, expect, it } from 'vitest'
-import { getAMTCertificatePolicy, getSigningAlgorithm } from './amtCertificatePolicy.js'
+import { getAMTCertificatePolicy, resolveProvisioningSignature } from './amtCertificatePolicy.js'
 
 const RSA_2048_DEVICE_KEY = { keyAlgorithm: 0, keyLength: 2048 }
 const ECC_384_DEVICE_KEY = { keyAlgorithm: 1, keyLength: 384 }
@@ -16,42 +16,56 @@ describe('getAMTCertificatePolicy', () => {
       hashAlgorithm: 'sha256',
       rsaKeySize: 2048,
       deviceKeyPair: RSA_2048_DEVICE_KEY,
-      requiresSha384ProvisioningCert: false
+      requiresSha384ProvisioningCert: false,
+      supportsSha384ProvisioningSignature: false
+    },
+    {
+      version: '20.0.5',
+      hashAlgorithm: 'sha256',
+      rsaKeySize: 2048,
+      deviceKeyPair: RSA_2048_DEVICE_KEY,
+      requiresSha384ProvisioningCert: false,
+      supportsSha384ProvisioningSignature: false
     },
     {
       version: '21.0.6',
       hashAlgorithm: 'sha256',
       rsaKeySize: 2048,
       deviceKeyPair: RSA_2048_DEVICE_KEY,
-      requiresSha384ProvisioningCert: false
+      requiresSha384ProvisioningCert: false,
+      supportsSha384ProvisioningSignature: true
     },
     {
       version: '22.0.0',
       hashAlgorithm: 'sha384',
       rsaKeySize: 3072,
       deviceKeyPair: ECC_384_DEVICE_KEY,
-      requiresSha384ProvisioningCert: true
+      requiresSha384ProvisioningCert: true,
+      supportsSha384ProvisioningSignature: true
     },
     {
       version: '22.1.15',
       hashAlgorithm: 'sha384',
       rsaKeySize: 3072,
       deviceKeyPair: ECC_384_DEVICE_KEY,
-      requiresSha384ProvisioningCert: true
+      requiresSha384ProvisioningCert: true,
+      supportsSha384ProvisioningSignature: true
     },
     {
       version: 'unknown',
       hashAlgorithm: 'sha256',
       rsaKeySize: 2048,
       deviceKeyPair: RSA_2048_DEVICE_KEY,
-      requiresSha384ProvisioningCert: false
+      requiresSha384ProvisioningCert: false,
+      supportsSha384ProvisioningSignature: false
     },
     {
       version: '',
       hashAlgorithm: 'sha256',
       rsaKeySize: 2048,
       deviceKeyPair: RSA_2048_DEVICE_KEY,
-      requiresSha384ProvisioningCert: false
+      requiresSha384ProvisioningCert: false,
+      supportsSha384ProvisioningSignature: false
     }
   ])('selects the certificate policy for AMT $version', ({ version, ...expected }) => {
     expect(getAMTCertificatePolicy(version)).toEqual(expected)
@@ -75,8 +89,9 @@ describe('getAMTCertificatePolicy', () => {
   })
 
   it('does not expose a version-derived signing algorithm', () => {
-    // SigningAlgorithm belongs to the provisioning certificate, not the AMT
-    // version — see getSigningAlgorithm. A version-gated field here invited the
+    // SigningAlgorithm is resolved from the provisioning certificate and the
+    // firmware's verification capability together — see
+    // resolveProvisioningSignature. A bare version-gated field here invited the
     // wrong rule, and was never read by any caller.
     expect(getAMTCertificatePolicy('22.0.0')).not.toHaveProperty('signingAlgorithm')
   })
@@ -120,22 +135,51 @@ describe('getAMTCertificatePolicy', () => {
   })
 })
 
-describe('getSigningAlgorithm', () => {
+describe('resolveProvisioningSignature', () => {
   it.each([
-    { hashAlgorithm: 'sha384', expected: 3 },
-    { hashAlgorithm: 'SHA384', expected: 3 },
-    { hashAlgorithm: 'sha256', expected: 2 },
-    { hashAlgorithm: undefined, expected: 2 },
-    { hashAlgorithm: null, expected: 2 }
-  ])('maps a $hashAlgorithm provisioning cert to SigningAlgorithm $expected', ({ hashAlgorithm, expected }) => {
-    expect(getSigningAlgorithm(hashAlgorithm)).toBe(expected)
+    { version: '21.0.6', certHashAlgorithm: 'sha384', hashAlgorithm: 'sha384', signingAlgorithm: 3 },
+    { version: '21.0.6', certHashAlgorithm: 'SHA384', hashAlgorithm: 'sha384', signingAlgorithm: 3 },
+    { version: '22.0.0', certHashAlgorithm: 'sha384', hashAlgorithm: 'sha384', signingAlgorithm: 3 },
+    { version: '21.0.6', certHashAlgorithm: 'sha256', hashAlgorithm: 'sha256', signingAlgorithm: 2 },
+    { version: '21.0.6', certHashAlgorithm: undefined, hashAlgorithm: 'sha256', signingAlgorithm: 2 },
+    { version: '21.0.6', certHashAlgorithm: null, hashAlgorithm: 'sha256', signingAlgorithm: 2 },
+    { version: '20.0.5', certHashAlgorithm: 'sha384', hashAlgorithm: 'sha256', signingAlgorithm: 2 },
+    { version: '11.8.50', certHashAlgorithm: 'sha384', hashAlgorithm: 'sha256', signingAlgorithm: 2 },
+    { version: 'unknown', certHashAlgorithm: 'sha384', hashAlgorithm: 'sha256', signingAlgorithm: 2 }
+  ])(
+    'AMT $version with a $certHashAlgorithm provisioning cert signs with $hashAlgorithm / SigningAlgorithm $signingAlgorithm',
+    ({ version, certHashAlgorithm, ...expected }) => {
+      expect(resolveProvisioningSignature(version, certHashAlgorithm)).toEqual(expected)
+    }
+  )
+
+  it('downgrades to sha256 on firmware that cannot verify a sha384 signature', () => {
+    // AMT 20.0.5 returned ReturnValue 3 (PT_STATUS_INVALID_PT_MODE) for
+    // UpgradeClientToAdmin with SigningAlgorithm=3, where AMT 21.0.6 and
+    // AMT 22.0.0 returned 0 for byte-for-byte the same provisioning cert.
+    expect(resolveProvisioningSignature('20.0.5', 'sha384').signingAlgorithm).toBe(2)
+    expect(resolveProvisioningSignature('21.0.6', 'sha384').signingAlgorithm).toBe(3)
   })
 
-  it('is driven by the certificate, not the AMT version', () => {
-    // Both AMT 21.0.6 and AMT 22.0.0 returned ReturnValue 0 for
-    // UpgradeClientToAdmin with SigningAlgorithm=3 and a SHA-384 provisioning
-    // cert, so this must not be gated on the AMT version.
-    expect(getSigningAlgorithm('sha384')).toBe(3)
-    expect(getAMTCertificatePolicy('21.0.6').hashAlgorithm).toBe('sha256')
+  it('never labels the signature with a digest it was not made with', () => {
+    // The firmware recomputes the digest named by SigningAlgorithm, so the two
+    // halves have to be resolved together rather than derived independently.
+    for (const version of [
+      '11.8.50',
+      '20.0.5',
+      '21.0.6',
+      '22.0.0',
+      'unknown',
+      ''
+    ]) {
+      for (const certHashAlgorithm of [
+        'sha256',
+        'sha384',
+        undefined
+      ]) {
+        const { hashAlgorithm, signingAlgorithm } = resolveProvisioningSignature(version, certHashAlgorithm)
+        expect(signingAlgorithm).toBe(hashAlgorithm === 'sha384' ? 3 : 2)
+      }
+    }
   })
 })

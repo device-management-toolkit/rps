@@ -43,7 +43,7 @@ import { NetworkConfiguration } from './networkConfiguration.js'
 import { error } from 'console'
 import { TLSTunnelManager } from '../TLSTunnelManager.js'
 import { ensurePemCertificate } from '../utils/certHelpers.js'
-import { getAMTCertificatePolicy, getSigningAlgorithm } from '../utils/amtCertificatePolicy.js'
+import { getAMTCertificatePolicy, resolveProvisioningSignature } from '../utils/amtCertificatePolicy.js'
 import crypto from 'node:crypto'
 
 export interface ActivationContext extends CommonContext {
@@ -190,16 +190,16 @@ export class Activation {
     const clientObj = devices[clientId]
     const amtVersion = clientObj.ClientData?.payload?.ver
     const policy = getAMTCertificatePolicy(amtVersion)
-    const certificateHashAlgorithm = hashAlgorithm?.toLowerCase()
+    const signingHashAlgorithm = hashAlgorithm?.toLowerCase()
     clientObj.signature = undefined
 
     this.logger.debug(
-      `AMT certificate policy: version=${amtVersion ?? 'unknown'} requiresSha384ProvisioningCert=${policy.requiresSha384ProvisioningCert} certificateHashAlgorithm=${certificateHashAlgorithm ?? 'unknown'}`
+      `AMT certificate policy: version=${amtVersion ?? 'unknown'} requiresSha384ProvisioningCert=${policy.requiresSha384ProvisioningCert} supportsSha384ProvisioningSignature=${policy.supportsSha384ProvisioningSignature} signingHashAlgorithm=${signingHashAlgorithm ?? 'unknown'}`
     )
 
-    if (policy.requiresSha384ProvisioningCert && certificateHashAlgorithm !== 'sha384') {
+    if (policy.requiresSha384ProvisioningCert && signingHashAlgorithm !== 'sha384') {
       this.logger.error(
-        `AMT ${amtVersion} requires a SHA384 provisioning certificate; received ${certificateHashAlgorithm ?? 'unknown'}`
+        `AMT ${amtVersion} requires a SHA384 provisioning certificate; received ${signingHashAlgorithm ?? 'unknown'}`
       )
       return false
     }
@@ -330,10 +330,13 @@ export class Activation {
     const ips: IPS.Messages = input.ips
     const { clientId, certChainPfx } = input
     const password = await this.getPassword(input)
-    this.createSignedString(clientId, certChainPfx.hashAlgorithm)
+    const { hashAlgorithm, signingAlgorithm } = resolveProvisioningSignature(
+      devices[clientId]?.ClientData?.payload?.ver,
+      certChainPfx.hashAlgorithm
+    )
+    this.createSignedString(clientId, hashAlgorithm)
     const clientObj = devices[clientId]
     if (clientObj.nonce != null && clientObj.signature != null) {
-      const signingAlgorithm = getSigningAlgorithm(certChainPfx.hashAlgorithm)
       input.xmlMessage = ips.HostBasedSetupService.AdminSetup(
         2,
         password,
@@ -350,10 +353,13 @@ export class Activation {
   sendUpgradeClientToAdmin = async ({ input }: { input: ActivationContext }): Promise<any> => {
     const ips: IPS.Messages = input.ips
     const { clientId, certChainPfx } = input
-    this.createSignedString(clientId, certChainPfx.hashAlgorithm)
+    const { hashAlgorithm, signingAlgorithm } = resolveProvisioningSignature(
+      devices[clientId]?.ClientData?.payload?.ver,
+      certChainPfx.hashAlgorithm
+    )
+    this.createSignedString(clientId, hashAlgorithm)
     const clientObj = devices[clientId]
     if (clientObj.nonce != null && clientObj.signature != null) {
-      const signingAlgorithm = getSigningAlgorithm(certChainPfx.hashAlgorithm)
       input.xmlMessage = ips.HostBasedSetupService.UpgradeClientToAdmin(
         clientObj.nonce.toString('base64'),
         signingAlgorithm,
