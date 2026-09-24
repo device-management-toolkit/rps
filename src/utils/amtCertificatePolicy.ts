@@ -157,6 +157,12 @@ export interface ProvisioningSignatureParameters {
  * SigningAlgorithm 3 to an AMT 20.0.5 device and got ReturnValue 3 back;
  * deriving purely from the AMT version would sign with a digest the
  * certificate's key was never used for on the generations that do accept both.
+ *
+ * Nor can this collapse back to a hardcoded 2. Forcing SigningAlgorithm 2 with a
+ * SHA-256 nonce signature on an AMT 22.0.0 device returned ReturnValue 1 from
+ * UpgradeClientToAdmin and the activation fell back to Unprovision (verified
+ * 2026-09-24), where 3 with the same SHA-384 provisioning certificate returns 0.
+ * AMT 22 does not merely accept 3 — it requires it.
  */
 export function resolveProvisioningSignature(
   version: unknown,
