@@ -531,10 +531,13 @@ describe('Activation State Machine', () => {
       expect(upgradeSpy.mock.calls[0][1]).toBe(3)
       expect(invokeWsmanCallSpy).toHaveBeenCalledWith(context, 0, undefined, true)
     })
-    it('should downgrade to SigningAlgorithm 2 on firmware that cannot verify sha384', async () => {
-      // AMT 20.0.5 rejected UpgradeClientToAdmin with ReturnValue 3
-      // (PT_STATUS_INVALID_PT_MODE) when sent SigningAlgorithm 3 for a SHA-384
-      // provisioning cert that AMT 21.0.6 accepted.
+    it('should refuse a sha384 provisioning certificate on firmware that cannot validate one', async () => {
+      // Pre-AMT-21 firmware is not documented to validate a SHA-384-signed
+      // provisioning chain: AMT 20.0.5 answered UpgradeClientToAdmin with
+      // ReturnValue 3 (InvalidParam) and AMT 11.8.95 with 5 (AuthFailed).
+      // Downgrading only the nonce signature to SigningAlgorithm 2 was never
+      // enough, because the chain itself is still SHA-384 — so the call is not
+      // made at all, and the log names the digest as the reason.
       const createSignedStringSpy = vi
         .spyOn(activation, 'createSignedString')
         .mockImplementation((clientId: string): boolean => {
@@ -550,9 +553,38 @@ describe('Activation State Machine', () => {
           ], privateKey:
             null }, fingerprint: { sha256: '82f2ed575db4abe462499cf550dbff9584980d70a0272894639c3653b9ad932c', sha384: 'bb00173b0fb55bc1b24fff5a32a02d210d2bbe16dc6ba4f8300729c1d545313a66930bcd1bcf9ed5a76e82ce602ef04a', sha1: '47d7b7db23f3e300189f54802482b1bd18b945ef' }, hashAlgorithm: 'sha384' }
       const upgradeSpy = vi.spyOn(context.ips.HostBasedSetupService, 'UpgradeClientToAdmin')
-      await activation.sendUpgradeClientToAdmin({ input: context })
-      expect(createSignedStringSpy).toHaveBeenCalledWith(clientId, 'sha256')
-      expect(upgradeSpy.mock.calls[0][1]).toBe(2)
+      const result = await activation.sendUpgradeClientToAdmin({ input: context })
+      expect(result).toBeNull()
+      expect(createSignedStringSpy).not.toHaveBeenCalled()
+      expect(upgradeSpy).not.toHaveBeenCalled()
+    })
+    it('should refuse a sha384 provisioning certificate on AMT 11 AdminSetup', async () => {
+      // AMT 11.8.95, the generation that answered ReturnValue 5 (AuthFailed).
+      const createSignedStringSpy = vi.spyOn(activation, 'createSignedString')
+      devices[clientId].ClientData.payload.ver = '11.8.95'
+      context.certChainPfx = { provisioningCertificateObj: { certChain: ['leaf', 'inter1', 'root'], privateKey: null }, fingerprint: {}, hashAlgorithm: 'sha384' }
+      const adminSetupSpy = vi.spyOn(context.ips.HostBasedSetupService, 'AdminSetup')
+      const result = await activation.sendAdminSetup({ input: context })
+      expect(result).toBeNull()
+      expect(createSignedStringSpy).not.toHaveBeenCalled()
+      expect(adminSetupSpy).not.toHaveBeenCalled()
+    })
+    it('should refuse a sha256 provisioning certificate on AMT 22 before any WSMan call', async () => {
+      // The mirror of the AMT 11 case. AMT 22.0.0 answered UpgradeClientToAdmin
+      // with ReturnValue 1 (InternalError) for a SHA-256 chain. The refusal has
+      // to happen here rather than inside createSignedString, so the chain is
+      // never uploaded and the failure names the digest.
+      const createSignedStringSpy = vi.spyOn(activation, 'createSignedString')
+      devices[clientId].ClientData.payload.ver = '22.0.0'
+      context.certChainPfx = { provisioningCertificateObj: { certChain: ['leaf', 'inter1', 'root'], privateKey: null }, fingerprint: {}, hashAlgorithm: 'sha256' }
+      const upgradeSpy = vi.spyOn(context.ips.HostBasedSetupService, 'UpgradeClientToAdmin')
+      const adminSetupSpy = vi.spyOn(context.ips.HostBasedSetupService, 'AdminSetup')
+      expect(await activation.sendUpgradeClientToAdmin({ input: context })).toBeNull()
+      expect(await activation.sendAdminSetup({ input: context })).toBeNull()
+      expect(createSignedStringSpy).not.toHaveBeenCalled()
+      expect(upgradeSpy).not.toHaveBeenCalled()
+      expect(adminSetupSpy).not.toHaveBeenCalled()
+      expect(invokeWsmanCallSpy).not.toHaveBeenCalled()
     })
     it('should send WSMan to change AMT password', async () => {
       await activation.changeAMTPassword({ input: context })

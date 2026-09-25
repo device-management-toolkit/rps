@@ -4,7 +4,11 @@
  **********************************************************************/
 
 import { describe, expect, it } from 'vitest'
-import { getAMTCertificatePolicy, resolveProvisioningSignature } from './amtCertificatePolicy.js'
+import {
+  checkProvisioningCertificateCompatibility,
+  getAMTCertificatePolicy,
+  resolveProvisioningSignature
+} from './amtCertificatePolicy.js'
 
 const RSA_2048_DEVICE_KEY = { keyAlgorithm: 0, keyLength: 2048 }
 const ECC_384_DEVICE_KEY = { keyAlgorithm: 1, keyLength: 384 }
@@ -17,6 +21,7 @@ describe('getAMTCertificatePolicy', () => {
       rsaKeySize: 2048,
       deviceKeyPair: RSA_2048_DEVICE_KEY,
       requiresSha384ProvisioningCert: false,
+      supportsSha384ProvisioningCert: false,
       supportsSha384ProvisioningSignature: false
     },
     {
@@ -25,6 +30,7 @@ describe('getAMTCertificatePolicy', () => {
       rsaKeySize: 2048,
       deviceKeyPair: RSA_2048_DEVICE_KEY,
       requiresSha384ProvisioningCert: false,
+      supportsSha384ProvisioningCert: false,
       supportsSha384ProvisioningSignature: false
     },
     {
@@ -33,6 +39,7 @@ describe('getAMTCertificatePolicy', () => {
       rsaKeySize: 2048,
       deviceKeyPair: RSA_2048_DEVICE_KEY,
       requiresSha384ProvisioningCert: false,
+      supportsSha384ProvisioningCert: true,
       supportsSha384ProvisioningSignature: true
     },
     {
@@ -41,6 +48,7 @@ describe('getAMTCertificatePolicy', () => {
       rsaKeySize: 3072,
       deviceKeyPair: ECC_384_DEVICE_KEY,
       requiresSha384ProvisioningCert: true,
+      supportsSha384ProvisioningCert: true,
       supportsSha384ProvisioningSignature: true
     },
     {
@@ -49,6 +57,7 @@ describe('getAMTCertificatePolicy', () => {
       rsaKeySize: 3072,
       deviceKeyPair: ECC_384_DEVICE_KEY,
       requiresSha384ProvisioningCert: true,
+      supportsSha384ProvisioningCert: true,
       supportsSha384ProvisioningSignature: true
     },
     {
@@ -57,6 +66,7 @@ describe('getAMTCertificatePolicy', () => {
       rsaKeySize: 2048,
       deviceKeyPair: RSA_2048_DEVICE_KEY,
       requiresSha384ProvisioningCert: false,
+      supportsSha384ProvisioningCert: false,
       supportsSha384ProvisioningSignature: false
     },
     {
@@ -65,6 +75,7 @@ describe('getAMTCertificatePolicy', () => {
       rsaKeySize: 2048,
       deviceKeyPair: RSA_2048_DEVICE_KEY,
       requiresSha384ProvisioningCert: false,
+      supportsSha384ProvisioningCert: false,
       supportsSha384ProvisioningSignature: false
     }
   ])('selects the certificate policy for AMT $version', ({ version, ...expected }) => {
@@ -181,5 +192,41 @@ describe('resolveProvisioningSignature', () => {
         expect(signingAlgorithm).toBe(hashAlgorithm === 'sha384' ? 3 : 2)
       }
     }
+  })
+})
+
+describe('checkProvisioningCertificateCompatibility', () => {
+  it('rejects a SHA384 provisioning certificate on pre-AMT-21 firmware', () => {
+    const result = checkProvisioningCertificateCompatibility('11.8.95', 'sha384')
+    expect(result.supported).toBe(false)
+    expect(result.reason).toContain('SHA384')
+    expect(result.reason).toContain('11.8.95')
+  })
+
+  it('rejects a SHA256 provisioning certificate on AMT 22', () => {
+    const result = checkProvisioningCertificateCompatibility('22.0.0', 'sha256')
+    expect(result.supported).toBe(false)
+    expect(result.reason).toContain('requires a SHA384')
+  })
+
+  it.each([
+    ['11.8.95', 'sha256'],
+    ['20.0.5', 'sha256'],
+    ['21.0.6', 'sha256'],
+    ['21.0.6', 'sha384'],
+    ['22.0.0', 'sha384']
+  ])('accepts a %s device with a %s provisioning certificate', (version, digest) => {
+    expect(checkProvisioningCertificateCompatibility(version, digest)).toEqual({ supported: true })
+  })
+
+  it('does not block provisioning when the certificate digest is unreadable', () => {
+    // Pre-existing behaviour is to attempt the chain; an unknown digest is not
+    // evidence of an incompatibility, only of a gap in what we could parse.
+    expect(checkProvisioningCertificateCompatibility('11.8.95', undefined).supported).toBe(true)
+    expect(checkProvisioningCertificateCompatibility('11.8.95', 'sha512').supported).toBe(true)
+  })
+
+  it('still demands SHA384 on AMT 22 when the digest is unreadable', () => {
+    expect(checkProvisioningCertificateCompatibility('22.0.0', undefined).supported).toBe(false)
   })
 })

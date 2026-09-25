@@ -15,13 +15,9 @@
  * AMT 22 TLS provisioning. This type exists so the device-held key size can
  * never again be confused with the RPS-side root/CA key size.
  *
- * ECC-384 (keyAlgorithm 1) is expressible but not yet used. The obstacle is
- * narrower than it first appears: node-forge's publicKeyFromPem cannot *parse*
- * an EC SubjectPublicKeyInfo, but RPS never needs to. The leaf is signed with
- * the RPS root's RSA key; the device's EC key only has to be embedded. AMT
- * returns AMT_PublicPrivateKeyPair.DERKey as the SPKI DER already, so it can be
- * spliced into the TBSCertificate verbatim (forge's certificateToAsn1 reuses a
- * caller-supplied cert.tbsCertificate) without ever being parsed.
+ * ECC-384 (keyAlgorithm 1) is what AMT 22 asks for. node-forge cannot parse an
+ * EC SubjectPublicKeyInfo, so the device's key is spliced into the TBSCertificate
+ * as DER rather than parsed — see the external-public-key helpers in certManager.
  */
 export interface DeviceKeyPairParameters {
   keyAlgorithm: 0 | 1
@@ -48,6 +44,29 @@ export interface AMTCertificatePolicy {
    */
   requiresSha384ProvisioningCert: boolean
   /**
+   * Whether host-based setup on this generation can validate a provisioning
+   * certificate *chain* that is itself signed with SHA-384.
+   *
+   * Distinct from `supportsSha384ProvisioningSignature`, which is about the
+   * digest over the nonce: a device can be told to verify a SHA-256 nonce
+   * signature (SigningAlgorithm 2) and still be unable to walk a SHA-384-signed
+   * chain up to a trusted root, because that validation happens in
+   * AddNextCertInChain/AdminSetup independently of the nonce.
+   *
+   * Intel documents SHA-256 provisioning-chain support from ME 11.0 onward and
+   * says nothing about SHA-384 for that generation; SHA-384 chains are only
+   * known-good from AMT 21. Gating here lets RPS refuse the combination with a
+   * readable message instead of letting the firmware answer with an opaque
+   * host-based-setup ReturnValue 5 (AuthFailed).
+   *
+   * Consequence worth stating explicitly: AMT 22 *requires* a SHA-384
+   * provisioning certificate and pre-21 generations may refuse one, so no single
+   * provisioning certificate covers the whole fleet. That is a deployment
+   * problem — one domain profile per certificate digest — not something this
+   * code can resolve.
+   */
+  supportsSha384ProvisioningCert: boolean
+  /**
    * Whether host-based setup on this generation can *verify* a SHA-384 signature
    * over the provisioning nonce (`IPS_HostBasedSetupService` AdminSetup /
    * UpgradeClientToAdmin with SigningAlgorithm 3).
@@ -73,16 +92,19 @@ const PRE_AMT_21_POLICY: AMTCertificatePolicy = {
   rsaKeySize: 2048,
   deviceKeyPair: RSA_2048_DEVICE_KEY,
   requiresSha384ProvisioningCert: false,
+  supportsSha384ProvisioningCert: false,
   supportsSha384ProvisioningSignature: false
 }
 
 /**
  * AMT 21 is identical to earlier generations for every certificate RPS mints —
- * it binds a sha256 leaf over an RSA-2048 device key — and differs only in
- * accepting a SHA-384 provisioning signature.
+ * it binds a sha256 leaf over an RSA-2048 device key — and differs only on the
+ * provisioning side, where it is the first generation known to accept both a
+ * SHA-384-signed certificate chain and a SHA-384 nonce signature.
  */
 const AMT_21_POLICY: AMTCertificatePolicy = {
   ...PRE_AMT_21_POLICY,
+  supportsSha384ProvisioningCert: true,
   supportsSha384ProvisioningSignature: true
 }
 
@@ -120,6 +142,7 @@ const AMT_22_POLICY: AMTCertificatePolicy = {
   rsaKeySize: 3072,
   deviceKeyPair: ECC_384_DEVICE_KEY,
   requiresSha384ProvisioningCert: true,
+  supportsSha384ProvisioningCert: true,
   supportsSha384ProvisioningSignature: true
 }
 
@@ -133,6 +156,54 @@ export function getAMTCertificatePolicy(version: unknown): AMTCertificatePolicy 
     return AMT_22_POLICY
   }
   return majorVersion >= 21 ? AMT_21_POLICY : PRE_AMT_21_POLICY
+}
+
+/** Outcome of checking a provisioning certificate against a device's policy. */
+export interface ProvisioningCertificateCompatibility {
+  supported: boolean
+  /** Populated only when `supported` is false; safe to log and surface verbatim. */
+  reason?: string
+}
+
+/**
+ * Whether this device can be provisioned with a certificate chain of the given
+ * digest, checked before any host-based setup call is sent.
+ *
+ * Both directions are real and were observed on hardware. AMT 22.0.0 rejects a
+ * SHA-256 chain; pre-21 firmware is not documented to validate a SHA-384 one,
+ * and an AMT 11.8.95 device answered UpgradeClientToAdmin with ReturnValue 5
+ * (AuthFailed) for a SHA-384 chain. Neither failure names the digest, so the
+ * point of this check is to say which certificate the profile needs rather than
+ * to change what the firmware would have done.
+ *
+ * An unrecognised or missing digest is allowed through: the pre-existing
+ * behaviour is to attempt provisioning, and turning "we could not read the
+ * certificate's algorithm" into a hard stop would break deployments this change
+ * has no evidence about.
+ */
+export function checkProvisioningCertificateCompatibility(
+  version: unknown,
+  certHashAlgorithm: string | null | undefined
+): ProvisioningCertificateCompatibility {
+  const policy = getAMTCertificatePolicy(version)
+  const digest = certHashAlgorithm?.toLowerCase()
+  const versionLabel = typeof version === 'string' && version !== '' ? version : 'unknown'
+
+  if (digest === 'sha384' && !policy.supportsSha384ProvisioningCert) {
+    return {
+      supported: false,
+      reason: `AMT ${versionLabel} cannot validate a SHA384-signed provisioning certificate chain; supply a SHA256 provisioning certificate for this device (AMT 22 requires SHA384, so the two need separate domain profiles)`
+    }
+  }
+
+  if (digest !== 'sha384' && policy.requiresSha384ProvisioningCert) {
+    return {
+      supported: false,
+      reason: `AMT ${versionLabel} requires a SHA384 provisioning certificate; the configured domain profile supplies ${digest ?? 'an unknown digest'}`
+    }
+  }
+
+  return { supported: true }
 }
 
 /** Digest and `SigningAlgorithm` to use for one host-based provisioning signature. */

@@ -43,7 +43,11 @@ import { NetworkConfiguration } from './networkConfiguration.js'
 import { error } from 'console'
 import { TLSTunnelManager } from '../TLSTunnelManager.js'
 import { ensurePemCertificate } from '../utils/certHelpers.js'
-import { getAMTCertificatePolicy, resolveProvisioningSignature } from '../utils/amtCertificatePolicy.js'
+import {
+  checkProvisioningCertificateCompatibility,
+  getAMTCertificatePolicy,
+  resolveProvisioningSignature
+} from '../utils/amtCertificatePolicy.js'
 import crypto from 'node:crypto'
 
 export interface ActivationContext extends CommonContext {
@@ -184,6 +188,26 @@ export class Activation {
       friendlyName: context.friendlyName,
       success: status === 'success'
     })
+  }
+
+  /**
+   * Refuse a provisioning certificate the firmware cannot validate, before the
+   * chain is sent. Without this the mismatch surfaces as a bare host-based-setup
+   * ReturnValue (1 on AMT 22 for a SHA-256 chain, 5 on AMT 11 for a SHA-384 one)
+   * with nothing naming the digest as the cause.
+   */
+  isProvisioningCertificateUsable(clientId: string, certHashAlgorithm: string | null | undefined): boolean {
+    const clientObj = devices[clientId]
+    const { supported, reason } = checkProvisioningCertificateCompatibility(
+      clientObj?.ClientData?.payload?.ver,
+      certHashAlgorithm
+    )
+    if (!supported) {
+      const message = reason ?? 'Provisioning certificate is not usable on this AMT version'
+      this.logger.error(message)
+      MqttProvider.publishEvent('fail', ['Activator'], message, clientObj?.uuid)
+    }
+    return supported
   }
 
   createSignedString(clientId: string, hashAlgorithm: string): boolean {
@@ -329,6 +353,9 @@ export class Activation {
   sendAdminSetup = async ({ input }: { input: ActivationContext }): Promise<any> => {
     const ips: IPS.Messages = input.ips
     const { clientId, certChainPfx } = input
+    if (!this.isProvisioningCertificateUsable(clientId, certChainPfx?.hashAlgorithm)) {
+      return null
+    }
     const password = await this.getPassword(input)
     const { hashAlgorithm, signingAlgorithm } = resolveProvisioningSignature(
       devices[clientId]?.ClientData?.payload?.ver,
@@ -353,6 +380,9 @@ export class Activation {
   sendUpgradeClientToAdmin = async ({ input }: { input: ActivationContext }): Promise<any> => {
     const ips: IPS.Messages = input.ips
     const { clientId, certChainPfx } = input
+    if (!this.isProvisioningCertificateUsable(clientId, certChainPfx?.hashAlgorithm)) {
+      return null
+    }
     const { hashAlgorithm, signingAlgorithm } = resolveProvisioningSignature(
       devices[clientId]?.ClientData?.payload?.ver,
       certChainPfx.hashAlgorithm
@@ -1231,7 +1261,6 @@ export class Activation {
       // Post-CCM: AMT may still present its temporary self-signed cert while RPS
       // generates, uploads, and binds the replacement certificate. Once bound, pin
       // against issuedCertPEM or its MPS root CA.
-      const hasIssuedCert = clientObj.tls?.issuedCertPEM != null && clientObj.tls.issuedCertPEM !== ''
       const caCert: string | undefined = clientObj.tls?.mpsRootCertPEM ?? clientObj.tls?.issuedCertPEM
       const hasTrustAnchor = caCert != null && caCert !== ''
       const inPostCcmTransitionSelfSignedPhase =
@@ -1364,6 +1393,12 @@ export class Activation {
         context.tlsCCMComplete === true &&
         context.message.Envelope.Body?.UpgradeClientToAdmin_OUTPUT?.ReturnValue === 0,
       isCertExtracted: ({ context }) => context.certChainPfx != null,
+      isProvisioningCertDigestUnsupported: ({ context }) =>
+        context.certChainPfx != null &&
+        !checkProvisioningCertificateCompatibility(
+          devices[context.clientId]?.ClientData?.payload?.ver,
+          context.certChainPfx?.hashAlgorithm
+        ).supported,
       isValidCert: ({ context }) => devices[context.clientId].certObj != null,
       isDigestRealmInvalid: ({ context }) =>
         !this.validator.isDigestRealmValid(devices[context.clientId].ClientData.payload.digestRealm),
@@ -1444,6 +1479,16 @@ export class Activation {
       'Update AMT Credentials': this.updateCredentials.bind(this),
       'Send Progress': ({ context }, params: { label: string }) => {
         sendProgressToDevice(context.clientId, params.label)
+      },
+      // Every FAILED transition assigns an errorMessage, but until now it was
+      // only ever carried to rpc-go in the final status message - so the reason
+      // an activation stopped appeared on the device's console and nowhere in
+      // the RPS log. Logged here so all FAILED paths report it once.
+      'Log Failure Reason': ({ context }) => {
+        const deviceId = devices[context.clientId]?.uuid ?? context.clientId
+        this.logger.error(
+          `Device ${deviceId} activation failed: ${context.errorMessage ?? 'no reason recorded'}`
+        )
       }
     }
   }).createMachine({
@@ -1602,6 +1647,22 @@ export class Activation {
       EXTRACT_DOMAIN_CERT: {
         entry: 'Get Provisioning CertObj',
         always: [
+          {
+            // Ordered ahead of isCertExtracted: the certificate parsed fine, it
+            // is just the wrong digest for this firmware. Failing here rather
+            // than at AdminSetup/UpgradeClientToAdmin means the chain is never
+            // uploaded and the operator sees which certificate is needed
+            // instead of a bare host-based-setup ReturnValue.
+            guard: 'isProvisioningCertDigestUnsupported',
+            actions: assign(({ context }) => ({
+              errorMessage:
+                checkProvisioningCertificateCompatibility(
+                  devices[context.clientId]?.ClientData?.payload?.ver,
+                  context.certChainPfx?.hashAlgorithm
+                ).reason ?? 'Provisioning certificate is not usable on this AMT version'
+            })),
+            target: 'FAILED'
+          },
           {
             guard: 'isCertExtracted',
             actions: ({ context }) => {
@@ -2810,6 +2871,7 @@ export class Activation {
         }
       },
       FAILED: {
+        entry: 'Log Failure Reason',
         always: [
           {
             guard: 'shouldDeactivate',
