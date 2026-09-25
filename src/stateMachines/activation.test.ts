@@ -380,6 +380,58 @@ describe('Activation State Machine', () => {
     })
   })
 
+  describe('precheckProvisioningCertDigest', () => {
+    const domain: any = {
+      profileName: 'vprodemo',
+      domainSuffix: 'vprodemo.com',
+      provisioningCert: Buffer.from('pfx').toString('base64'),
+      provisioningCertPassword: 'P@ssw0rd',
+      expirationDate: new Date(),
+      tenantId: ''
+    }
+    const mockPfx = (hashAlgorithm: string | undefined): void => {
+      vi.spyOn(activation.certManager, 'convertPfxToObject').mockReturnValue({} as any)
+      vi.spyOn(activation.certManager, 'dumpPfx').mockReturnValue({ hashAlgorithm } as any)
+    }
+
+    it('should refuse a sha256 certificate on AMT 22 before the device is touched', async () => {
+      vi.spyOn(activation, 'getAMTDomainCert').mockResolvedValue(domain)
+      mockPfx('sha256')
+      devices[clientId].ClientData.payload.ver = '22.0.0'
+      const result = await activation.precheckProvisioningCertDigest({ input: context })
+      expect(result.supported).toBe(false)
+      expect(result.reason).toContain('requires a SHA384')
+    })
+
+    it('should refuse a sha384 certificate on AMT 11', async () => {
+      vi.spyOn(activation, 'getAMTDomainCert').mockResolvedValue(domain)
+      mockPfx('sha384')
+      devices[clientId].ClientData.payload.ver = '11.8.95'
+      expect((await activation.precheckProvisioningCertDigest({ input: context })).supported).toBe(false)
+    })
+
+    it('should allow a matching certificate through', async () => {
+      vi.spyOn(activation, 'getAMTDomainCert').mockResolvedValue(domain)
+      mockPfx('sha384')
+      devices[clientId].ClientData.payload.ver = '22.0.0'
+      expect(await activation.precheckProvisioningCertDigest({ input: context })).toEqual({ supported: true })
+    })
+
+    it('should not fail the activation when the domain has no certificate', async () => {
+      vi.spyOn(activation, 'getAMTDomainCert').mockResolvedValue({ ...domain, provisioningCert: null })
+      devices[clientId].ClientData.payload.ver = '22.0.0'
+      expect(await activation.precheckProvisioningCertDigest({ input: context })).toEqual({ supported: true })
+    })
+
+    it('should not fail the activation when the pre-check itself throws', async () => {
+      // Advisory only: EXTRACT_DOMAIN_CERT remains the backstop, so a bad
+      // password or an unreachable vault must not turn into a refusal here.
+      vi.spyOn(activation, 'getAMTDomainCert').mockRejectedValue(new Error('vault unreachable'))
+      devices[clientId].ClientData.payload.ver = '22.0.0'
+      expect(await activation.precheckProvisioningCertDigest({ input: context })).toEqual({ supported: true })
+    })
+  })
+
   describe('createSignedString', () => {
     it('should return valid signed string when certificate is valid', () => {
       const clientObj: any = devices[clientId]

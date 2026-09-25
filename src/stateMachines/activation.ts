@@ -46,7 +46,8 @@ import { ensurePemCertificate } from '../utils/certHelpers.js'
 import {
   checkProvisioningCertificateCompatibility,
   getAMTCertificatePolicy,
-  resolveProvisioningSignature
+  resolveProvisioningSignature,
+  type ProvisioningCertificateCompatibility
 } from '../utils/amtCertificatePolicy.js'
 import crypto from 'node:crypto'
 
@@ -151,6 +152,65 @@ export class Activation {
       input.tenantId
     )
     return domain
+  }
+
+  /**
+   * Check the provisioning certificate's digest against the device's AMT version
+   * before anything is written to the device.
+   *
+   * `CHECK_PROFILE_TYPE` sends TLS-enforced devices straight to the tunnel and
+   * defers the domain-certificate fetch to the ACM-upgrade branch, so the §4.6
+   * gate in `EXTRACT_DOMAIN_CERT` cannot fire until CCM activation and the whole
+   * TLS certificate provisioning sequence have already run - verified on an AMT
+   * 22.0.0 device that was activated into CCM, issued a TLS leaf, and then
+   * unprovisioned for a mismatch known at the first `activate` message. Both
+   * inputs are available here, so the mismatch is caught before the device is
+   * touched.
+   *
+   * This re-reads and re-parses the PFX rather than caching it into `amtDomain`
+   * / `certChainPfx`. The later fetch is on a path shared with the non-TLS
+   * activation flows and with re-entry after the port switch, and populating
+   * those fields early would change what those paths see. The cost is one vault
+   * read and one PKCS#12 decrypt, against a run that is otherwise minutes long.
+   *
+   * Never fails the activation on its own errors. If the domain or the digest
+   * cannot be determined here, the run proceeds exactly as before and the
+   * `EXTRACT_DOMAIN_CERT` gate remains the backstop.
+   */
+  precheckProvisioningCertDigest = async ({
+    input
+  }: {
+    input: ActivationContext
+  }): Promise<ProvisioningCertificateCompatibility> => {
+    const { clientId } = input
+    const clientObj = devices[clientId]
+    try {
+      const domain = await this.getAMTDomainCert({ input })
+      if (domain?.provisioningCert == null || domain.provisioningCertPassword == null) {
+        return { supported: true }
+      }
+      const pfxb64 = Buffer.from(domain.provisioningCert, 'base64').toString('base64')
+      const pfxobj = this.certManager.convertPfxToObject(pfxb64, domain.provisioningCertPassword)
+      const certHashAlgorithm = this.certManager.dumpPfx(pfxobj)?.hashAlgorithm
+      const result = checkProvisioningCertificateCompatibility(
+        clientObj?.ClientData?.payload?.ver,
+        certHashAlgorithm
+      )
+      if (!result.supported) {
+        MqttProvider.publishEvent(
+          'fail',
+          ['Activator'],
+          result.reason ?? 'Provisioning certificate is not usable on this AMT version',
+          clientObj?.uuid
+        )
+      }
+      return result
+    } catch (err) {
+      this.logger.debug(
+        `Device ${clientObj?.uuid ?? clientId} provisioning certificate pre-check skipped: ${String(err)}`
+      )
+      return { supported: true }
+    }
   }
 
   sendMessageToDevice({ context }): void {
@@ -1314,6 +1374,7 @@ export class Activation {
       evaluateLegacyLmsNonTlsOverride: fromPromise(this.evaluateLegacyLmsNonTlsOverride.bind(this)),
       getDeviceFromMPS: fromPromise(this.getDeviceFromMPS.bind(this)),
       getAMTDomainCert: fromPromise(this.getAMTDomainCert.bind(this)),
+      precheckProvisioningCertDigest: fromPromise(this.precheckProvisioningCertDigest.bind(this)),
       initializeTLSTunnel: fromPromise(this.initializeTLSTunnel.bind(this)),
       getGeneralSettings: fromPromise(this.getGeneralSettings.bind(this)),
       getHostBasedSetupService: fromPromise(this.getHostBasedSetupService.bind(this)),
@@ -1392,6 +1453,25 @@ export class Activation {
       isTlsUpgradeSuccessful: ({ context }) =>
         context.tlsCCMComplete === true &&
         context.message.Envelope.Body?.UpgradeClientToAdmin_OUTPUT?.ReturnValue === 0,
+      /**
+       * Only for the TLS branches. The non-TLS admin-mode path already goes
+       * straight to GET_AMT_DOMAIN_CERT, where EXTRACT_DOMAIN_CERT gates the
+       * digest before any WSMAN call, so a pre-check there would be a second
+       * vault read for nothing.
+       */
+      needsProvisioningCertPrecheck: ({ context }) => {
+        if (context.profile?.activation !== ClientAction.ADMINCTLMODE) return false
+        const device = devices[context.clientId]
+        // Mirrors isTlsActivation
+        const tlsActivation =
+          device?.ClientData?.payload != null &&
+          device.ClientData.payload.tlsEnforced === true &&
+          device.ClientData.payload.currentMode === 0 &&
+          !context.tlsCCMComplete
+        // Mirrors isTlsTunnelActivation
+        const tlsTunnelActivation = device?.tlsTunnelActivation === true && device?.tlsEnforced !== true
+        return tlsActivation || tlsTunnelActivation
+      },
       isCertExtracted: ({ context }) => context.certChainPfx != null,
       isProvisioningCertDigestUnsupported: ({ context }) =>
         context.certChainPfx != null &&
@@ -1575,6 +1655,13 @@ export class Activation {
             actions: { type: 'Send Progress', params: { label: 'Device already activated' } }
           },
           {
+            // Both TLS branches below defer the domain-certificate fetch until
+            // after CCM, so for an ACM profile the digest is checked here first -
+            // nothing has been written to the device yet.
+            guard: 'needsProvisioningCertPrecheck',
+            target: 'PRECHECK_PROVISIONING_CERT'
+          },
+          {
             guard: 'isTlsActivation',
             target: 'INIT_TLS_TUNNEL'
           },
@@ -1628,6 +1715,38 @@ export class Activation {
             target: 'FAILED'
           }
         ]
+      },
+      PRECHECK_PROVISIONING_CERT: {
+        invoke: {
+          src: 'precheckProvisioningCertDigest',
+          input: ({ context }) => context,
+          id: 'precheck-provisioning-cert',
+          onDone: [
+            {
+              guard: ({ event }) => (event.output as ProvisioningCertificateCompatibility).supported === false,
+              actions: assign({
+                errorMessage: ({ event }) =>
+                  (event.output as ProvisioningCertificateCompatibility).reason ??
+                  'Provisioning certificate is not usable on this AMT version'
+              }),
+              target: 'FAILED'
+            },
+            {
+              guard: 'isTlsActivation',
+              target: 'INIT_TLS_TUNNEL'
+            },
+            {
+              guard: 'isTlsTunnelActivation',
+              target: 'INIT_TLS_TUNNEL'
+            },
+            {
+              target: 'GET_AMT_DOMAIN_CERT'
+            }
+          ],
+          // The pre-check is advisory. Anything that goes wrong here leaves the
+          // run exactly as it was, with EXTRACT_DOMAIN_CERT as the backstop.
+          onError: 'INIT_TLS_TUNNEL'
+        }
       },
       GET_AMT_DOMAIN_CERT: {
         invoke: {
