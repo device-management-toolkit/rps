@@ -11,7 +11,6 @@ import { type AMTConfiguration, type AMTKeyUsage, type CertAttributes } from '..
 import { NodeForge } from '../NodeForge.js'
 import { devices } from '../devices.js'
 import { Error } from './error.js'
-import { TimeSync } from './timeMachine.js'
 import { TlsSigningAuthority } from '../models/RCS.Config.js'
 import { UNEXPECTED_PARSE_ERROR } from '../utils/constants.js'
 import { parseChunkedMessage } from '../utils/parseChunkedMessage.js'
@@ -49,7 +48,6 @@ export class TLS {
   logger: Logger = new Logger('TLS')
   certManager: CertManager
   error: Error = new Error()
-  timeSync: TimeSync = new TimeSync()
 
   signCSR = async ({ input }: { input: TLSContext }): Promise<any> => {
     input.xmlMessage = input.amt.PublicKeyManagementService.GeneratePKCS10RequestEx({
@@ -297,7 +295,6 @@ export class TLS {
       input: TLSContext
     },
     actors: {
-      timeSync: this.timeSync.machine,
       errorMachine: this.error.machine,
       enumeratePublicKeyCertificate: fromPromise(this.enumeratePublicKeyCertificate),
       pullPublicKeyCertificate: fromPromise(this.pullPublicKeyCertificate),
@@ -697,12 +694,12 @@ export class TLS {
             actions: [
               assign({ message: ({ event }) => event.output })
             ],
-            target: 'SYNC_TIME'
+            target: 'ENUMERATE_TLS_DATA'
           },
           onError: [
             {
               guard: 'alreadyExists',
-              target: 'SYNC_TIME'
+              target: 'ENUMERATE_TLS_DATA'
             },
             {
               actions: assign({ errorMessage: 'Failed to put TLS credential context' }),
@@ -720,30 +717,18 @@ export class TLS {
             actions: [
               assign({ message: ({ event }) => event.output })
             ],
-            target: 'SYNC_TIME'
+            target: 'ENUMERATE_TLS_DATA'
           },
           onError: [
             {
               guard: 'alreadyExists',
-              target: 'SYNC_TIME'
+              target: 'ENUMERATE_TLS_DATA'
             },
             {
               actions: assign({ errorMessage: 'Failed to create TLS credential context' }),
               target: 'FAILED'
             }
           ]
-        }
-      },
-      SYNC_TIME: {
-        entry: sendTo('time-machine', { type: 'TIMETRAVEL' }),
-        invoke: {
-          src: 'timeSync',
-          input: ({ context }) => context,
-          id: 'time-machine',
-          onDone: 'ENUMERATE_TLS_DATA'
-        },
-        on: {
-          ONFAILED: 'FAILED'
         }
       },
       ENUMERATE_TLS_DATA: {

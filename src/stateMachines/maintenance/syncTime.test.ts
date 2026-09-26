@@ -14,6 +14,7 @@ import { HttpResponseError, coalesceMessage } from '../common.js'
 
 import {
   type GetLowAccuracyTimeSynchResponse,
+  type EnableLocalTimeSyncResponse,
   type SetHighAccuracyTimeSynchResponse,
   type SyncTimeEvent,
   type SyncTimeContext,
@@ -42,6 +43,7 @@ describe('SyncTime State Machine', () => {
   let event: SyncTimeEvent
   let lowAccuracyRsp: GetLowAccuracyTimeSynchResponse
   let highAccuracyRsp: SetHighAccuracyTimeSynchResponse
+  let enableLocalTimeSyncRsp: EnableLocalTimeSyncResponse
 
   beforeEach(() => {
     vi.resetAllMocks()
@@ -71,6 +73,15 @@ describe('SyncTime State Machine', () => {
         }
       }
     }
+    enableLocalTimeSyncRsp = {
+      Envelope: {
+        Body: {
+          EnableLocalTimeSync_OUTPUT: {
+            ReturnValue: 0
+          }
+        }
+      }
+    }
     context = {
       taskName: 'synctime',
       clientId
@@ -94,6 +105,36 @@ describe('SyncTime State Machine', () => {
   }
   it('should succeed synchronizing time', async () => {
     await runTheTest()
+    expect(invokeWsmanCallSpy).toHaveBeenCalledTimes(2)
+  })
+  it('should enable local time sync when LMS is available', async () => {
+    event.lmsAvailable = true
+    invokeWsmanCallSpy.mockResolvedValueOnce(enableLocalTimeSyncRsp)
+
+    await runTilDone(implementation.machine.provide(implementationConfig), event, doneResponse, context)
+
+    expect(invokeWsmanCallSpy).toHaveBeenCalledTimes(1)
+    expect(invokeWsmanCallSpy.mock.calls[0][0].xmlMessage).toContain(
+      'AMT_TimeSynchronizationService/EnableLocalTimeSync'
+    )
+    expect(invokeWsmanCallSpy.mock.calls[0][0].xmlMessage).toContain('<h:Enable>true</h:Enable>')
+  })
+  it('should retry local time sync after an AMT digest challenge', async () => {
+    event.lmsAvailable = true
+    const unauthorizedResponse = {
+      statusCode: 401,
+      headers: [
+        {
+          name: 'Www-Authenticate',
+          value: 'Digest realm="Digest:test", nonce="nonce", qop="auth"'
+        }
+      ]
+    }
+    invokeWsmanCallSpy.mockRejectedValueOnce(unauthorizedResponse).mockResolvedValueOnce(enableLocalTimeSyncRsp)
+
+    await runTilDone(implementation.machine.provide(implementationConfig), event, doneResponse, context)
+
+    expect(invokeWsmanCallSpy).toHaveBeenCalledTimes(2)
   })
   it('should fail getting low accuracy time sync on bad return value', async () => {
     doneResponse.status = StatusFailed
@@ -104,5 +145,15 @@ describe('SyncTime State Machine', () => {
     doneResponse.status = StatusFailed
     highAccuracyRsp.Envelope.Body.SetHighAccuracyTimeSynch_OUTPUT.ReturnValue = PTStatus.INTERNAL_ERROR.value
     await runTheTest()
+  })
+  it('should fail enabling local time sync on bad return value', async () => {
+    doneResponse.status = StatusFailed
+    event.lmsAvailable = true
+    enableLocalTimeSyncRsp.Envelope.Body.EnableLocalTimeSync_OUTPUT.ReturnValue = PTStatus.INTERNAL_ERROR.value
+    invokeWsmanCallSpy.mockResolvedValueOnce(enableLocalTimeSyncRsp)
+
+    await runTilDone(implementation.machine.provide(implementationConfig), event, doneResponse, context)
+
+    expect(invokeWsmanCallSpy).toHaveBeenCalledTimes(1)
   })
 })

@@ -338,6 +338,7 @@ it('should pass maintainDevice method', async () => {
       username: '$$OsAdmin',
       password: 'P@ssw0rd',
       currentMode: 2,
+      lmsInstalled: true,
       hostname: 'DESKTOP-9CC12U7',
       certHashes: ['c3846bf24b9e93ca64274c0ec67c1ecc5e024ffcacd2d74019350e81fe546ae4']
     }
@@ -358,7 +359,8 @@ it('should pass maintainDevice method', async () => {
   VersionChecker.setCurrentVersion('4.0.0')
   const expectedEvent: MaintenanceEvent = {
     type: SyncTimeEventType,
-    clientId
+    clientId,
+    lmsAvailable: true
   }
   await dataProcessor.maintainDevice(clientMsg, clientId, maintenance)
   expect(validatorSpy).toHaveBeenCalled()
