@@ -11,6 +11,8 @@ COPY package*.json ./
 
 # Install dependencies
 RUN npm ci
+RUN ./node_modules/.bin/tsc --project node_modules/@device-management-toolkit/wsman-messages/tsconfig.json \
+      && cp -R node_modules/@device-management-toolkit/wsman-messages/dist/. node_modules/@device-management-toolkit/wsman-messages/
 
 COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src/
@@ -27,7 +29,7 @@ FROM alpine:latest@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4c
 LABEL license='SPDX-License-Identifier: Apache-2.0' \
       copyright='Copyright (c) Intel Corporation 2021'
 
-RUN addgroup -g 1000 node && adduser -u 1000 -G node -s /bin/sh -D node 
+RUN addgroup -g 1000 node && adduser -u 1000 -G node -s /bin/sh -D node
 RUN apk update && apk upgrade && apk add nodejs && rm -rf /var/cache/apk/*
 
 COPY --from=builder  /rps/dist /rps/dist
