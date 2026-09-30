@@ -738,7 +738,10 @@ export class TLS {
         entry: sendTo('time-machine', { type: 'TIMETRAVEL' }),
         invoke: {
           src: 'timeSync',
-          input: ({ context }) => context,
+          input: ({ context }) => ({
+            ...context,
+            lmsInstalled: devices[context.clientId]?.ClientData?.payload?.lmsInstalled === true
+          }),
           id: 'time-machine',
           onDone: 'ENUMERATE_TLS_DATA'
         },

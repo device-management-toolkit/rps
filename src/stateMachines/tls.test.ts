@@ -42,6 +42,7 @@ describe('TLS State Machine', () => {
     devices[clientId] = {
       status: {},
       hostname: 'WinDev2211Eval',
+      ClientData: { payload: { lmsInstalled: true } },
       ClientSocket: { send: vi.fn() },
       tls: {}
     } as any
@@ -65,7 +66,10 @@ describe('TLS State Machine', () => {
 
     config = {
       actors: {
-        timeSync: fromPromise(async ({ input }) => await Promise.resolve({})),
+        timeSync: fromPromise(async ({ input }) => {
+          expect((input as { lmsInstalled?: boolean } | null | undefined)?.lmsInstalled).toBe(true)
+          return await Promise.resolve({})
+        }),
         errorMachine: fromPromise(async ({ input }) => await Promise.resolve({})),
         enumeratePublicKeyCertificate: fromPromise(async ({ input }) => await Promise.resolve({})),
         pullPublicKeyCertificate: fromPromise(
