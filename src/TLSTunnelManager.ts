@@ -17,26 +17,6 @@ const logger = new Logger('TLSTunnelManager')
 
 let sessionCounter = 0
 
-/**
- * Whether to accept an Intel DICE chain that reaches no trusted root.
- *
- * Defaults to enabled so AMT 22 keeps activating until AMT_DICE_ROOT_CERTS is
- * populated with the official roots. Set RPS_ALLOW_INTEL_DICE_BYPASS=false to
- * enforce real verification.
- */
-export function allowIntelDiceTrustBypass(): boolean {
-  return process.env.RPS_ALLOW_INTEL_DICE_BYPASS?.toLowerCase() !== 'false'
-}
-
-export function isIntelDiceSubCASubject(subject: string): boolean {
-  const attributes = new Set(subject.split(/\n|,\s*/).map((attribute) => attribute.trim()))
-  return (
-    attributes.has('O=Intel Corporation') &&
-    attributes.has('organizationIdentifier=PEN:343') &&
-    [...attributes].some((attribute) => attribute.startsWith('CN=Intel DICE SubCA CAID:'))
-  )
-}
-
 interface TLSTunnelOptions {
   allowPostCcmTransitionSelfSigned?: boolean
 }
@@ -277,7 +257,7 @@ export class TLSTunnelManager {
           const verifyResult =
             this.caCerts != null
               ? this.verifyPeerAgainstCustomCA(this.tlsSocket!)
-              : this.verifyAmtChainAgainstODCA(this.tlsSocket!)
+              : this.verifyAmtChainAgainstTrustedRoots(this.tlsSocket!)
 
           if (!verifyResult.ok) {
             const err = new Error(verifyResult.reason)
@@ -461,10 +441,10 @@ export class TLSTunnelManager {
       }
 
       // Log the CA certs we're trusting
-      const effectiveCa = this.caCerts != null ? this.caCerts : AMT_ODCA_ROOT_CERTS
+      const effectiveCa = this.caCerts != null ? this.caCerts : [...AMT_ODCA_ROOT_CERTS, ...AMT_DICE_ROOT_CERTS]
       const caCount = Array.isArray(effectiveCa) ? effectiveCa.length : 1
       logger.error(
-        `  trusted CA certs loaded: ${caCount} (source: ${this.caCerts != null ? 'MPS root CA' : 'Intel ODCA'})`
+        `  trusted CA certs loaded: ${caCount} (source: ${this.caCerts != null ? 'MPS root CA' : 'Intel ODCA and DICE'})`
       )
     } catch (diagErr) {
       logger.error(`  diagnostics collection failed: ${(diagErr as Error).message}`)
@@ -472,17 +452,16 @@ export class TLSTunnelManager {
   }
 
   /**
-   * Verifies the peer certificate chain (as captured from the handshake) terminates at
-   * one of the trusted Intel ODCA root certs. Each adjacent pair is checked by signature,
-   * then the topmost cert is matched to a trusted root either by fingerprint (if the peer
-   * sent the root) or by signature (if the peer only sent up to an intermediate).
+   * Verifies the peer certificate chain terminates at a trusted Intel ODCA or DICE CA.
+   * Each adjacent pair is checked by signature, then the topmost cert is matched to a
+   * trust anchor by fingerprint or by signature if the peer sent only an intermediate.
    *
    * We deliberately do not check Extended Key Usage here. AMT's RCFG activation leaf is
    * issued by Intel specifically for remote configuration and does not carry the
    * serverAuth EKU, which would make OpenSSL's default verify reject it with
    * INVALID_PURPOSE despite a cryptographically valid chain.
    */
-  private verifyAmtChainAgainstODCA(socket: tls.TLSSocket): { ok: boolean; reason: string } {
+  private verifyAmtChainAgainstTrustedRoots(socket: tls.TLSSocket): { ok: boolean; reason: string } {
     let chain: crypto.X509Certificate[]
     if (this.peerChainDer.length > 0) {
       try {
@@ -554,27 +533,6 @@ export class TLSTunnelManager {
         }
       } catch {
         // Try the next root.
-      }
-    }
-
-    // Temporary compatibility path. Populate AMT_DICE_ROOT_CERTS with the official
-    // Intel DICE root(s), then set RPS_ALLOW_INTEL_DICE_BYPASS=false to enforce real
-    // verification for AMT 22, and finally delete this branch.
-    if (isIntelDiceSubCASubject(topCert.subject)) {
-      if (!allowIntelDiceTrustBypass()) {
-        return {
-          ok: false,
-          reason:
-            `Intel DICE chain does not terminate at any trusted root (${trustedRoots.length} root(s) checked) ` +
-            'and the temporary DICE bypass is disabled'
-        }
-      }
-      logger.warn(
-        `SECURITY WARNING: bypassing trusted-root verification for Intel DICE certificate chain; temporary AMT 22 compatibility mode, top fp256=${topCert.fingerprint256}`
-      )
-      return {
-        ok: true,
-        reason: `temporary Intel DICE trust bypass for top certificate ${topCert.subject.replace(/\n/g, ' ')}`
       }
     }
 
