@@ -5,11 +5,12 @@
 
 /**
  * Intel AMT DICE trust anchors for Nova Lake and newer platforms.
- * These public Intel certificates validate AMT device certificate chains
- * when TLS is enforced on supported platforms.
+ * The CAID-specific Intel certificate and its DCP DICE Global Root validate
+ * AMT device certificate chains when TLS is enforced on supported platforms.
  *
  * Certificate source: https://tsci.intel.com/content/DICE/certs/Intel_DICE_SubCA_CAID343_1_001.cer
- * SHA-256 fingerprint: FB:31:E4:10:9E:75:63:53:2B:3D:19:79:57:28:2A:5C:7A:9B:5D:C8:AC:49:B4:B7:BD:B0:C7:B8:A8:CF:48:F0
+ * CAID 343_1 SHA-256 fingerprint: FB:31:E4:10:9E:75:63:53:2B:3D:19:79:57:28:2A:5C:7A:9B:5D:C8:AC:49:B4:B7:BD:B0:C7:B8:A8:CF:48:F0
+ * DCP Global Root SHA-256 fingerprint: 24:F8:14:D4:F9:C1:8A:0A:B7:95:D4:49:71:18:30:DD:D2:C9:55:6F:D5:28:93:8D:A2:BD:FE:2C:C6:CC:41:9C
  */
 export const AMT_DICE_ROOT_CERTS: string[] = [
   // Intel DICE SubCA certificate for CAID 343_1 (ECC P-384, valid 2023-2048)
@@ -33,5 +34,24 @@ RElDRS9jcmxzL0RDUF9ESUNFX0dsb2JhbF9Sb290Q0EuY3JsMAoGCCqGSM49BAMD
 A2cAMGQCMGGNmf8CeNB2S8oOMSdbG7OlqIXoTi6/ZPFzRosJdruS9ZVYxgGyDeqv
 DVNkj+vIIgIwDH4qB21sjnGMSETaNQ/QpnoYWpUy3PrVEadgevkPln6judOr77NB
 JBKbBt0vlSE6
+-----END CERTIFICATE-----`,
+  // DCP DICE Global Root CA (ECC P-384, self-signed, valid 2024-9999)
+  // Subject: C=US, ST=OR, L=Beaverton, O=Digital Content Protection LLC, CN=DCP DICE Global Root CA
+  `-----BEGIN CERTIFICATE-----
+MIICwDCCAkWgAwIBAgIBATAKBggqhkjOPQQDAzCBljELMAkGA1UEBgwCVVMxCzAJ
+BgNVBAgMAk9SMRIwEAYDVQQHDAlCZWF2ZXJ0b24xJzAlBgNVBAoMHkRpZ2l0YWwg
+Q29udGVudCBQcm90ZWN0aW9uIExMQzEbMBkGA1UECwwSd3d3LmRpZ2l0YWwtY3Au
+Y29tMSAwHgYDVQQDDBdEQ1AgRElDRSBHbG9iYWwgUm9vdCBDQTAgFw0yNDAxMDEw
+MDAwMDBaGA85OTk5MTIzMTIzNTk1OVowgZYxCzAJBgNVBAYMAlVTMQswCQYDVQQI
+DAJPUjESMBAGA1UEBwwJQmVhdmVydG9uMScwJQYDVQQKDB5EaWdpdGFsIENvbnRl
+bnQgUHJvdGVjdGlvbiBMTEMxGzAZBgNVBAsMEnd3dy5kaWdpdGFsLWNwLmNvbTEg
+MB4GA1UEAwwXRENQIERJQ0UgR2xvYmFsIFJvb3QgQ0EwdjAQBgcqhkjOPQIBBgUr
+gQQAIgNiAAS/AK1rr74Mp8quBLO+1rT2fYtJPFjdbF9t3qmnXbtHw+un1aoPjrbu
+0lRtgFdcPT/o9s69WREg5Q3Cj2zr26JOeIyY4lAPPvCXjV6+h24v9ASrPqPo4OM5
+egU6j4n2obCjYzBhMB8GA1UdIwQYMBaAFOtX00XGYYiDG45jnSrMGcYu2GpaMB0G
+A1UdDgQWBBTrV9NFxmGIgxuOY50qzBnGLthqWjAPBgNVHRMBAf8EBTADAQH/MA4G
+A1UdDwEB/wQEAwIBBjAKBggqhkjOPQQDAwNpADBmAjEA86VlSmSGGwHLHirs37pR
+fy/M6jBMgUDEvnkq+4dM6vBbla4q2E+xo/911ayisivHAjEA42F7eeK35YfVJ5F6
+qvc09Cdx2fdB6R65jqma/VGARZc77zQ4vQ3NMdd937jGNqZQ
 -----END CERTIFICATE-----`
 ]

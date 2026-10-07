@@ -536,9 +536,16 @@ export class TLSTunnelManager {
       }
     }
 
+    const trustedRootSummary = trustedRoots
+      .map((root) => `${root.subject.replace(/\n/g, ' ')} fp256=${root.fingerprint256}`)
+      .join('; ')
+
     return {
       ok: false,
-      reason: `chain does not terminate at any trusted AMT root (${trustedRoots.length} root(s) checked, top subject=${topCert.subject.replace(/\n/g, ' ')})`
+      reason:
+        `chain does not terminate at any trusted AMT root (${trustedRoots.length} root(s) checked, ` +
+        `top fp256=${topCert.fingerprint256}, subject=${topCert.subject.replace(/\n/g, ' ')}, ` +
+        `issuer=${topCert.issuer.replace(/\n/g, ' ')}, trusted roots=[${trustedRootSummary}])`
     }
   }
 
