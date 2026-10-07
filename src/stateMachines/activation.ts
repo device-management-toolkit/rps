@@ -456,16 +456,15 @@ export class Activation {
     for (const hash of devices[clientId].ClientData.payload.certHashes || []) {
       if (!hash) continue
 
-      const certFingerprint =
-        hash.toLowerCase().length === 40
-          ? certChainPfx?.fingerprint?.sha1?.toLowerCase()
-          : hash.toLowerCase().length === 64
-            ? certChainPfx?.fingerprint?.sha256?.toLowerCase()
-            : hash.toLowerCase().length === 96
-              ? certChainPfx?.fingerprint?.sha384?.toLowerCase()
-              : null
+      const hashLength = hash.toLowerCase().length
+      const hashAlgorithm =
+        hashLength === 40 ? 'sha1' : hashLength === 64 ? 'sha256' : hashLength === 96 ? 'sha384' : null
+      const certFingerprint = hashAlgorithm != null ? certChainPfx?.fingerprint?.[hashAlgorithm]?.toLowerCase() : null
 
       if (hash.toLowerCase() === certFingerprint) {
+        this.logger.debug(
+          `Matched provisioning certificate root against firmware trusted hash for client ${clientId}: algorithm=${hashAlgorithm} length=${hashLength}`
+        )
         devices[clientId].certObj = certChainPfx.provisioningCertificateObj
         return
       }
