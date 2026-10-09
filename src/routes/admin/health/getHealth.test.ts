@@ -32,6 +32,9 @@ describe('Checks health of dependent services', () => {
       resSpy.send.mockReturnThis()
       mqttSpy = vi.spyOn(MqttProvider, 'publishEvent')
     })
+    afterEach(() => {
+      Environment.Config = config
+    })
     it('should handle health check failed', async () => {
       await getHealthCheck(null as any, resSpy)
       expect(resSpy.status).toHaveBeenCalledWith(500)
@@ -41,6 +44,18 @@ describe('Checks health of dependent services', () => {
       Environment.Config = config
       await getHealthCheck(req, resSpy)
       expect(resSpy.status).toHaveBeenCalledWith(200)
+    })
+    it('should report the configured secrets provider', async () => {
+      Environment.Config = { ...config, secrets_provider: 'gcpsm' }
+      await getHealthCheck(req, resSpy)
+      expect(resSpy.json.mock.calls[0][0].secretStore.name).toBe('GCPSM')
+    })
+    it('should report a provider error status with 503', async () => {
+      Environment.Config = config
+      req.secretsManager = { health: vi.fn().mockRejectedValue({ healthStatus: 'PERMISSION_DENIED' }) }
+      await getHealthCheck(req, resSpy)
+      expect(resSpy.json.mock.calls[0][0].secretStore.status).toBe('PERMISSION_DENIED')
+      expect(resSpy.status).toHaveBeenCalledWith(503)
     })
     it('should not be healthy when db error', async () => {
       req.db.query.mockRejectedValue({ code: '28P01' })
@@ -120,6 +135,13 @@ describe('Checks health of dependent services', () => {
       secretProviderSpy.health.mockRejectedValue({ error: { code: 505 } })
       const response = await getSecretStoreHealth(secretProviderSpy)
       expect(response).toBe('unknown error')
+    })
+    it('should return the status name a provider attaches to its error', async () => {
+      secretProviderSpy.health.mockRejectedValue(
+        Object.assign(new Error('denied'), { healthStatus: 'PERMISSION_DENIED' })
+      )
+      const response = await getSecretStoreHealth(secretProviderSpy)
+      expect(response).toBe('PERMISSION_DENIED')
     })
     it('should return Secret Store error statusCode null', async () => {
       secretProviderSpy.health.mockRejectedValue({ error: { code: null } })

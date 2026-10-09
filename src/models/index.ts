@@ -92,6 +92,9 @@ export interface RPSConfig {
   websocketport: number // no underlines to avoid breaking change
   web_port: number
   secrets_provider: string
+  gcpsm_project?: string
+  gcpsm_location?: string
+  gcpsm_secret_prefix?: string
   db_provider: string
   connection_string: string
   postgres_ssl_ca?: string

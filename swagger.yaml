@@ -2152,6 +2152,7 @@ components:
           properties:
             name:
               type: string
+              description: Configured secrets provider, upper-cased (VAULT or GCPSM).
             status:
               type: object
               properties:
