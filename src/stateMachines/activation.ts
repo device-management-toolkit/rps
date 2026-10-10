@@ -189,12 +189,13 @@ export class Activation {
   createSignedString(clientId: string, hashAlgorithm: string): boolean {
     const clientObj = devices[clientId]
     const amtVersion = clientObj.ClientData?.payload?.ver
-    const policy = getAMTCertificatePolicy(amtVersion)
+    const weakAlgorithmsRemoved = clientObj.ClientData?.payload?.weakAlgorithmsRemoved
+    const policy = getAMTCertificatePolicy(amtVersion, weakAlgorithmsRemoved)
     const signingHashAlgorithm = hashAlgorithm?.toLowerCase()
     clientObj.signature = undefined
 
     this.logger.debug(
-      `AMT certificate policy: version=${amtVersion ?? 'unknown'} requiresSha384ProvisioningCert=${policy.requiresSha384ProvisioningCert} supportsSha384ProvisioningSignature=${policy.supportsSha384ProvisioningSignature} signingHashAlgorithm=${signingHashAlgorithm ?? 'unknown'}`
+      `AMT certificate policy: version=${amtVersion ?? 'unknown'} weakAlgorithmsRemoved=${weakAlgorithmsRemoved ?? 'not reported (inferred from version)'} requiresSha384ProvisioningCert=${policy.requiresSha384ProvisioningCert} supportsSha384ProvisioningSignature=${policy.supportsSha384ProvisioningSignature} signingHashAlgorithm=${signingHashAlgorithm ?? 'unknown'}`
     )
 
     if (policy.requiresSha384ProvisioningCert && signingHashAlgorithm !== 'sha384') {
@@ -332,7 +333,8 @@ export class Activation {
     const password = await this.getPassword(input)
     const { hashAlgorithm, signingAlgorithm } = resolveProvisioningSignature(
       devices[clientId]?.ClientData?.payload?.ver,
-      certChainPfx.hashAlgorithm
+      certChainPfx.hashAlgorithm,
+      devices[clientId]?.ClientData?.payload?.weakAlgorithmsRemoved
     )
     this.createSignedString(clientId, hashAlgorithm)
     const clientObj = devices[clientId]
@@ -355,7 +357,8 @@ export class Activation {
     const { clientId, certChainPfx } = input
     const { hashAlgorithm, signingAlgorithm } = resolveProvisioningSignature(
       devices[clientId]?.ClientData?.payload?.ver,
-      certChainPfx.hashAlgorithm
+      certChainPfx.hashAlgorithm,
+      devices[clientId]?.ClientData?.payload?.weakAlgorithmsRemoved
     )
     this.createSignedString(clientId, hashAlgorithm)
     const clientObj = devices[clientId]

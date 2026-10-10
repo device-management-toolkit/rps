@@ -278,6 +278,13 @@ export interface Payload {
   profile?: any
   tlsEnforced?: boolean
   tlsTunnel?: boolean
+  /**
+   * Reported by rpc-go from bit 4 of the firmware's
+   * STATE_INDEPENDENCE_IsChangeToAMTEnabled response: the firmware has dropped
+   * AES-128, SHA-256, RSA-2K and ECC-256. Selects the certificate crypto
+   * policy. `undefined` means the agent predates the field, not "no".
+   */
+  weakAlgorithmsRemoved?: boolean
 }
 
 export interface ConnectionObject {

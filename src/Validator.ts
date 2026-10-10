@@ -85,6 +85,17 @@ export class Validator implements IValidator {
       clientObj.tlsTunnelActivation = true
       this.logger.info(`Device ${payload.uuid} requested TLS tunnel activation`)
     }
+    // Record the firmware-reported crypto capability so the certificate policy
+    // chosen later in the flow is traceable from the activation log alone.
+    if (msg.payload.weakAlgorithmsRemoved != null) {
+      this.logger.info(
+        `Device ${payload.uuid} reports weakAlgorithmsRemoved=${msg.payload.weakAlgorithmsRemoved === true}`
+      )
+    } else {
+      this.logger.info(
+        `Device ${payload.uuid} did not report weakAlgorithmsRemoved - crypto policy will be inferred from AMT version ${payload.ver}`
+      )
+    }
     // Check for client requested action and profile activation
     const profile: AMTConfiguration | null = await this.configurator.profileManager.getAmtProfile(
       payload.profile,
