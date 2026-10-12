@@ -190,12 +190,12 @@ export class Activation {
     const clientObj = devices[clientId]
     const amtVersion = clientObj.ClientData?.payload?.ver
     const weakAlgorithmsRemoved = clientObj.ClientData?.payload?.weakAlgorithmsRemoved
-    const policy = getAMTCertificatePolicy(amtVersion, weakAlgorithmsRemoved)
+    const policy = getAMTCertificatePolicy(weakAlgorithmsRemoved)
     const signingHashAlgorithm = hashAlgorithm?.toLowerCase()
     clientObj.signature = undefined
 
     this.logger.debug(
-      `AMT certificate policy: version=${amtVersion ?? 'unknown'} weakAlgorithmsRemoved=${weakAlgorithmsRemoved ?? 'not reported (inferred from version)'} requiresSha384ProvisioningCert=${policy.requiresSha384ProvisioningCert} supportsSha384ProvisioningSignature=${policy.supportsSha384ProvisioningSignature} signingHashAlgorithm=${signingHashAlgorithm ?? 'unknown'}`
+      `AMT certificate policy: version=${amtVersion ?? 'unknown'} weakAlgorithmsRemoved=${weakAlgorithmsRemoved ?? 'not reported'} requiresSha384ProvisioningCert=${policy.requiresSha384ProvisioningCert} signingHashAlgorithm=${signingHashAlgorithm ?? 'unknown'}`
     )
 
     if (policy.requiresSha384ProvisioningCert && signingHashAlgorithm !== 'sha384') {
@@ -332,7 +332,6 @@ export class Activation {
     const { clientId, certChainPfx } = input
     const password = await this.getPassword(input)
     const { hashAlgorithm, signingAlgorithm } = resolveProvisioningSignature(
-      devices[clientId]?.ClientData?.payload?.ver,
       certChainPfx.hashAlgorithm,
       devices[clientId]?.ClientData?.payload?.weakAlgorithmsRemoved
     )
@@ -356,7 +355,6 @@ export class Activation {
     const ips: IPS.Messages = input.ips
     const { clientId, certChainPfx } = input
     const { hashAlgorithm, signingAlgorithm } = resolveProvisioningSignature(
-      devices[clientId]?.ClientData?.payload?.ver,
       certChainPfx.hashAlgorithm,
       devices[clientId]?.ClientData?.payload?.weakAlgorithmsRemoved
     )

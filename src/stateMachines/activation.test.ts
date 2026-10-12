@@ -417,9 +417,10 @@ describe('Activation State Machine', () => {
       expect(result).toBeTruthy()
       expect(signStringSpy).toHaveBeenCalledWith(expect.any(Buffer), clientObj.certObj.privateKey, 'sha384')
     })
-    it('should reject a SHA256 provisioning certificate for AMT 22', () => {
+    it('should reject a SHA256 provisioning certificate on hardened firmware', () => {
       const clientObj: any = devices[clientId]
       clientObj.ClientData.payload.ver = '22.0.0'
+      clientObj.ClientData.payload.weakAlgorithmsRemoved = true
       clientObj.ClientData.payload.fwNonce = PasswordHelper.generateNonce()
 
       const result = activation.createSignedString(clientId, 'sha256')
@@ -519,6 +520,7 @@ describe('Activation State Machine', () => {
         })
       devices[clientId].nonce = PasswordHelper.generateNonce()
       devices[clientId].ClientData.payload.ver = '22.0.0'
+      devices[clientId].ClientData.payload.weakAlgorithmsRemoved = true
       context.certChainPfx = { provisioningCertificateObj: { certChain: [
             'leaf',
             'inter1',

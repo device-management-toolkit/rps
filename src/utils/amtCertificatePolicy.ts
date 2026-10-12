@@ -47,55 +47,29 @@ export interface AMTCertificatePolicy {
    * has to be something the firmware will accept as a server credential.
    */
   requiresSha384ProvisioningCert: boolean
-  /**
-   * Whether host-based setup on this generation can *verify* a SHA-384 signature
-   * over the provisioning nonce (`IPS_HostBasedSetupService` AdminSetup /
-   * UpgradeClientToAdmin with SigningAlgorithm 3).
-   *
-   * This is the only field that gates the provisioning signature on the AMT
-   * version, and it is a firmware capability, not a preference: an AMT 20.0.5
-   * device rejected UpgradeClientToAdmin with ReturnValue 3
-   * (PT_STATUS_INVALID_PT_MODE) for a SHA-384 signature, where an AMT 21.0.6 and
-   * an AMT 22.0.0 device accepted byte-for-byte the same provisioning
-   * certificate and returned 0. The digest used for the nonce signature is
-   * independent of the certificate's own signature algorithm, so a device that
-   * cannot do SHA-384 can still be provisioned with a SHA-384-signed
-   * certificate — see `resolveProvisioningSignature`.
-   */
-  supportsSha384ProvisioningSignature: boolean
 }
 
 const RSA_2048_DEVICE_KEY: DeviceKeyPairParameters = { keyAlgorithm: 0, keyLength: 2048 }
 const ECC_384_DEVICE_KEY: DeviceKeyPairParameters = { keyAlgorithm: 1, keyLength: 384 }
 
+/**
+ * Firmware that still carries the weak algorithms — AES-128, SHA-256, RSA-2K and
+ * ECC-256. Everything that has not reported the hardening lands here, including
+ * a device whose agent is too old to report anything at all.
+ */
 const LEGACY_CRYPTO_POLICY: AMTCertificatePolicy = {
   hashAlgorithm: 'sha256',
   rsaKeySize: 2048,
   deviceKeyPair: RSA_2048_DEVICE_KEY,
-  requiresSha384ProvisioningCert: false,
-  supportsSha384ProvisioningSignature: false
+  requiresSha384ProvisioningCert: false
 }
 
 /**
- * Firmware that still carries the weak algorithms but can nonetheless *verify* a
- * SHA-384 provisioning signature. Identical to `LEGACY_CRYPTO_POLICY` for every
- * certificate RPS mints — it binds a sha256 leaf over an RSA-2048 device key.
- *
- * This is the one capability with no bit of its own in the firmware's
- * change-enabled response, so it remains keyed on the AMT version: 21 is the
- * first generation that accepts SigningAlgorithm 3, where AMT 20.0.5 returns
- * PT_STATUS_INVALID_PT_MODE for the same call.
- */
-const LEGACY_CRYPTO_SHA384_SIGNATURE_POLICY: AMTCertificatePolicy = {
-  ...LEGACY_CRYPTO_POLICY,
-  supportsSha384ProvisioningSignature: true
-}
-
-/**
- * The policy for firmware that has removed the weak algorithms — AES-128,
- * SHA-256, RSA-2K and ECC-256. AMT 22 is the first generation to report it, but
- * it is selected by the firmware's report rather than by generation, so an older
- * platform updated to hardened firmware lands here too.
+ * The policy for firmware that has reported, through bit 4 of the change-enabled
+ * response, that it has removed the weak algorithms — AES-128, SHA-256, RSA-2K
+ * and ECC-256. AMT 22 is the first generation to report it, but the report is
+ * what selects this tuple, not the generation, so an older platform updated to
+ * hardened firmware lands here too.
  *
  * AMT 22 asks the firmware for an ECC-384 device key, not RSA-2048.
  *
@@ -129,15 +103,7 @@ const HARDENED_CRYPTO_POLICY: AMTCertificatePolicy = {
   hashAlgorithm: 'sha384',
   rsaKeySize: 3072,
   deviceKeyPair: ECC_384_DEVICE_KEY,
-  requiresSha384ProvisioningCert: true,
-  supportsSha384ProvisioningSignature: true
-}
-
-function parseMajorVersion(version: unknown): number | null {
-  if (typeof version !== 'string' || !/^\d+(?:\.\d+)*$/.test(version.trim())) {
-    return null
-  }
-  return Number.parseInt(version, 10)
+  requiresSha384ProvisioningCert: true
 }
 
 /**
@@ -145,31 +111,21 @@ function parseMajorVersion(version: unknown): number | null {
  *
  * `weakAlgorithmsRemoved` is the firmware's own answer, read by rpc-go from bit
  * 4 of the STATE_INDEPENDENCE_IsChangeToAMTEnabled response and forwarded in the
- * activation payload. It is preferred over the AMT version because the version
- * is only ever an inference about what the firmware will accept.
+ * activation payload. It is the only input: the AMT version is an inference
+ * about what the firmware will accept, and the firmware reports the same thing
+ * directly.
  *
- * A reported `true` is honoured on **every** AMT version, with no floor. The
- * hardening can reach an older platform through a firmware update, and when it
- * does the AMT version still reads 11 or 16 while the firmware's own answer is
- * the only thing that has changed. Capping the capability at some version would
- * mint a SHA-256 leaf over an RSA-2048 key for a device that has just stopped
- * accepting either.
+ * A reported `true` is honoured whatever the device's AMT version. The hardening
+ * can reach an older platform through a firmware update, and when it does the
+ * version is the one thing that does not move.
  *
- * The `??` is load-bearing and is not interchangeable with `||`. An explicit
- * `false` from a current rpc-go is authoritative and must not be overridden by a
- * `>= 22` guess — that is the entire point of reading the capability. But
- * `undefined`, which is what an rpc-go predating the field sends, means
- * *unknown*: without the version fallback every already-deployed agent would
- * silently downgrade its AMT 22 devices to the legacy policy and fail the
- * `Put AMT_TLSCredentialContext` bind with no diagnostic.
+ * An absent field — what an rpc-go predating it sends — is the legacy policy,
+ * not a cue to guess from the version. The cost is a rollout order: rpc-go ships
+ * before, or with, RPS, because an AMT 22 device on an older agent will take the
+ * legacy policy and fail the `Put AMT_TLSCredentialContext` bind.
  */
-export function getAMTCertificatePolicy(version: unknown, weakAlgorithmsRemoved?: boolean): AMTCertificatePolicy {
-  const majorVersion = parseMajorVersion(version)
-  const hardened = weakAlgorithmsRemoved ?? (majorVersion != null && majorVersion >= 22)
-  if (hardened) {
-    return HARDENED_CRYPTO_POLICY
-  }
-  return majorVersion != null && majorVersion >= 21 ? LEGACY_CRYPTO_SHA384_SIGNATURE_POLICY : LEGACY_CRYPTO_POLICY
+export function getAMTCertificatePolicy(weakAlgorithmsRemoved?: boolean): AMTCertificatePolicy {
+  return weakAlgorithmsRemoved === true ? HARDENED_CRYPTO_POLICY : LEGACY_CRYPTO_POLICY
 }
 
 /** Digest and `SigningAlgorithm` to use for one host-based provisioning signature. */
@@ -184,30 +140,33 @@ export interface ProvisioningSignatureParameters {
  * Digest and SigningAlgorithm for IPS_HostBasedSetupService AdminSetup /
  * UpgradeClientToAdmin.
  *
- * The two have to be the intersection of what the provisioning certificate
- * offers and what the firmware can verify, and they have to agree with each
- * other — the firmware recomputes the digest named by SigningAlgorithm and
- * checks it against the signature RPS produced, so deriving them separately
- * risks sending a SHA-384 signature labelled 2, or the reverse.
+ * SHA-384 is used when the certificate offers it *and* the firmware has reported
+ * the hardening. The two returned values must agree with each other — the
+ * firmware recomputes the digest named by SigningAlgorithm and checks it against
+ * the signature RPS produced, so deriving them separately risks sending a
+ * SHA-384 signature labelled 2, or the reverse.
  *
  * Neither input alone is sufficient. Deriving purely from the certificate sent
- * SigningAlgorithm 3 to an AMT 20.0.5 device and got ReturnValue 3 back;
- * deriving purely from the AMT version would sign with a digest the
- * certificate's key was never used for on the generations that do accept both.
+ * SigningAlgorithm 3 to an AMT 20.0.5 device and got ReturnValue 3
+ * (PT_STATUS_INVALID_PT_MODE) back; deriving purely from the firmware ignores
+ * what the certificate actually offers.
  *
  * Nor can this collapse back to a hardcoded 2. Forcing SigningAlgorithm 2 with a
  * SHA-256 nonce signature on an AMT 22.0.0 device returned ReturnValue 1 from
  * UpgradeClientToAdmin and the activation fell back to Unprovision (verified
  * 2026-09-24), where 3 with the same SHA-384 provisioning certificate returns 0.
  * AMT 22 does not merely accept 3 — it requires it.
+ *
+ * Firmware that has not reported the hardening is signed with SHA-256 even when
+ * the certificate is SHA-384. That includes AMT 21, which can verify SHA-384 but
+ * does not require it; the nonce digest is independent of the digest the
+ * certificate itself was signed with, so nothing is lost.
  */
 export function resolveProvisioningSignature(
-  version: unknown,
   certHashAlgorithm: string | null | undefined,
   weakAlgorithmsRemoved?: boolean
 ): ProvisioningSignatureParameters {
   const certIsSha384 = certHashAlgorithm?.toLowerCase() === 'sha384'
-  const useSha384 =
-    certIsSha384 && getAMTCertificatePolicy(version, weakAlgorithmsRemoved).supportsSha384ProvisioningSignature
+  const useSha384 = certIsSha384 && weakAlgorithmsRemoved === true
   return useSha384 ? { hashAlgorithm: 'sha384', signingAlgorithm: 3 } : { hashAlgorithm: 'sha256', signingAlgorithm: 2 }
 }

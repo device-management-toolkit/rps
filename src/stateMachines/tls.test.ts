@@ -355,13 +355,13 @@ describe('TLS State Machine', () => {
     expect(invokeWsmanCallSpy).toHaveBeenCalled()
   })
 
-  it('should sign an AMT 22 TLS certificate with the AMT 22 policy', async () => {
+  it('should sign the TLS certificate with the hardened policy when the firmware reports it', async () => {
     const event: TLSEvent = {
       type: 'CONFIGURE_TLS',
       clientId: clientId as string,
       output: { response: '' }
     }
-    devices[clientId].ClientData = { payload: { ver: '22.0.0' } }
+    devices[clientId].ClientData = { payload: { ver: '22.0.0', weakAlgorithmsRemoved: true } }
     context.keyPairHandle = TEST_KEY_PAIR_HANDLE
     context.message = testKeyPairPullResponse
     const signSpy = vi.spyOn(tls.certManager, 'amtCertSignWithCAKey')
@@ -369,7 +369,7 @@ describe('TLS State Machine', () => {
 
     await tls.addCertificate({ input: { context, event } })
 
-    // sha384: AMT 22's TlsProvisionVerifyLeafCertificate() no longer accepts a
+    // sha384: hardened firmware's TlsProvisionVerifyLeafCertificate() no longer accepts a
     // SHA-256 leaf, and rejects it at Put AMT_TLSCredentialContext with a bare
     // AMT-STATUS 1. The digest must reach both the leaf and the root RPS mints.
     expect(signSpy.mock.calls[0][6]).toBe('sha384')
@@ -383,19 +383,25 @@ describe('TLS State Machine', () => {
   it.each([
     // The SDK allows exactly two key pairs: KeyAlgorithm 0 / RSA-2048 and
     // KeyAlgorithm 1 / ECC-384. Any other size returns 2066 PT_STATUS_UNSUPPORTED.
-    { version: '21.0.6', expected: { KeyAlgorithm: 0, KeyLength: 2048 } },
-    { version: '22.0.0', expected: { KeyAlgorithm: 1, KeyLength: 384 } }
-  ])('should ask AMT $version for the key pair its generation binds', async ({ version, expected }) => {
-    devices[clientId].ClientData = { payload: { ver: version } }
-    const generateKeyPairSpy = vi
-      .spyOn(context.amt.PublicKeyManagementService, 'GenerateKeyPair')
-      .mockReturnValue({} as any)
+    // The device's AMT version is not consulted - only what the firmware reported.
+    { ver: '21.0.6', weakAlgorithmsRemoved: false, expected: { KeyAlgorithm: 0, KeyLength: 2048 } },
+    { ver: '22.0.0', weakAlgorithmsRemoved: true, expected: { KeyAlgorithm: 1, KeyLength: 384 } },
+    { ver: '16.1.25', weakAlgorithmsRemoved: true, expected: { KeyAlgorithm: 1, KeyLength: 384 } },
+    { ver: '22.0.0', weakAlgorithmsRemoved: undefined, expected: { KeyAlgorithm: 0, KeyLength: 2048 } }
+  ])(
+    'should ask AMT $ver reporting weakAlgorithmsRemoved=$weakAlgorithmsRemoved for the key pair its firmware binds',
+    async ({ ver, weakAlgorithmsRemoved, expected }) => {
+      devices[clientId].ClientData = { payload: { ver, weakAlgorithmsRemoved } }
+      const generateKeyPairSpy = vi
+        .spyOn(context.amt.PublicKeyManagementService, 'GenerateKeyPair')
+        .mockReturnValue({} as any)
 
-    await tls.generateKeyPair({ input: context })
+      await tls.generateKeyPair({ input: context })
 
-    expect(generateKeyPairSpy).toHaveBeenCalledWith(expected)
-    expect(invokeWsmanCallSpy).toHaveBeenCalled()
-  })
+      expect(generateKeyPairSpy).toHaveBeenCalledWith(expected)
+      expect(invokeWsmanCallSpy).toHaveBeenCalled()
+    }
+  )
 
   it('should addTrustedRootCertificate with pre-configured cert', async () => {
     devices[clientId].ClientData = { payload: { profile: { tlsCerts: { ROOT_CERTIFICATE: { certbin: 'dGVzdA==' } } } } }
