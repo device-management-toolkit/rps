@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { type AMT } from '@device-management-toolkit/wsman-messages'
+
 /**
  * Parameters for AMT_PublicKeyManagementService.GenerateKeyPair.
  *
@@ -15,17 +17,47 @@
  * AMT 22 TLS provisioning. This type exists so the device-held key size can
  * never again be confused with the RPS-side root/CA key size.
  *
- * ECC-384 (keyAlgorithm 1) is expressible but not yet used. The obstacle is
- * narrower than it first appears: node-forge's publicKeyFromPem cannot *parse*
- * an EC SubjectPublicKeyInfo, but RPS never needs to. The leaf is signed with
- * the RPS root's RSA key; the device's EC key only has to be embedded. AMT
- * returns AMT_PublicPrivateKeyPair.DERKey as the SPKI DER already, so it can be
- * spliced into the TBSCertificate verbatim (forge's certificateToAsn1 reuses a
- * caller-supplied cert.tbsCertificate) without ever being parsed.
+ * ECC-384 (keyAlgorithm 1) is what hardened firmware binds. node-forge's
+ * publicKeyFromPem cannot *parse* an EC SubjectPublicKeyInfo, but RPS never
+ * needs to. The leaf is signed with the RPS root's RSA key; the device's EC key
+ * only has to be embedded. AMT returns AMT_PublicPrivateKeyPair.DERKey as the
+ * SPKI DER already, so it can be spliced into the TBSCertificate verbatim
+ * (forge's certificateToAsn1 reuses a caller-supplied cert.tbsCertificate)
+ * without ever being parsed.
  */
-export interface DeviceKeyPairParameters {
-  keyAlgorithm: 0 | 1
-  keyLength: 384 | 2048
+export interface RSADeviceKeyPair {
+  keyAlgorithm: 0
+  keyLength: 2048
+}
+
+export interface ECCDeviceKeyPair {
+  keyAlgorithm: 1
+  keyLength: 384
+}
+
+/**
+ * The algorithm and the length are not independent — the firmware supports
+ * exactly two pairs. Keeping them in one union means a cross-pair such as
+ * RSA-384 or ECC-2048 cannot be written down, let alone sent, which mirrors
+ * `AMT.Models.GenerateKeyPairRequest` in wsman-messages.
+ */
+export type DeviceKeyPairParameters = RSADeviceKeyPair | ECCDeviceKeyPair
+
+/**
+ * Translate a policy's device key pair into the wsman-messages request object.
+ *
+ * `AMT.Models.GenerateKeyPairRequest` is the union of the two valid
+ * pairs, so this cannot be written as a field-by-field copy — destructuring
+ * `{ keyAlgorithm, keyLength }` widens each field back to `0 | 1` and
+ * `384 | 2048` independently and the result no longer matches either member.
+ * Branching on the algorithm keeps the two halves tied together.
+ */
+export function toGenerateKeyPairRequest(
+  deviceKeyPair: DeviceKeyPairParameters
+): AMT.Models.GenerateKeyPairRequest {
+  return deviceKeyPair.keyAlgorithm === 1
+    ? { KeyAlgorithm: 1, KeyLength: 384 }
+    : { KeyAlgorithm: 0, KeyLength: 2048 }
 }
 
 export interface AMTCertificatePolicy {
@@ -49,8 +81,8 @@ export interface AMTCertificatePolicy {
   requiresSha384ProvisioningCert: boolean
 }
 
-const RSA_2048_DEVICE_KEY: DeviceKeyPairParameters = { keyAlgorithm: 0, keyLength: 2048 }
-const ECC_384_DEVICE_KEY: DeviceKeyPairParameters = { keyAlgorithm: 1, keyLength: 384 }
+const RSA_2048_DEVICE_KEY: RSADeviceKeyPair = { keyAlgorithm: 0, keyLength: 2048 }
+const ECC_384_DEVICE_KEY: ECCDeviceKeyPair = { keyAlgorithm: 1, keyLength: 384 }
 
 /**
  * Firmware that still carries the weak algorithms — AES-128, SHA-256, RSA-2K and
@@ -170,3 +202,36 @@ export function resolveProvisioningSignature(
   const useSha384 = certIsSha384 && weakAlgorithmsRemoved === true
   return useSha384 ? { hashAlgorithm: 'sha384', signingAlgorithm: 3 } : { hashAlgorithm: 'sha256', signingAlgorithm: 2 }
 }
+
+/*
+ * Compile-time assertions that the two key-pair unions still reject the
+ * cross-pairs. They live here, in a file the build compiles, rather than in
+ * amtCertificatePolicy.test.ts: tsconfig.json excludes the test files and
+ * vitest strips types without checking them, so a negative type assertion in a
+ * test file would never be evaluated. These are types only and emit no code.
+ *
+ * If a later change widens `DeviceKeyPairParameters` back into two independent
+ * scalars, `Rejects<...>` resolves to `false`, `Assert` fails its constraint,
+ * and `npm run compile` reports it here.
+ */
+type Assert<T extends true> = T
+/** True when `Pair` is assignable to neither member of the union. */
+type Rejects<Union, Pair> = Pair extends Union ? false : true
+type Accepts<Union, Pair> = Rejects<Union, Pair> extends false ? true : false
+
+export type DeviceKeyPairRejectsCrossPairs = [
+  Assert<Rejects<DeviceKeyPairParameters, { keyAlgorithm: 0; keyLength: 384 }>>,
+  Assert<Rejects<DeviceKeyPairParameters, { keyAlgorithm: 1; keyLength: 2048 }>>,
+  // The valid pairs have to stay accepted - a type that rejected everything
+  // would satisfy the two assertions above and say nothing.
+  Assert<Accepts<DeviceKeyPairParameters, { keyAlgorithm: 0; keyLength: 2048 }>>,
+  Assert<Accepts<DeviceKeyPairParameters, { keyAlgorithm: 1; keyLength: 384 }>>
+]
+
+/** The same guarantee for the wsman-messages request type this module maps onto. */
+export type GenerateKeyPairRequestRejectsCrossPairs = [
+  Assert<Rejects<AMT.Models.GenerateKeyPairRequest, { KeyAlgorithm: 0; KeyLength: 384 }>>,
+  Assert<Rejects<AMT.Models.GenerateKeyPairRequest, { KeyAlgorithm: 1; KeyLength: 2048 }>>,
+  Assert<Accepts<AMT.Models.GenerateKeyPairRequest, { KeyAlgorithm: 0; KeyLength: 2048 }>>,
+  Assert<Accepts<AMT.Models.GenerateKeyPairRequest, { KeyAlgorithm: 1; KeyLength: 384 }>>
+]

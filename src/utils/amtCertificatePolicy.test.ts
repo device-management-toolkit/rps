@@ -4,7 +4,11 @@
  **********************************************************************/
 
 import { describe, expect, it } from 'vitest'
-import { getAMTCertificatePolicy, resolveProvisioningSignature } from './amtCertificatePolicy.js'
+import {
+  getAMTCertificatePolicy,
+  resolveProvisioningSignature,
+  toGenerateKeyPairRequest
+} from './amtCertificatePolicy.js'
 
 const RSA_2048_DEVICE_KEY = { keyAlgorithm: 0, keyLength: 2048 }
 const ECC_384_DEVICE_KEY = { keyAlgorithm: 1, keyLength: 384 }
@@ -103,6 +107,36 @@ describe('getAMTCertificatePolicy', () => {
     const policy = getAMTCertificatePolicy(false)
     expect(policy.hashAlgorithm).toBe('sha256')
     expect(policy.deviceKeyPair).toEqual(RSA_2048_DEVICE_KEY)
+  })
+})
+
+describe('toGenerateKeyPairRequest', () => {
+  it('maps each policy onto the pair the firmware supports', () => {
+    expect(toGenerateKeyPairRequest(getAMTCertificatePolicy(true).deviceKeyPair)).toEqual({
+      KeyAlgorithm: 1,
+      KeyLength: 384
+    })
+    expect(toGenerateKeyPairRequest(getAMTCertificatePolicy(false).deviceKeyPair)).toEqual({
+      KeyAlgorithm: 0,
+      KeyLength: 2048
+    })
+  })
+
+  it('never emits a cross-pair', () => {
+    // RSA-384 and ECC-2048 are both rejected by the firmware with 2066
+    // PT_STATUS_UNSUPPORTED. The union makes them unwritable at compile time;
+    // this asserts the mapper does not reintroduce one at runtime by copying
+    // the two fields independently.
+    for (const weakAlgorithmsRemoved of [
+      true,
+      false,
+      undefined
+    ]) {
+      const { KeyAlgorithm, KeyLength } = toGenerateKeyPairRequest(
+        getAMTCertificatePolicy(weakAlgorithmsRemoved).deviceKeyPair
+      )
+      expect(KeyLength).toBe(KeyAlgorithm === 1 ? 384 : 2048)
+    }
   })
 })
 

@@ -23,7 +23,7 @@ import {
   sendEnterpriseAssistantKeyPairResponse
 } from './enterpriseAssistant.js'
 import { type CommonContext, invokeWsmanCall, sendProgressToDevice, recordComponentResult } from './common.js'
-import { getAMTCertificatePolicy } from '../utils/amtCertificatePolicy.js'
+import { getAMTCertificatePolicy, toGenerateKeyPairRequest } from '../utils/amtCertificatePolicy.js'
 
 export interface TLSContext extends CommonContext {
   amtProfile: AMTConfiguration | null
@@ -163,17 +163,15 @@ export class TLS {
     const amtVersion = devices[input.clientId].ClientData?.payload?.ver
     const weakAlgorithmsRemoved = devices[input.clientId].ClientData?.payload?.weakAlgorithmsRemoved
     const policy = getAMTCertificatePolicy(weakAlgorithmsRemoved)
-    const { keyAlgorithm, keyLength } = policy.deviceKeyPair
+    const keyPair = toGenerateKeyPairRequest(policy.deviceKeyPair)
     this.logger.debug(
       `AMT certificate policy: version=${amtVersion ?? 'unknown'} ` +
         `weakAlgorithmsRemoved=${weakAlgorithmsRemoved ?? 'not reported'} ` +
         `hashAlgorithm=${policy.hashAlgorithm} ` +
-        `rsaKeySize(RPS root)=${policy.rsaKeySize} deviceKey=${keyAlgorithm === 1 ? 'ECC' : 'RSA'}-${keyLength}`
+        `rsaKeySize(RPS root)=${policy.rsaKeySize} ` +
+        `deviceKey=${keyPair.KeyAlgorithm === 1 ? 'ECC' : 'RSA'}-${keyPair.KeyLength}`
     )
-    input.xmlMessage = input.amt.PublicKeyManagementService.GenerateKeyPair({
-      KeyAlgorithm: keyAlgorithm,
-      KeyLength: keyLength
-    })
+    input.xmlMessage = input.amt.PublicKeyManagementService.GenerateKeyPair(keyPair)
     return await invokeWsmanCall(input, 2)
   }
 
