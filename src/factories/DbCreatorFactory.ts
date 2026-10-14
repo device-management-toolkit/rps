@@ -7,7 +7,7 @@ import { type IDB } from '../interfaces/database/IDb.js'
 import { Environment } from '../utils/Environment.js'
 
 export class DbCreatorFactory {
-  private static instance: IDB
+  private static instance: IDB | undefined
   async getDb(): Promise<IDB> {
     if (DbCreatorFactory.instance == null) {
       const { default: Provider }: { default: new (connectionString: string) => IDB } = await import(
@@ -16,5 +16,10 @@ export class DbCreatorFactory {
       DbCreatorFactory.instance = new Provider(Environment.Config.connection_string)
     }
     return DbCreatorFactory.instance
+  }
+
+  /** Test-only: clears the singleton so a later getDb() re-reads db_provider. */
+  static reset(): void {
+    DbCreatorFactory.instance = undefined
   }
 }

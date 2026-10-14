@@ -11,6 +11,8 @@ import { Configurator } from './Configurator.js'
 import { Environment } from './utils/Environment.js'
 import { type RPSConfig } from './models/index.js'
 import routes from './routes/index.js'
+import healthRouter from './routes/admin/health/index.js'
+import { RPS_MODE_CONSOLE } from './utils/constants.js'
 import { MqttProvider } from './utils/MqttProvider.js'
 import { DbCreatorFactory } from './factories/DbCreatorFactory.js'
 import { backOff } from 'exponential-backoff'
@@ -86,26 +88,29 @@ export const startItUp = (): void => {
     return middleware
   }
 
-  loadCustomMiddleware()
-    .then((customMiddleware) => {
-      app.use(
-        '/api/v1',
-        async (req: express.Request, res: express.Response, next) => {
-          if (configurator.secretsManager) {
-            ;(req as any).secretsManager = configurator.secretsManager
-          }
-          req.db = await dbFactory.getDb()
-          next()
-        },
-        customMiddleware,
-        routes
-      )
-    })
-    .catch((err) => {
-      log.error('Error loading custom middleware')
-      log.error(err)
-      process.exit(0)
-    })
+  const attachServices = async (req: express.Request, res: express.Response, next): Promise<void> => {
+    if (configurator.secretsManager) {
+      ;(req as any).secretsManager = configurator.secretsManager
+    }
+    req.db = await dbFactory.getDb()
+    next()
+  }
+
+  // Console owns configuration in this mode, so RPS's own CRUD routes are not mounted.
+  if (Environment.Config.mode === RPS_MODE_CONSOLE) {
+    log.info('console mode: RPS configuration APIs are disabled, Console owns configuration')
+    app.use('/api/v1/admin/health', attachServices, healthRouter)
+  } else {
+    loadCustomMiddleware()
+      .then((customMiddleware) => {
+        app.use('/api/v1', attachServices, customMiddleware, routes)
+      })
+      .catch((err) => {
+        log.error('Error loading custom middleware')
+        log.error(err)
+        process.exit(0)
+      })
+  }
 
   // the env keys have been lower-cased!!
   if (process.env.node_env !== 'test') {
