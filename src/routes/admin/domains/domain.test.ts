@@ -3,7 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { validationResult } from 'express-validator'
+import forge from 'node-forge'
 import {
+  domainUpdateValidator,
   passwordChecker,
   domainSuffixChecker,
   expirationChecker,
@@ -16,6 +19,7 @@ import {
 import { NodeForge } from '../../../NodeForge.js'
 import { CertManager, UnsupportedCertificateError } from '../../../certManager.js'
 import Logger from '../../../Logger.js'
+import { TEST_PFXCERT } from '../../../test/helper/certs.js'
 
 describe('Domain Profile Validation', () => {
   const nodeForge = new NodeForge()
@@ -263,23 +267,186 @@ describe('Domain Profile Validation', () => {
   })
 
   test('rootCertChecker - success', () => {
-    // pfxobj from passwordChecker contains a root cert (self-signed)
+    const rootCertificate = pfxobj.certs.find((certificate) => certificate.subject.hash === certificate.issuer.hash)
+    expect(rootCertificate).toBeDefined()
     expect(() => {
-      rootCertChecker(pfxobj)
+      rootCertChecker([rootCertificate])
     }).not.toThrow()
   })
 
-  test('rootCertChecker - failure', () => {
-    const pfxobjNoRoot = {
-      certs: [
-        { subject: { hash: 'abc' }, issuer: { hash: 'xyz' } },
-        { subject: { hash: 'def' }, issuer: { hash: 'abc' } }
-      ],
-      keys: []
-    } as any
+  test('rootCertChecker - failure - terminal certificate is not self-issued', () => {
+    const selfIssuedCertificate = { subject: { hash: 'unrelated' }, issuer: { hash: 'unrelated' } }
+    const terminalCertificate = { subject: { hash: 'root' }, issuer: { hash: 'other' } }
     expect(() => {
-      rootCertChecker(pfxobjNoRoot)
-    }).toThrow(new Error('Provisioning certificate does not contain a root certificate'))
+      rootCertChecker([selfIssuedCertificate, terminalCertificate] as any)
+    }).toThrow('Provisioning certificate does not contain a self-issued root certificate')
+  })
+
+  test('domainUpdateValidator requires an explicit password for a replacement cert', async () => {
+    const getSecretAtPath = vi.fn().mockResolvedValue({ CERT_PASSWORD: 'existing-password' })
+    const req = {
+      body: {
+        profileName: 'profile_name',
+        domainSuffix: 'domain.com',
+        provisioningCert: TEST_PFXCERT,
+        provisioningCertStorageFormat: 'raw'
+      },
+      secretsManager: { getSecretAtPath }
+    }
+
+    await Promise.all(domainUpdateValidator().map((validator) => validator.run(req as any)))
+
+    expect(getSecretAtPath).not.toHaveBeenCalled()
+    expect(validationResult(req as any).array()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: 'provisioningCert',
+          msg: 'Provisioning Cert Password is required to validate replacement certificate'
+        })
+      ])
+    )
+  })
+
+  test('domainUpdateValidator requires an explicit suffix for a replacement cert', async () => {
+    const getByName = vi.fn().mockResolvedValue({ domainSuffix: 'vprodemo.com' })
+    const updateReq = {
+      body: {
+        profileName: 'vprodemo',
+        provisioningCert: TEST_PFXCERT,
+        provisioningCertPassword: 'P@ssw0rd',
+        provisioningCertStorageFormat: 'raw'
+      },
+      db: { domains: { getByName } },
+      tenantId: 'tenant'
+    }
+
+    await Promise.all(domainUpdateValidator().map((validator) => validator.run(updateReq as any)))
+
+    expect(getByName).not.toHaveBeenCalled()
+    expect(validationResult(updateReq as any).array()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: 'provisioningCert',
+          msg: 'Domain suffix name is required to validate provisioning certificate'
+        })
+      ])
+    )
+  })
+
+  test('domainUpdateValidator accepts a replacement cert with an explicit suffix and password', async () => {
+    const updateReq = {
+      body: {
+        profileName: 'vprodemo',
+        domainSuffix: 'vprodemo.com',
+        provisioningCert: TEST_PFXCERT,
+        provisioningCertPassword: 'P@ssw0rd',
+        provisioningCertStorageFormat: 'raw'
+      }
+    }
+
+    await Promise.all(domainUpdateValidator().map((validator) => validator.run(updateReq as any)))
+
+    expect(validationResult(updateReq as any).array()).toEqual([])
+  })
+
+  test('domainUpdateValidator rejects an explicitly empty suffix without a replacement cert', async () => {
+    const updateReq = {
+      body: { profileName: 'vprodemo', domainSuffix: '', provisioningCertStorageFormat: 'raw' }
+    }
+
+    await Promise.all(domainUpdateValidator().map((validator) => validator.run(updateReq as any)))
+
+    expect(validationResult(updateReq as any).array()).toEqual([
+      expect.objectContaining({ path: 'domainSuffix', msg: 'Domain suffix name is required' })
+    ])
+  })
+
+  test('domainUpdateValidator does not substitute the stored suffix for an explicitly empty one', async () => {
+    const getByName = vi.fn().mockResolvedValue({ domainSuffix: 'vprodemo.com' })
+    const updateReq = {
+      body: {
+        profileName: 'vprodemo',
+        domainSuffix: '',
+        provisioningCert: TEST_PFXCERT,
+        provisioningCertPassword: 'P@ssw0rd',
+        provisioningCertStorageFormat: 'raw'
+      },
+      db: { domains: { getByName } }
+    }
+
+    await Promise.all(domainUpdateValidator().map((validator) => validator.run(updateReq as any)))
+
+    expect(getByName).not.toHaveBeenCalled()
+    expect(validationResult(updateReq as any).array()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: 'domainSuffix', msg: 'Domain suffix name is required' }),
+        expect.objectContaining({
+          path: 'provisioningCert',
+          msg: 'Domain suffix name is required to validate provisioning certificate'
+        })
+      ])
+    )
+  })
+
+  test('domainUpdateValidator rejects a single-cert PFX without root CA constraints', async () => {
+    const keys = forge.pki.rsa.generateKeyPair(2048)
+    const cert = forge.pki.createCertificate()
+    cert.publicKey = keys.publicKey
+    cert.serialNumber = '01'
+    cert.validity.notBefore = new Date(Date.now() - 60_000)
+    cert.validity.notAfter = new Date(Date.now() + 86_400_000)
+    cert.setSubject([{ name: 'commonName', value: 'intel.vprodemo.com' }])
+    cert.setIssuer(cert.subject.attributes)
+    cert.setExtensions([{ name: 'extKeyUsage', '2.16.840.1.113741.1.2.3': true }])
+    cert.sign(keys.privateKey, forge.md.sha256.create())
+
+    const pfx = forge.pkcs12.toPkcs12Asn1(keys.privateKey, [cert], 'P@ssw0rd')
+    const updateReq = {
+      body: {
+        profileName: 'vprodemo',
+        domainSuffix: 'vprodemo.com',
+        provisioningCert: Buffer.from(forge.asn1.toDer(pfx).getBytes(), 'binary').toString('base64'),
+        provisioningCertPassword: 'P@ssw0rd',
+        provisioningCertStorageFormat: 'raw'
+      }
+    }
+
+    await Promise.all(domainUpdateValidator().map((validator) => validator.run(updateReq as any)))
+
+    expect(validationResult(updateReq as any).array()).toEqual([
+      expect.objectContaining({
+        path: 'provisioningCert',
+        msg: 'Provisioning certificate root must have basicConstraints with cA set to true'
+      })
+    ])
+  })
+
+  test('rootCertChecker - failure - invalid self-signature', () => {
+    const rootCertificate = {
+      subject: { hash: 'root' },
+      issuer: { hash: 'root' },
+      verify: () => false,
+      getExtension: () => ({ cA: true })
+    }
+    expect(() => {
+      rootCertChecker([rootCertificate] as any)
+    }).toThrow('Provisioning certificate root signature is invalid')
+  })
+
+  test.each([
+    ['missing basicConstraints', null],
+    ['basicConstraints without cA', {}],
+    ['basicConstraints with cA false', { cA: false }]
+  ])('rootCertChecker - failure - %s', (_caseName, basicConstraints) => {
+    const rootCertificate = {
+      subject: { hash: 'root' },
+      issuer: { hash: 'root' },
+      verify: () => true,
+      getExtension: () => basicConstraints
+    }
+    expect(() => {
+      rootCertChecker([rootCertificate] as any)
+    }).toThrow('Provisioning certificate root must have basicConstraints with cA set to true')
   })
 
   test('keySizeChecker - success', () => {
@@ -321,11 +488,10 @@ describe('Domain Profile Validation', () => {
     }).toThrow('Private key in the PFX does not match the leaf certificate public key')
   })
 
-  test('chainIntegrityChecker - success - single cert returns early', () => {
-    const singleCertPfxobj = { certs: [{}], keys: [] } as any
-    expect(() => {
-      chainIntegrityChecker(singleCertPfxobj)
-    }).not.toThrow()
+  test('chainIntegrityChecker - success - single self-issued cert', () => {
+    const selfIssuedCertificate = { subject: { hash: 'root' }, issuer: { hash: 'root' } }
+    const singleCertPfxobj = { certs: [selfIssuedCertificate], keys: [] } as any
+    expect(chainIntegrityChecker(singleCertPfxobj)).toEqual([selfIssuedCertificate])
   })
 
   test('chainIntegrityChecker - failure - broken issuer link', () => {
@@ -339,6 +505,21 @@ describe('Domain Profile Validation', () => {
     expect(() => {
       chainIntegrityChecker(brokenChainPfxobj)
     }).toThrow('Certificate chain is broken: cannot find issuer for a certificate in the chain')
+  })
+
+  test('chainIntegrityChecker - failure - unrelated certificate outside the chain', () => {
+    const pfxWithUnrelatedCert = {
+      certs: [
+        { subject: { hash: 'leaf' }, issuer: { hash: 'root' } },
+        { subject: { hash: 'root' }, issuer: { hash: 'root' } },
+        { subject: { hash: 'unrelated' }, issuer: { hash: 'unrelated' } }
+      ],
+      keys: []
+    } as any
+
+    expect(() => {
+      chainIntegrityChecker(pfxWithUnrelatedCert)
+    }).toThrow('Provisioning certificate contains certificates not in the leaf-to-root chain')
   })
 
   test('amtOidChecker - success', () => {
