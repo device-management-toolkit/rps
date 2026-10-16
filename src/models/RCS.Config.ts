@@ -278,6 +278,8 @@ export interface Payload {
   profile?: any
   tlsEnforced?: boolean
   tlsTunnel?: boolean
+  // Reported by rpc-go from the firmware; omitted by older rpc-go builds.
+  weakAlgorithmsRemoved?: boolean
   lmsInstalled?: boolean
 }
 

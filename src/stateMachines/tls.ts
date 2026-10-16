@@ -21,6 +21,7 @@ import {
   initiateCertRequest,
   sendEnterpriseAssistantKeyPairResponse
 } from './enterpriseAssistant.js'
+import { getAMTCertificatePolicy } from '../utils/amtCertificatePolicy.js'
 import { type CommonContext, invokeWsmanCall, sendProgressToDevice, recordComponentResult } from './common.js'
 
 export interface TLSContext extends CommonContext {
@@ -145,7 +146,9 @@ export class TLS {
   }
 
   generateKeyPair = async ({ input }: { input: TLSContext }): Promise<any> => {
-    input.xmlMessage = input.amt.PublicKeyManagementService.GenerateKeyPair({ KeyAlgorithm: 0, KeyLength: 2048 })
+    const payload = devices[input.clientId].ClientData?.payload
+    const policy = getAMTCertificatePolicy(payload?.ver, payload?.weakAlgorithmsRemoved)
+    input.xmlMessage = input.amt.PublicKeyManagementService.GenerateKeyPair(policy.deviceKeyPair)
     return await invokeWsmanCall(input, 2)
   }
 
