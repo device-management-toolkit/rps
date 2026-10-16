@@ -9,6 +9,7 @@ import { type ILogger } from './interfaces/ILogger.js'
 import { type ClientMsg, ClientAction, type Payload, ClientMethods } from './models/RCS.Config.js'
 import { ClientMsgJsonParser } from './utils/ClientMsgJsonParser.js'
 import { RPSError } from './utils/RPSError.js'
+import { getAMTCertificatePolicy } from './utils/amtCertificatePolicy.js'
 import { CommandParser } from './CommandParser.js'
 import { VersionChecker } from './VersionChecker.js'
 import { AMTUserName } from './utils/constants.js'
@@ -72,6 +73,21 @@ export class Validator implements IValidator {
     // Check for password
     if (!payload.password) {
       throw new RPSError(`Device ${payload.uuid} activation failed. Missing password.`)
+    }
+    const { deviceKeyPair } = getAMTCertificatePolicy(payload.ver, payload.weakAlgorithmsRemoved)
+    this.logger.info(
+      `Device ${payload.uuid} AMT certificate policy: version=${payload.ver ?? 'unknown'} ` +
+        `weakAlgorithmsRemoved=${payload.weakAlgorithmsRemoved ?? 'not reported'} ` +
+        `deviceKey=${deviceKeyPair.KeyAlgorithm === 1 ? 'ECC' : 'RSA'}-${deviceKeyPair.KeyLength}`
+    )
+    // Hardened firmware (AMT 22: reported by the device, or inferred from the version by an older
+    // rpc-go) needs SHA-384 provisioning, which RPS does not support yet. Fail here rather than
+    // part-way through activation.
+    if (deviceKeyPair.KeyAlgorithm === 1) {
+      throw new RPSError(
+        `Device ${payload.uuid} activation failed. AMT 22 firmware (weak algorithms removed) is not supported by RPS yet ` +
+          `(version=${payload.ver}, weakAlgorithmsRemoved=${payload.weakAlgorithmsRemoved ?? 'not reported'}).`
+      )
     }
     // Extract TLS enforcement flag from payload
     if (msg.payload.tlsEnforced != null) {
