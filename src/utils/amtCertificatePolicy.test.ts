@@ -72,6 +72,20 @@ describe('getAMTCertificatePolicy', () => {
 })
 
 describe('device key pair', () => {
+  it('returns a fresh key pair after the message builder mutates its input', () => {
+    const firstPolicy = getAMTCertificatePolicy('21.0.0')
+    const serializedKeyPair = firstPolicy.deviceKeyPair as unknown as Record<string, number>
+    serializedKeyPair['h:KeyAlgorithm'] = serializedKeyPair.KeyAlgorithm
+    serializedKeyPair['h:KeyLength'] = serializedKeyPair.KeyLength
+    delete serializedKeyPair.KeyAlgorithm
+    delete serializedKeyPair.KeyLength
+
+    const nextPolicy = getAMTCertificatePolicy('21.0.0')
+
+    expect(nextPolicy.deviceKeyPair).toEqual(RSA_2048)
+    expect(nextPolicy.deviceKeyPair).not.toBe(firstPolicy.deviceKeyPair)
+  })
+
   it.each([
     true,
     false,
