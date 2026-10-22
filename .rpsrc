@@ -5,6 +5,7 @@
   "vault_token": "myroot",
   "websocketport": 8080,
   "db_provider": "postgres",
+  "mode": "mps",
   "secrets_provider": "vault",
   "connection_string": "postgresql://<USERNAME>:<PASSWORD>@localhost:5432/rpsdb",
   "postgres_ssl_ca": "",
