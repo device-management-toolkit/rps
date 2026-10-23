@@ -318,8 +318,22 @@ describe('TLS State Machine', () => {
     expect(invokeWsmanCallSpy).toHaveBeenCalled()
   })
 
-  it('should generateKeyPair', async () => {
+  it.each([
+    // The SDK allows exactly two key pairs: KeyAlgorithm 0 / RSA-2048 and
+    // KeyAlgorithm 1 / ECC-384. Any other size returns 2066 PT_STATUS_UNSUPPORTED.
+    { payload: { ver: '21.0.6' }, expected: { KeyAlgorithm: 0, KeyLength: 2048 } },
+    { payload: { ver: '22.0.0' }, expected: { KeyAlgorithm: 1, KeyLength: 384 } },
+    { payload: { ver: '22.0.0', weakAlgorithmsRemoved: false }, expected: { KeyAlgorithm: 0, KeyLength: 2048 } },
+    { payload: { ver: '21.0.6', weakAlgorithmsRemoved: true }, expected: { KeyAlgorithm: 1, KeyLength: 384 } }
+  ])('should ask AMT for $expected given $payload', async ({ payload, expected }) => {
+    devices[clientId].ClientData = { payload }
+    const generateKeyPairSpy = vi
+      .spyOn(context.amt.PublicKeyManagementService, 'GenerateKeyPair')
+      .mockReturnValue({} as any)
+
     await tls.generateKeyPair({ input: context })
+
+    expect(generateKeyPairSpy).toHaveBeenCalledWith(expected)
     expect(invokeWsmanCallSpy).toHaveBeenCalled()
   })
   it('should addTrustedRootCertificate with pre-configured cert', async () => {
