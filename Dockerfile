@@ -11,8 +11,6 @@ COPY package*.json ./
 
 # Install dependencies
 RUN npm ci
-RUN ./node_modules/.bin/tsc --project node_modules/@device-management-toolkit/wsman-messages/tsconfig.json \
-      && cp -R node_modules/@device-management-toolkit/wsman-messages/dist/. node_modules/@device-management-toolkit/wsman-messages/
 
 COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src/
