@@ -556,9 +556,9 @@ describe('Activation State Machine', () => {
       expect(upgradeSpy.mock.calls[0][1]).toBe(3)
       expect(invokeWsmanCallSpy).toHaveBeenCalledWith(context, 0, undefined, true)
     })
-    it('should sign with sha384 / SigningAlgorithm 3 on unhardened firmware given a sha384 certificate', async () => {
-      // Unhardened firmware accepts either digest, so the nonce follows the certificate.
-      // (AMT 20.0.5 is known to reject SigningAlgorithm 3; this path exists to measure that.)
+    it('should sign the nonce with sha256 / SigningAlgorithm 2 on unhardened firmware given a sha384 certificate', async () => {
+      // AMT 20.0.5 accepts a SHA-384 certificate chain but refuses a SHA-384 nonce signature
+      // (UpgradeClientToAdmin ReturnValue 3), so the nonce stays SHA-256 / label 2 unless hardened.
       const createSignedStringSpy = vi
         .spyOn(activation, 'createSignedString')
         .mockImplementation((clientId: string): boolean => {
@@ -567,6 +567,7 @@ describe('Activation State Machine', () => {
         })
       devices[clientId].nonce = PasswordHelper.generateNonce()
       devices[clientId].ClientData.payload.ver = '20.0.5'
+      devices[clientId].ClientData.payload.weakAlgorithmsRemoved = undefined
       context.certChainPfx = { provisioningCertificateObj: { certChain: [
             'leaf',
             'inter1',
@@ -576,10 +577,10 @@ describe('Activation State Machine', () => {
       const upgradeSpy = vi.spyOn(context.ips.HostBasedSetupService, 'UpgradeClientToAdmin')
       const infoSpy = vi.spyOn(activation.logger, 'info')
       await activation.sendUpgradeClientToAdmin({ input: context })
-      expect(createSignedStringSpy).toHaveBeenCalledWith(clientId, 'sha384')
-      expect(upgradeSpy.mock.calls[0][1]).toBe(3)
+      expect(createSignedStringSpy).toHaveBeenCalledWith(clientId, 'sha256')
+      expect(upgradeSpy.mock.calls[0][1]).toBe(2)
       expect(infoSpy).toHaveBeenCalledWith(
-        'Provisioning signature (UpgradeClientToAdmin): certificateDigest=sha384 nonceDigest=sha384 SigningAlgorithm=3'
+        'Provisioning signature (UpgradeClientToAdmin): certificateDigest=sha384 nonceDigest=sha256 SigningAlgorithm=2'
       )
     })
     it('should send WSMan to change AMT password', async () => {

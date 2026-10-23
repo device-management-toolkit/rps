@@ -180,26 +180,34 @@ export interface ProvisioningSignatureParameters {
  * Digest and SigningAlgorithm for IPS_HostBasedSetupService AdminSetup /
  * UpgradeClientToAdmin.
  *
- * The nonce is signed with the digest the provisioning certificate offers, and
- * the label follows the digest: SHA-384 -> 3, anything else -> 2. The two
- * returned values must agree with each other, because the firmware recomputes
- * the digest named by SigningAlgorithm and checks it against the signature RPS
- * produced.
+ * The two returned values must agree with each other, because the firmware
+ * recomputes the digest named by SigningAlgorithm and checks it against the
+ * signature RPS produced.
+ *
+ * The digest of the *provisioning certificate* and the digest of the *nonce
+ * signature* are separate requirements, and firmware does not treat them the
+ * same way:
+ * - Hardened firmware (see `getAMTCertificatePolicy`) requires a SHA-384
+ *   certificate and a SHA-384 nonce signature, so SHA-384 -> label 3.
+ * - Every other generation accepts either certificate digest, but its nonce is
+ *   signed with SHA-256 -> label 2, even when the certificate is SHA-384. An
+ *   AMT 20.0.5 device accepted a SHA-384 certificate chain (all three
+ *   AddNextCertInChain calls returned 0) and then refused SigningAlgorithm 3
+ *   with ReturnValue 3 (InvalidParam) on UpgradeClientToAdmin, where AMT 21.0.6
+ *   and AMT 22.0.0 returned 0. Which older generations can verify a SHA-384
+ *   nonce signature is untested.
  *
  * Which certificates are acceptable is decided by the policy, not here:
- * hardened firmware accepts only a SHA-384 certificate (createSignedString
- * rejects SHA-256 and names the digest), unhardened firmware accepts either.
- *
- * Unhardened firmware is no longer pinned to SigningAlgorithm 2. That is
- * deliberate, to measure SHA-384 across AMT 12 and later. It is known to fail
- * on at least one generation: an AMT 20.0.5 device rejected UpgradeClientToAdmin
- * with ReturnValue 3 (PT_STATUS_INVALID_PT_MODE) for SigningAlgorithm 3, where
- * AMT 21.0.6 and AMT 22.0.0 returned 0.
+ * createSignedString rejects a non-SHA-384 certificate on hardened firmware and
+ * names the digest.
  */
 export function resolveProvisioningSignature(
-  certHashAlgorithm: string | null | undefined
+  certHashAlgorithm: string | null | undefined,
+  weakAlgorithmsRemoved?: boolean,
+  version?: unknown
 ): ProvisioningSignatureParameters {
-  return certHashAlgorithm?.toLowerCase() === 'sha384'
+  const hardened = getAMTCertificatePolicy(weakAlgorithmsRemoved, version).requiresSha384ProvisioningCert
+  return hardened && certHashAlgorithm?.toLowerCase() === 'sha384'
     ? { hashAlgorithm: 'sha384', signingAlgorithm: 3 }
     : { hashAlgorithm: 'sha256', signingAlgorithm: 2 }
 }

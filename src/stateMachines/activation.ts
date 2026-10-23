@@ -353,7 +353,11 @@ export class Activation {
     const ips: IPS.Messages = input.ips
     const { clientId, certChainPfx } = input
     const password = await this.getPassword(input)
-    const { hashAlgorithm, signingAlgorithm } = resolveProvisioningSignature(certChainPfx.hashAlgorithm)
+    const { hashAlgorithm, signingAlgorithm } = resolveProvisioningSignature(
+      certChainPfx.hashAlgorithm,
+      devices[clientId]?.ClientData?.payload?.weakAlgorithmsRemoved,
+      devices[clientId]?.ClientData?.payload?.ver
+    )
     this.createSignedString(clientId, hashAlgorithm)
     const clientObj = devices[clientId]
     if (clientObj.nonce != null && clientObj.signature != null) {
@@ -374,7 +378,11 @@ export class Activation {
   sendUpgradeClientToAdmin = async ({ input }: { input: ActivationContext }): Promise<any> => {
     const ips: IPS.Messages = input.ips
     const { clientId, certChainPfx } = input
-    const { hashAlgorithm, signingAlgorithm } = resolveProvisioningSignature(certChainPfx.hashAlgorithm)
+    const { hashAlgorithm, signingAlgorithm } = resolveProvisioningSignature(
+      certChainPfx.hashAlgorithm,
+      devices[clientId]?.ClientData?.payload?.weakAlgorithmsRemoved,
+      devices[clientId]?.ClientData?.payload?.ver
+    )
     this.createSignedString(clientId, hashAlgorithm)
     const clientObj = devices[clientId]
     if (clientObj.nonce != null && clientObj.signature != null) {

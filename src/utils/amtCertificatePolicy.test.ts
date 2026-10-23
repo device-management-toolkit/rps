@@ -138,36 +138,55 @@ describe('toGenerateKeyPairRequest', () => {
 })
 
 describe('resolveProvisioningSignature', () => {
-  it.each([
-    { certHashAlgorithm: 'sha384', hashAlgorithm: 'sha384', signingAlgorithm: 3 },
-    { certHashAlgorithm: 'SHA384', hashAlgorithm: 'sha384', signingAlgorithm: 3 },
-    { certHashAlgorithm: 'sha256', hashAlgorithm: 'sha256', signingAlgorithm: 2 },
-    { certHashAlgorithm: undefined, hashAlgorithm: 'sha256', signingAlgorithm: 2 },
-    { certHashAlgorithm: null, hashAlgorithm: 'sha256', signingAlgorithm: 2 }
-  ])(
-    'a $certHashAlgorithm certificate signs with $hashAlgorithm / SigningAlgorithm $signingAlgorithm',
-    ({ certHashAlgorithm, ...expected }) => {
-      expect(resolveProvisioningSignature(certHashAlgorithm)).toEqual(expected)
-    }
-  )
+  const SHA384_3 = { hashAlgorithm: 'sha384', signingAlgorithm: 3 }
+  const SHA256_2 = { hashAlgorithm: 'sha256', signingAlgorithm: 2 }
 
-  it('follows the certificate digest on unhardened firmware too', () => {
-    // Unhardened firmware accepts either digest, so the nonce is signed with
-    // whichever one the provisioning certificate offers.
-    expect(resolveProvisioningSignature('sha384')).toEqual({ hashAlgorithm: 'sha384', signingAlgorithm: 3 })
-    expect(resolveProvisioningSignature('sha256')).toEqual({ hashAlgorithm: 'sha256', signingAlgorithm: 2 })
+  it.each([
+    // Hardened, reported or inferred from AMT 22 or later: SHA-384 nonce, label 3.
+    { cert: 'sha384', weak: true, version: '22.0.0', expected: SHA384_3 },
+    { cert: 'SHA384', weak: true, version: '21.0.6', expected: SHA384_3 },
+    { cert: 'sha384', weak: undefined, version: '22.0.0', expected: SHA384_3 },
+    // Hardened firmware with a SHA-256 certificate never reaches a SHA-384 label;
+    // createSignedString rejects it before anything is sent.
+    { cert: 'sha256', weak: true, version: '22.0.0', expected: SHA256_2 },
+    // Not hardened: the certificate may be SHA-384, the nonce is still SHA-256 / 2.
+    // AMT 20.0.5 accepted a SHA-384 chain and refused SigningAlgorithm 3.
+    { cert: 'sha384', weak: false, version: '22.0.0', expected: SHA256_2 },
+    { cert: 'sha384', weak: false, version: '20.0.5', expected: SHA256_2 },
+    { cert: 'sha384', weak: undefined, version: '20.0.5', expected: SHA256_2 },
+    { cert: 'sha384', weak: undefined, version: '21.0.6', expected: SHA256_2 },
+    { cert: 'sha384', weak: undefined, version: undefined, expected: SHA256_2 },
+    { cert: 'sha256', weak: false, version: '20.0.5', expected: SHA256_2 },
+    { cert: undefined, weak: true, version: '22.0.0', expected: SHA256_2 },
+    { cert: null, weak: true, version: '22.0.0', expected: SHA256_2 }
+  ])('$cert certificate, weakAlgorithmsRemoved=$weak, version=$version', ({ cert, weak, version, expected }) => {
+    expect(resolveProvisioningSignature(cert, weak, version)).toEqual(expected)
   })
 
   it('never labels the signature with a digest it was not made with', () => {
     // The firmware recomputes the digest named by SigningAlgorithm, so the two
     // halves have to be resolved together rather than derived independently.
-    for (const certHashAlgorithm of [
-      'sha256',
-      'sha384',
+    for (const weak of [
+      true,
+      false,
       undefined
     ]) {
-      const { hashAlgorithm, signingAlgorithm } = resolveProvisioningSignature(certHashAlgorithm)
-      expect(signingAlgorithm).toBe(hashAlgorithm === 'sha384' ? 3 : 2)
+      for (const version of [
+        '12.0.95',
+        '20.0.5',
+        '21.0.6',
+        '22.0.0',
+        undefined
+      ]) {
+        for (const cert of [
+          'sha256',
+          'sha384',
+          undefined
+        ]) {
+          const { hashAlgorithm, signingAlgorithm } = resolveProvisioningSignature(cert, weak, version)
+          expect(signingAlgorithm).toBe(hashAlgorithm === 'sha384' ? 3 : 2)
+        }
+      }
     }
   })
 })
