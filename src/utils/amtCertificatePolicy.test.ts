@@ -142,59 +142,31 @@ describe('toGenerateKeyPairRequest', () => {
 
 describe('resolveProvisioningSignature', () => {
   it.each([
-    { certHashAlgorithm: 'sha384', weakAlgorithmsRemoved: true, hashAlgorithm: 'sha384', signingAlgorithm: 3 },
-    { certHashAlgorithm: 'SHA384', weakAlgorithmsRemoved: true, hashAlgorithm: 'sha384', signingAlgorithm: 3 },
-    { certHashAlgorithm: 'sha256', weakAlgorithmsRemoved: true, hashAlgorithm: 'sha256', signingAlgorithm: 2 },
-    { certHashAlgorithm: 'sha384', weakAlgorithmsRemoved: false, hashAlgorithm: 'sha256', signingAlgorithm: 2 },
-    { certHashAlgorithm: 'sha384', weakAlgorithmsRemoved: undefined, hashAlgorithm: 'sha256', signingAlgorithm: 2 },
-    { certHashAlgorithm: 'sha256', weakAlgorithmsRemoved: false, hashAlgorithm: 'sha256', signingAlgorithm: 2 },
-    { certHashAlgorithm: undefined, weakAlgorithmsRemoved: true, hashAlgorithm: 'sha256', signingAlgorithm: 2 },
-    { certHashAlgorithm: null, weakAlgorithmsRemoved: true, hashAlgorithm: 'sha256', signingAlgorithm: 2 }
+    { certHashAlgorithm: 'sha384', hashAlgorithm: 'sha384', signingAlgorithm: 3 },
+    { certHashAlgorithm: 'SHA384', hashAlgorithm: 'sha384', signingAlgorithm: 3 },
+    { certHashAlgorithm: 'sha256', hashAlgorithm: 'sha256', signingAlgorithm: 2 },
+    { certHashAlgorithm: undefined, hashAlgorithm: 'sha256', signingAlgorithm: 2 },
+    { certHashAlgorithm: null, hashAlgorithm: 'sha256', signingAlgorithm: 2 }
   ])(
-    'a $certHashAlgorithm cert on firmware reporting $weakAlgorithmsRemoved signs with $hashAlgorithm / SigningAlgorithm $signingAlgorithm',
-    ({ certHashAlgorithm, weakAlgorithmsRemoved, ...expected }) => {
-      expect(resolveProvisioningSignature(certHashAlgorithm, weakAlgorithmsRemoved)).toEqual(expected)
+    'a $certHashAlgorithm certificate signs with $hashAlgorithm / SigningAlgorithm $signingAlgorithm',
+    ({ certHashAlgorithm, ...expected }) => {
+      expect(resolveProvisioningSignature(certHashAlgorithm)).toEqual(expected)
     }
   )
 
-  it('requires both inputs before using sha384', () => {
-    // Deriving from the certificate alone sent SigningAlgorithm 3 to an AMT
-    // 20.0.5 device and got ReturnValue 3 (PT_STATUS_INVALID_PT_MODE) back.
-    // Deriving from the firmware alone ignores what the certificate offers.
-    expect(resolveProvisioningSignature('sha384', false).signingAlgorithm).toBe(2)
-    expect(resolveProvisioningSignature('sha256', true).signingAlgorithm).toBe(2)
-    expect(resolveProvisioningSignature('sha384', true).signingAlgorithm).toBe(3)
-  })
-
-  it('signs unhardened firmware with sha256 even when the certificate offers sha384', () => {
-    // This is the deliberate cost of dropping the version gate. AMT 21 reports
-    // 0xE2 and can verify sha384, but does not require it; the nonce digest is
-    // independent of the digest the certificate itself was signed with.
-    expect(resolveProvisioningSignature('sha384', false)).toEqual({
-      hashAlgorithm: 'sha256',
-      signingAlgorithm: 2
-    })
+  it('follows the certificate digest on unhardened firmware too', () => {
+    // Unhardened firmware accepts either digest, so the nonce is signed with
+    // whichever one the provisioning certificate offers.
+    expect(resolveProvisioningSignature('sha384')).toEqual({ hashAlgorithm: 'sha384', signingAlgorithm: 3 })
+    expect(resolveProvisioningSignature('sha256')).toEqual({ hashAlgorithm: 'sha256', signingAlgorithm: 2 })
   })
 
   it('never labels the signature with a digest it was not made with', () => {
     // The firmware recomputes the digest named by SigningAlgorithm, so the two
     // halves have to be resolved together rather than derived independently.
-    for (const weakAlgorithmsRemoved of [
-      true,
-      false,
-      undefined
-    ]) {
-      for (const certHashAlgorithm of [
-        'sha256',
-        'sha384',
-        undefined
-      ]) {
-        const { hashAlgorithm, signingAlgorithm } = resolveProvisioningSignature(
-          certHashAlgorithm,
-          weakAlgorithmsRemoved
-        )
-        expect(signingAlgorithm).toBe(hashAlgorithm === 'sha384' ? 3 : 2)
-      }
+    for (const certHashAlgorithm of ['sha256', 'sha384', undefined]) {
+      const { hashAlgorithm, signingAlgorithm } = resolveProvisioningSignature(certHashAlgorithm)
+      expect(signingAlgorithm).toBe(hashAlgorithm === 'sha384' ? 3 : 2)
     }
   })
 })

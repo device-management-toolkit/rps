@@ -44,7 +44,11 @@ import { NetworkConfiguration } from './networkConfiguration.js'
 import { error } from 'console'
 import { TLSTunnelManager } from '../TLSTunnelManager.js'
 import { ensurePemCertificate } from '../utils/certHelpers.js'
-import { getAMTCertificatePolicy, resolveProvisioningSignature } from '../utils/amtCertificatePolicy.js'
+import {
+  getAMTCertificatePolicy,
+  type ProvisioningSignatureParameters,
+  resolveProvisioningSignature
+} from '../utils/amtCertificatePolicy.js'
 import crypto from 'node:crypto'
 
 export interface ActivationContext extends CommonContext {
@@ -334,17 +338,26 @@ export class Activation {
     return password
   }
 
+  private logProvisioningSignature(
+    operation: string,
+    certDigest: string | null | undefined,
+    signature: ProvisioningSignatureParameters
+  ): void {
+    this.logger.info(
+      `Provisioning signature (${operation}): certificateDigest=${certDigest ?? 'unknown'} ` +
+        `nonceDigest=${signature.hashAlgorithm} SigningAlgorithm=${signature.signingAlgorithm}`
+    )
+  }
+
   sendAdminSetup = async ({ input }: { input: ActivationContext }): Promise<any> => {
     const ips: IPS.Messages = input.ips
     const { clientId, certChainPfx } = input
     const password = await this.getPassword(input)
-    const { hashAlgorithm, signingAlgorithm } = resolveProvisioningSignature(
-      certChainPfx.hashAlgorithm,
-      devices[clientId]?.ClientData?.payload?.weakAlgorithmsRemoved
-    )
+    const { hashAlgorithm, signingAlgorithm } = resolveProvisioningSignature(certChainPfx.hashAlgorithm)
     this.createSignedString(clientId, hashAlgorithm)
     const clientObj = devices[clientId]
     if (clientObj.nonce != null && clientObj.signature != null) {
+      this.logProvisioningSignature('AdminSetup', certChainPfx.hashAlgorithm, { hashAlgorithm, signingAlgorithm })
       input.xmlMessage = ips.HostBasedSetupService.AdminSetup(
         2,
         password,
@@ -361,13 +374,14 @@ export class Activation {
   sendUpgradeClientToAdmin = async ({ input }: { input: ActivationContext }): Promise<any> => {
     const ips: IPS.Messages = input.ips
     const { clientId, certChainPfx } = input
-    const { hashAlgorithm, signingAlgorithm } = resolveProvisioningSignature(
-      certChainPfx.hashAlgorithm,
-      devices[clientId]?.ClientData?.payload?.weakAlgorithmsRemoved
-    )
+    const { hashAlgorithm, signingAlgorithm } = resolveProvisioningSignature(certChainPfx.hashAlgorithm)
     this.createSignedString(clientId, hashAlgorithm)
     const clientObj = devices[clientId]
     if (clientObj.nonce != null && clientObj.signature != null) {
+      this.logProvisioningSignature('UpgradeClientToAdmin', certChainPfx.hashAlgorithm, {
+        hashAlgorithm,
+        signingAlgorithm
+      })
       input.xmlMessage = ips.HostBasedSetupService.UpgradeClientToAdmin(
         clientObj.nonce.toString('base64'),
         signingAlgorithm,

@@ -39,25 +39,21 @@ export interface ECCDeviceKeyPair {
  * The algorithm and the length are not independent — the firmware supports
  * exactly two pairs. Keeping them in one union means a cross-pair such as
  * RSA-384 or ECC-2048 cannot be written down, let alone sent, which mirrors
- * `AMT.Models.GenerateKeyPairRequest` in wsman-messages.
+ * `AMT.Models.GenerateKeyPairParameters` in wsman-messages.
  */
 export type DeviceKeyPairParameters = RSADeviceKeyPair | ECCDeviceKeyPair
 
 /**
  * Translate a policy's device key pair into the wsman-messages request object.
  *
- * `AMT.Models.GenerateKeyPairRequest` is the union of the two valid
+ * `AMT.Models.GenerateKeyPairParameters` is the union of the two valid
  * pairs, so this cannot be written as a field-by-field copy — destructuring
  * `{ keyAlgorithm, keyLength }` widens each field back to `0 | 1` and
  * `384 | 2048` independently and the result no longer matches either member.
  * Branching on the algorithm keeps the two halves tied together.
  */
-export function toGenerateKeyPairRequest(
-  deviceKeyPair: DeviceKeyPairParameters
-): AMT.Models.GenerateKeyPairRequest {
-  return deviceKeyPair.keyAlgorithm === 1
-    ? { KeyAlgorithm: 1, KeyLength: 384 }
-    : { KeyAlgorithm: 0, KeyLength: 2048 }
+export function toGenerateKeyPairRequest(deviceKeyPair: DeviceKeyPairParameters): AMT.Models.GenerateKeyPairParameters {
+  return deviceKeyPair.keyAlgorithm === 1 ? { KeyAlgorithm: 1, KeyLength: 384 } : { KeyAlgorithm: 0, KeyLength: 2048 }
 }
 
 export interface AMTCertificatePolicy {
@@ -172,35 +168,28 @@ export interface ProvisioningSignatureParameters {
  * Digest and SigningAlgorithm for IPS_HostBasedSetupService AdminSetup /
  * UpgradeClientToAdmin.
  *
- * SHA-384 is used when the certificate offers it *and* the firmware has reported
- * the hardening. The two returned values must agree with each other — the
- * firmware recomputes the digest named by SigningAlgorithm and checks it against
- * the signature RPS produced, so deriving them separately risks sending a
- * SHA-384 signature labelled 2, or the reverse.
+ * The nonce is signed with the digest the provisioning certificate offers, and
+ * the label follows the digest: SHA-384 -> 3, anything else -> 2. The two
+ * returned values must agree with each other, because the firmware recomputes
+ * the digest named by SigningAlgorithm and checks it against the signature RPS
+ * produced.
  *
- * Neither input alone is sufficient. Deriving purely from the certificate sent
- * SigningAlgorithm 3 to an AMT 20.0.5 device and got ReturnValue 3
- * (PT_STATUS_INVALID_PT_MODE) back; deriving purely from the firmware ignores
- * what the certificate actually offers.
+ * Which certificates are acceptable is decided by the policy, not here:
+ * hardened firmware accepts only a SHA-384 certificate (createSignedString
+ * rejects SHA-256 and names the digest), unhardened firmware accepts either.
  *
- * Nor can this collapse back to a hardcoded 2. Forcing SigningAlgorithm 2 with a
- * SHA-256 nonce signature on an AMT 22.0.0 device returned ReturnValue 1 from
- * UpgradeClientToAdmin and the activation fell back to Unprovision (verified
- * 2026-09-24), where 3 with the same SHA-384 provisioning certificate returns 0.
- * AMT 22 does not merely accept 3 — it requires it.
- *
- * Firmware that has not reported the hardening is signed with SHA-256 even when
- * the certificate is SHA-384. That includes AMT 21, which can verify SHA-384 but
- * does not require it; the nonce digest is independent of the digest the
- * certificate itself was signed with, so nothing is lost.
+ * Unhardened firmware is no longer pinned to SigningAlgorithm 2. That is
+ * deliberate, to measure SHA-384 across AMT 12 and later. It is known to fail
+ * on at least one generation: an AMT 20.0.5 device rejected UpgradeClientToAdmin
+ * with ReturnValue 3 (PT_STATUS_INVALID_PT_MODE) for SigningAlgorithm 3, where
+ * AMT 21.0.6 and AMT 22.0.0 returned 0.
  */
 export function resolveProvisioningSignature(
-  certHashAlgorithm: string | null | undefined,
-  weakAlgorithmsRemoved?: boolean
+  certHashAlgorithm: string | null | undefined
 ): ProvisioningSignatureParameters {
-  const certIsSha384 = certHashAlgorithm?.toLowerCase() === 'sha384'
-  const useSha384 = certIsSha384 && weakAlgorithmsRemoved === true
-  return useSha384 ? { hashAlgorithm: 'sha384', signingAlgorithm: 3 } : { hashAlgorithm: 'sha256', signingAlgorithm: 2 }
+  return certHashAlgorithm?.toLowerCase() === 'sha384'
+    ? { hashAlgorithm: 'sha384', signingAlgorithm: 3 }
+    : { hashAlgorithm: 'sha256', signingAlgorithm: 2 }
 }
 
 /*
@@ -230,8 +219,8 @@ export type DeviceKeyPairRejectsCrossPairs = [
 
 /** The same guarantee for the wsman-messages request type this module maps onto. */
 export type GenerateKeyPairRequestRejectsCrossPairs = [
-  Assert<Rejects<AMT.Models.GenerateKeyPairRequest, { KeyAlgorithm: 0; KeyLength: 384 }>>,
-  Assert<Rejects<AMT.Models.GenerateKeyPairRequest, { KeyAlgorithm: 1; KeyLength: 2048 }>>,
-  Assert<Accepts<AMT.Models.GenerateKeyPairRequest, { KeyAlgorithm: 0; KeyLength: 2048 }>>,
-  Assert<Accepts<AMT.Models.GenerateKeyPairRequest, { KeyAlgorithm: 1; KeyLength: 384 }>>
+  Assert<Rejects<AMT.Models.GenerateKeyPairParameters, { KeyAlgorithm: 0; KeyLength: 384 }>>,
+  Assert<Rejects<AMT.Models.GenerateKeyPairParameters, { KeyAlgorithm: 1; KeyLength: 2048 }>>,
+  Assert<Accepts<AMT.Models.GenerateKeyPairParameters, { KeyAlgorithm: 0; KeyLength: 2048 }>>,
+  Assert<Accepts<AMT.Models.GenerateKeyPairParameters, { KeyAlgorithm: 1; KeyLength: 384 }>>
 ]

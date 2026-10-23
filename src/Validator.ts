@@ -93,7 +93,7 @@ export class Validator implements IValidator {
       )
     } else {
       this.logger.info(
-        `Device ${payload.uuid} did not report weakAlgorithmsRemoved - crypto policy will be inferred from AMT version ${payload.ver}`
+        `Device ${payload.uuid} did not report weakAlgorithmsRemoved - legacy crypto policy will be used (AMT version ${payload.ver})`
       )
     }
     // Check for client requested action and profile activation

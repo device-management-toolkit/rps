@@ -436,6 +436,22 @@ describe('Activation State Machine', () => {
       expect(clientObj.signature).toBeUndefined()
       expect(signStringSpy).not.toHaveBeenCalled()
     })
+    it('should accept a SHA384 provisioning certificate on hardened firmware', () => {
+      const clientObj: any = devices[clientId]
+      clientObj.ClientData.payload.weakAlgorithmsRemoved = true
+      clientObj.ClientData.payload.fwNonce = PasswordHelper.generateNonce()
+
+      expect(activation.createSignedString(clientId, 'sha384')).toBe(true)
+      expect(signStringSpy).toHaveBeenCalledWith(expect.any(Buffer), clientObj.certObj.privateKey, 'sha384')
+    })
+    it('should accept both SHA256 and SHA384 provisioning certificates on unhardened firmware', () => {
+      const clientObj: any = devices[clientId]
+      clientObj.ClientData.payload.weakAlgorithmsRemoved = false
+      clientObj.ClientData.payload.fwNonce = PasswordHelper.generateNonce()
+
+      expect(activation.createSignedString(clientId, 'sha256')).toBe(true)
+      expect(activation.createSignedString(clientId, 'sha384')).toBe(true)
+    })
     it('should throw error message when certificate is invalid', () => {
       signStringSpy = vi.spyOn(activation.signatureHelper, 'signString').mockImplementation(() => {
         throw new Error('Unable to create Digital Signature')
@@ -540,10 +556,9 @@ describe('Activation State Machine', () => {
       expect(upgradeSpy.mock.calls[0][1]).toBe(3)
       expect(invokeWsmanCallSpy).toHaveBeenCalledWith(context, 0, undefined, true)
     })
-    it('should downgrade to SigningAlgorithm 2 on firmware that cannot verify sha384', async () => {
-      // AMT 20.0.5 rejected UpgradeClientToAdmin with ReturnValue 3
-      // (PT_STATUS_INVALID_PT_MODE) when sent SigningAlgorithm 3 for a SHA-384
-      // provisioning cert that AMT 21.0.6 accepted.
+    it('should sign with sha384 / SigningAlgorithm 3 on unhardened firmware given a sha384 certificate', async () => {
+      // Unhardened firmware accepts either digest, so the nonce follows the certificate.
+      // (AMT 20.0.5 is known to reject SigningAlgorithm 3; this path exists to measure that.)
       const createSignedStringSpy = vi
         .spyOn(activation, 'createSignedString')
         .mockImplementation((clientId: string): boolean => {
@@ -559,9 +574,13 @@ describe('Activation State Machine', () => {
           ], privateKey:
             null }, fingerprint: { sha256: '82f2ed575db4abe462499cf550dbff9584980d70a0272894639c3653b9ad932c', sha384: 'bb00173b0fb55bc1b24fff5a32a02d210d2bbe16dc6ba4f8300729c1d545313a66930bcd1bcf9ed5a76e82ce602ef04a', sha1: '47d7b7db23f3e300189f54802482b1bd18b945ef' }, hashAlgorithm: 'sha384' }
       const upgradeSpy = vi.spyOn(context.ips.HostBasedSetupService, 'UpgradeClientToAdmin')
+      const infoSpy = vi.spyOn(activation.logger, 'info')
       await activation.sendUpgradeClientToAdmin({ input: context })
-      expect(createSignedStringSpy).toHaveBeenCalledWith(clientId, 'sha256')
-      expect(upgradeSpy.mock.calls[0][1]).toBe(2)
+      expect(createSignedStringSpy).toHaveBeenCalledWith(clientId, 'sha384')
+      expect(upgradeSpy.mock.calls[0][1]).toBe(3)
+      expect(infoSpy).toHaveBeenCalledWith(
+        'Provisioning signature (UpgradeClientToAdmin): certificateDigest=sha384 nonceDigest=sha384 SigningAlgorithm=3'
+      )
     })
     it('should send WSMan to change AMT password', async () => {
       await activation.changeAMTPassword({ input: context })
