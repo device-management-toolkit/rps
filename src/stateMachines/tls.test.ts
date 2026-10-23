@@ -74,6 +74,7 @@ describe('TLS State Machine', () => {
     devices[clientId] = {
       status: {},
       hostname: 'WinDev2211Eval',
+      ClientData: { payload: { lmsInstalled: true } },
       ClientSocket: { send: vi.fn() },
       tls: {}
     } as any
@@ -97,7 +98,6 @@ describe('TLS State Machine', () => {
 
     config = {
       actors: {
-        timeSync: fromPromise(async ({ input }) => await Promise.resolve({})),
         errorMachine: fromPromise(async ({ input }) => await Promise.resolve({})),
         enumeratePublicKeyCertificate: fromPromise(async ({ input }) => await Promise.resolve({})),
         pullPublicKeyCertificate: fromPromise(
@@ -173,7 +173,6 @@ describe('TLS State Machine', () => {
         'ENUMERATE_TLS_CREDENTIAL_CONTEXT',
         'PULL_TLS_CREDENTIAL_CONTEXT',
         'CREATE_TLS_CREDENTIAL_CONTEXT',
-        'SYNC_TIME',
         'ENUMERATE_TLS_DATA',
         'PULL_TLS_DATA',
         'PUT_REMOTE_TLS_DATA',
@@ -242,7 +241,6 @@ describe('TLS State Machine', () => {
         'ENUMERATE_TLS_CREDENTIAL_CONTEXT',
         'PULL_TLS_CREDENTIAL_CONTEXT',
         'PUT_TLS_CREDENTIAL_CONTEXT',
-        'SYNC_TIME',
         'ENUMERATE_TLS_DATA',
         'PULL_TLS_DATA',
         'PUT_REMOTE_TLS_DATA',
@@ -601,7 +599,6 @@ describe('TLS State Machine', () => {
         'ENUMERATE_TLS_CREDENTIAL_CONTEXT',
         'PULL_TLS_CREDENTIAL_CONTEXT',
         'CREATE_TLS_CREDENTIAL_CONTEXT',
-        'SYNC_TIME',
         'ENUMERATE_TLS_DATA',
         'PULL_TLS_DATA',
         'PUT_REMOTE_TLS_DATA',

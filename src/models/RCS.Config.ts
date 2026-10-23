@@ -285,6 +285,7 @@ export interface Payload {
    * policy. `undefined` means the agent predates the field, not "no".
    */
   weakAlgorithmsRemoved?: boolean
+  lmsInstalled?: boolean
 }
 
 export interface ConnectionObject {

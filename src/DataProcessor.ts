@@ -203,7 +203,7 @@ export class DataProcessor {
         mEvent = { type: SyncDeviceInfoEventType, clientId, deviceInfo: payload }
         break
       case 'synctime':
-        mEvent = { type: SyncTimeEventType, clientId }
+        mEvent = { type: SyncTimeEventType, clientId, lmsAvailable: payload.lmsInstalled === true }
         break
       case 'syncip':
         if (!payload.ipConfiguration) {

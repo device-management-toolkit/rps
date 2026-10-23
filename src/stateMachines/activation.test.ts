@@ -78,6 +78,11 @@ const { TLSTunnelManager } = await import('../TLSTunnelManager.js')
 
 vi.mock('got')
 const clientId = randomUUID()
+const timeSyncInputSpy = vi.fn()
+const timeSyncActorMock = fromPromise(async ({ input }) => {
+  timeSyncInputSpy((input as { lmsInstalled?: boolean }).lmsInstalled)
+  return { status: 'success' }
+})
 Environment.Config = config
 describe('Activation State Machine', () => {
   let activation: ActivationType
@@ -125,7 +130,8 @@ describe('Activation State Machine', () => {
           digestRealm: 'Digest:A3829B3827DE4D33D4449B366831FD01',
           action: ClientAction.ADMINCTLMODE,
           ipConfiguration: { ipAddress: '' },
-          hostnameInfo: { dnsSuffixOS: '' }
+          hostnameInfo: { dnsSuffixOS: '' },
+          lmsInstalled: true
         }
       },
       ciraconfig: {},
@@ -303,6 +309,7 @@ describe('Activation State Machine', () => {
           clientObj.tls.issuedCertPEM = 'mock-issued-cert-pem'
           return await Promise.resolve({ clientId, status: 'success' })
         }),
+        timeSync: timeSyncActorMock,
         cira: fromPromise(async ({ input }) => await Promise.resolve({ clientId })),
         setMEBxPassword: fromPromise(async ({ input }) => await Promise.resolve({ clientId })),
         initializeTLSTunnel: fromPromise(async () => await Promise.resolve(true)),
@@ -1044,6 +1051,7 @@ describe('Activation State Machine', () => {
           'UNCONFIGURATION',
           'NETWORK_CONFIGURATION',
           'FEATURES_CONFIGURATION',
+          'SYNC_ACTIVATION_TIME',
           'PROVISIONED'
         ]
         const ccmActivationService = createActor(mockActivationMachine, { input: context })
@@ -1058,6 +1066,7 @@ describe('Activation State Machine', () => {
             expect(sendProgressToDeviceSpy).toHaveBeenCalledWith(clientId, 'Clearing previous configuration')
             expect(sendProgressToDeviceSpy).toHaveBeenCalledWith(clientId, 'Configuring network settings')
             expect(sendProgressToDeviceSpy).toHaveBeenCalledWith(clientId, 'Configuring AMT features')
+            expect(timeSyncInputSpy).toHaveBeenCalledWith(true)
             resolve()
           }
         })
@@ -1103,6 +1112,7 @@ describe('Activation State Machine', () => {
           'UNCONFIGURATION',
           'NETWORK_CONFIGURATION',
           'FEATURES_CONFIGURATION',
+          'SYNC_ACTIVATION_TIME',
           'PROVISIONED'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
@@ -1162,6 +1172,7 @@ describe('Activation State Machine', () => {
           'NETWORK_CONFIGURATION',
           'FEATURES_CONFIGURATION',
           'CIRA',
+          'SYNC_ACTIVATION_TIME',
           'PROVISIONED'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
@@ -1365,6 +1376,7 @@ describe('Activation State Machine', () => {
           'NETWORK_CONFIGURATION',
           'FEATURES_CONFIGURATION',
           'CIRA',
+          'SYNC_ACTIVATION_TIME',
           'PROVISIONED'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
@@ -1732,6 +1744,7 @@ describe('Activation State Machine', () => {
           'NETWORK_CONFIGURATION',
           'FEATURES_CONFIGURATION',
           'CIRA',
+          'SYNC_ACTIVATION_TIME',
           'PROVISIONED'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
@@ -1892,6 +1905,7 @@ describe('Activation State Machine', () => {
           'NETWORK_CONFIGURATION',
           'FEATURES_CONFIGURATION',
           'CIRA',
+          'SYNC_ACTIVATION_TIME',
           'PROVISIONED'
         ]
 
@@ -2201,6 +2215,7 @@ describe('Activation State Machine', () => {
           'NETWORK_CONFIGURATION',
           'FEATURES_CONFIGURATION',
           'CIRA',
+          'SYNC_ACTIVATION_TIME',
           'PROVISIONED'
         ]
 
@@ -2267,6 +2282,7 @@ describe('Activation State Machine', () => {
           'NETWORK_CONFIGURATION',
           'FEATURES_CONFIGURATION',
           'CIRA',
+          'SYNC_ACTIVATION_TIME',
           'PROVISIONED'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
@@ -2538,6 +2554,7 @@ describe('Activation State Machine', () => {
           'FETCH_POST_PROVISIONING_ROOT_KEY',
           'TLS',
           'SAVE_POST_PROVISIONING_CERTS',
+          'SYNC_ACTIVATION_TIME',
           'PROVISIONED'
         ]
         const ccmActivationService = createActor(mockActivationMachine, { input: context })
@@ -2593,6 +2610,7 @@ describe('Activation State Machine', () => {
           'UNCONFIGURATION',
           'NETWORK_CONFIGURATION',
           'FEATURES_CONFIGURATION',
+          'SYNC_ACTIVATION_TIME',
           'PROVISIONED'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
@@ -2668,11 +2686,20 @@ describe('Activation State Machine', () => {
       // AMT <19 with --tls-tunnel (TLS enforced): isTLSEnforced → PROVISIONED
       const tlsEnforcedGuard = onDone.find((t: any) => t.guard === 'isTLSEnforced')
       expect(tlsEnforcedGuard).toBeDefined()
-      expect(tlsEnforcedGuard.target).toBe('PROVISIONED')
+      expect(tlsEnforcedGuard.target).toBe('SYNC_ACTIVATION_TIME')
 
       // Default (AMT <19 without --tls-tunnel): → PROVISIONED
       const defaultTransition = onDone[onDone.length - 1]
-      expect(defaultTransition.target).toBe('PROVISIONED')
+      expect(defaultTransition.target).toBe('SYNC_ACTIVATION_TIME')
+    })
+
+    it('should route time-sync failures to FAILED instead of PROVISIONED', () => {
+      const states = activation.machine.config.states as any
+      const onDone = states.SYNC_ACTIVATION_TIME.invoke.onDone
+
+      expect(onDone[0].guard({ event: { output: { status: 'success' } } })).toBe(true)
+      expect(onDone[0].target).toBe('PROVISIONED')
+      expect(onDone[1].target).toBe('FAILED')
     })
 
     it('should reach PROVISIONED for AMT <19 without --tls-tunnel and skip TLS entirely', () =>
@@ -2726,6 +2753,7 @@ describe('Activation State Machine', () => {
           'UNCONFIGURATION',
           'NETWORK_CONFIGURATION',
           'FEATURES_CONFIGURATION',
+          'SYNC_ACTIVATION_TIME',
           'PROVISIONED'
         ]
         const service = createActor(mockActivationMachine, { input: context })
