@@ -381,11 +381,13 @@ describe('TLS State Machine', () => {
   it.each([
     // The SDK allows exactly two key pairs: KeyAlgorithm 0 / RSA-2048 and
     // KeyAlgorithm 1 / ECC-384. Any other size returns 2066 PT_STATUS_UNSUPPORTED.
-    // The device's AMT version is not consulted - only what the firmware reported.
+    // What the firmware reported wins; the AMT version is consulted only when nothing was reported.
     { ver: '21.0.6', weakAlgorithmsRemoved: false, expected: { KeyAlgorithm: 0, KeyLength: 2048 } },
     { ver: '22.0.0', weakAlgorithmsRemoved: true, expected: { KeyAlgorithm: 1, KeyLength: 384 } },
     { ver: '16.1.25', weakAlgorithmsRemoved: true, expected: { KeyAlgorithm: 1, KeyLength: 384 } },
-    { ver: '22.0.0', weakAlgorithmsRemoved: undefined, expected: { KeyAlgorithm: 0, KeyLength: 2048 } }
+    { ver: '22.0.0', weakAlgorithmsRemoved: false, expected: { KeyAlgorithm: 0, KeyLength: 2048 } },
+    { ver: '22.0.0', weakAlgorithmsRemoved: undefined, expected: { KeyAlgorithm: 1, KeyLength: 384 } },
+    { ver: '21.0.6', weakAlgorithmsRemoved: undefined, expected: { KeyAlgorithm: 0, KeyLength: 2048 } }
   ])(
     'should ask AMT $ver reporting weakAlgorithmsRemoved=$weakAlgorithmsRemoved for the key pair its firmware binds',
     async ({ ver, weakAlgorithmsRemoved, expected }) => {

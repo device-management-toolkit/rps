@@ -29,35 +29,32 @@ const HARDENED = {
 
 describe('getAMTCertificatePolicy', () => {
   // rpc-go reads bit 4 of STATE_INDEPENDENCE_IsChangeToAMTEnabled and forwards it
-  // in the activation payload. It is the only input — the AMT version is an
-  // inference about the firmware, and the firmware reports the same thing itself.
+  // in the activation payload. A reported value is authoritative; the version is
+  // only consulted when nothing was reported.
   it.each([
-    { weakAlgorithmsRemoved: true, expected: HARDENED },
-    { weakAlgorithmsRemoved: false, expected: LEGACY },
-    { weakAlgorithmsRemoved: undefined, expected: LEGACY }
+    { weakAlgorithmsRemoved: true, version: '21.0.6', expected: HARDENED },
+    { weakAlgorithmsRemoved: true, version: undefined, expected: HARDENED },
+    { weakAlgorithmsRemoved: false, version: '22.0.0', expected: LEGACY },
+    { weakAlgorithmsRemoved: false, version: '21.0.6', expected: LEGACY },
+    { weakAlgorithmsRemoved: undefined, version: '22.0.0', expected: HARDENED },
+    { weakAlgorithmsRemoved: undefined, version: '23.1.0', expected: HARDENED },
+    { weakAlgorithmsRemoved: undefined, version: '21.0.6', expected: LEGACY },
+    { weakAlgorithmsRemoved: undefined, version: '12.0.95', expected: LEGACY },
+    { weakAlgorithmsRemoved: undefined, version: 'not-a-version', expected: LEGACY },
+    { weakAlgorithmsRemoved: undefined, version: undefined, expected: LEGACY }
   ])(
-    'weakAlgorithmsRemoved=$weakAlgorithmsRemoved selects the matching policy',
-    ({ weakAlgorithmsRemoved, expected }) => {
-      expect(getAMTCertificatePolicy(weakAlgorithmsRemoved)).toEqual(expected)
+    'weakAlgorithmsRemoved=$weakAlgorithmsRemoved version=$version selects the matching policy',
+    ({ weakAlgorithmsRemoved, version, expected }) => {
+      expect(getAMTCertificatePolicy(weakAlgorithmsRemoved, version)).toEqual(expected)
     }
   )
 
-  it('treats a missing report as the legacy policy, not as a cue to guess', () => {
-    // An rpc-go predating the field sends undefined. That is the legacy policy
-    // by decision: inferring `>= 22` from the version here would reintroduce the
-    // version keying this design removes, on the path where it is least visible.
-    // The cost is a rollout order — rpc-go ships before, or with, RPS.
-    expect(getAMTCertificatePolicy(undefined)).toEqual(LEGACY)
+  it('falls back to the version only when nothing is reported', () => {
+    // An explicit false from a current rpc-go must not be overridden by a
+    // version guess; only an absent field (older rpc-go) uses the version.
+    expect(getAMTCertificatePolicy(false, '22.0.0')).toEqual(LEGACY)
+    expect(getAMTCertificatePolicy(undefined, '22.0.0')).toEqual(HARDENED)
     expect(getAMTCertificatePolicy()).toEqual(LEGACY)
-  })
-
-  it('honours the report whatever generation the device is', () => {
-    // The hardening can reach an older platform through a firmware update, and
-    // when it does the AMT version is the one thing that does not move. Nothing
-    // in the resolver may cap the capability by version — there is no version
-    // parameter to cap it with.
-    expect(getAMTCertificatePolicy.length).toBe(1)
-    expect(getAMTCertificatePolicy(true)).toEqual(HARDENED)
   })
 
   it('never asks the firmware for an RSA size other than 2048', () => {
@@ -164,7 +161,11 @@ describe('resolveProvisioningSignature', () => {
   it('never labels the signature with a digest it was not made with', () => {
     // The firmware recomputes the digest named by SigningAlgorithm, so the two
     // halves have to be resolved together rather than derived independently.
-    for (const certHashAlgorithm of ['sha256', 'sha384', undefined]) {
+    for (const certHashAlgorithm of [
+      'sha256',
+      'sha384',
+      undefined
+    ]) {
       const { hashAlgorithm, signingAlgorithm } = resolveProvisioningSignature(certHashAlgorithm)
       expect(signingAlgorithm).toBe(hashAlgorithm === 'sha384' ? 3 : 2)
     }

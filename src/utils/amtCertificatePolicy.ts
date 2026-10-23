@@ -139,21 +139,33 @@ const HARDENED_CRYPTO_POLICY: AMTCertificatePolicy = {
  *
  * `weakAlgorithmsRemoved` is the firmware's own answer, read by rpc-go from bit
  * 4 of the STATE_INDEPENDENCE_IsChangeToAMTEnabled response and forwarded in the
- * activation payload. It is the only input: the AMT version is an inference
- * about what the firmware will accept, and the firmware reports the same thing
- * directly.
+ * activation payload. It is the primary input: the AMT version is only an
+ * inference about what the firmware will accept, and the firmware reports the
+ * same thing directly.
  *
  * A reported `true` is honoured whatever the device's AMT version. The hardening
  * can reach an older platform through a firmware update, and when it does the
  * version is the one thing that does not move.
  *
- * An absent field — what an rpc-go predating it sends — is the legacy policy,
- * not a cue to guess from the version. The cost is a rollout order: rpc-go ships
- * before, or with, RPS, because an AMT 22 device on an older agent will take the
- * legacy policy and fail the `Put AMT_TLSCredentialContext` bind.
+ * An absent field — what an rpc-go predating it sends, or one that could not
+ * read the capability — falls back to the AMT version: major 22 or later is
+ * treated as hardened, everything else as legacy. AMT 22 is the first
+ * generation to report the hardening, and without this an AMT 22 device on an
+ * older agent takes the legacy policy and fails the
+ * `Put AMT_TLSCredentialContext` bind with a bare HTTP 500. The fallback applies
+ * only when nothing is reported: an explicit `false` is never overridden.
  */
-export function getAMTCertificatePolicy(weakAlgorithmsRemoved?: boolean): AMTCertificatePolicy {
-  return weakAlgorithmsRemoved === true ? HARDENED_CRYPTO_POLICY : LEGACY_CRYPTO_POLICY
+export function getAMTCertificatePolicy(weakAlgorithmsRemoved?: boolean, version?: unknown): AMTCertificatePolicy {
+  const hardened = weakAlgorithmsRemoved ?? isHardenedByVersion(version)
+  return hardened ? HARDENED_CRYPTO_POLICY : LEGACY_CRYPTO_POLICY
+}
+
+/** AMT 22 is the first generation to ship hardened firmware. */
+function isHardenedByVersion(version: unknown): boolean {
+  if (typeof version !== 'string' || !/^\d+(?:\.\d+)*$/.test(version.trim())) {
+    return false
+  }
+  return Number.parseInt(version, 10) >= 22
 }
 
 /** Digest and `SigningAlgorithm` to use for one host-based provisioning signature. */

@@ -113,7 +113,10 @@ export class TLS {
       }
       // Use the MPS root key or pre-stored root key if available,
       // otherwise create a new root cert (backwards compatibility)
-      const policy = getAMTCertificatePolicy(clientObj.ClientData?.payload?.weakAlgorithmsRemoved)
+      const policy = getAMTCertificatePolicy(
+        clientObj.ClientData?.payload?.weakAlgorithmsRemoved,
+        clientObj.ClientData?.payload?.ver
+      )
       let rootKey: any
       if (clientObj.tls?.rootCertKey) {
         rootKey = clientObj.tls.rootCertKey
@@ -160,7 +163,7 @@ export class TLS {
   generateKeyPair = async ({ input }: { input: TLSContext }): Promise<any> => {
     const amtVersion = devices[input.clientId].ClientData?.payload?.ver
     const weakAlgorithmsRemoved = devices[input.clientId].ClientData?.payload?.weakAlgorithmsRemoved
-    const policy = getAMTCertificatePolicy(weakAlgorithmsRemoved)
+    const policy = getAMTCertificatePolicy(weakAlgorithmsRemoved, amtVersion)
     const keyPair = toGenerateKeyPairRequest(policy.deviceKeyPair)
     this.logger.debug(
       `AMT certificate policy: version=${amtVersion ?? 'unknown'} ` +

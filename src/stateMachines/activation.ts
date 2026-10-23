@@ -201,7 +201,7 @@ export class Activation {
     const clientObj = devices[clientId]
     const amtVersion = clientObj.ClientData?.payload?.ver
     const weakAlgorithmsRemoved = clientObj.ClientData?.payload?.weakAlgorithmsRemoved
-    const policy = getAMTCertificatePolicy(weakAlgorithmsRemoved)
+    const policy = getAMTCertificatePolicy(weakAlgorithmsRemoved, amtVersion)
     const signingHashAlgorithm = hashAlgorithm?.toLowerCase()
     clientObj.signature = undefined
 
