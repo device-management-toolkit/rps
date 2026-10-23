@@ -11,6 +11,11 @@ const ipv6 =
   '^((?:[0-9A-Fa-f]{1,4}))((?::[0-9A-Fa-f]{1,4}))*::((?:[0-9A-Fa-f]{1,4}))((?::[0-9A-Fa-f]{1,4}))*|((?:[0-9A-Fa-f]{1,4}))((?::[0-9A-Fa-f]{1,4})){7}$'
 const fqdn = '^(?=.{1,254}$)((?=[a-z0-9-]{1,63}\\.)(xn--+)?[a-z0-9]+(-[a-z0-9]+)*\\.)+[a-z]{2,63}$'
 
+const MPS_PORT_ERROR = 'MPS Port value should range between 1024 and 49151'
+
+/** The CIRA (MPS) port may be 80 or any registered port from 1024 to 49151. */
+const isAllowedMpsPort = (port: number): boolean => port === 80 || (port >= 1024 && port <= 49151)
+
 export const ciraInsertValidator = (): any => [
   check('configName')
     .not()
@@ -42,8 +47,8 @@ export const ciraInsertValidator = (): any => [
     .not()
     .isEmpty()
     .withMessage('MPS port is required')
-    .isInt({ min: 1024, max: 49151 })
-    .withMessage('MPS Port value should range between 1024 and 49151'),
+    .custom((value) => Number.isInteger(Number(value)) && isAllowedMpsPort(Number(value)))
+    .withMessage(MPS_PORT_ERROR),
   check('username')
     .not()
     .isEmpty()
@@ -101,8 +106,8 @@ export const ciraUpdateValidator = (): any => [
   check('mpsPort')
     .optional()
     .custom((value, { req }) => {
-      if (typeof value !== 'number' || value <= 1024 || value >= 49151) {
-        throw new Error('MPS Port value should range between 1024 and 49151')
+      if (typeof value !== 'number' || !Number.isInteger(value) || !isAllowedMpsPort(value)) {
+        throw new Error(MPS_PORT_ERROR)
       }
       return true
     }),
