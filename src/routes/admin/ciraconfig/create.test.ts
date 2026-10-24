@@ -34,6 +34,16 @@ describe('CIRA Config - Create', () => {
     expect(insertSpy).toHaveBeenCalledTimes(1)
     expect(resSpy.status).toHaveBeenCalledWith(201)
   })
+  it('should write the MPS password under the request tenant', async () => {
+    req.tenantId = 'tenant-a'
+    req.body = { configName: 'cira1', password: 'P@ssw0rd' }
+    req.secretsManager = { writeSecretWithObject: vi.fn().mockResolvedValue({}) }
+    await createCiraConfig(req, resSpy)
+    expect(req.secretsManager.writeSecretWithObject).toHaveBeenCalledWith('tenants/tenant-a/CIRAConfigs/cira1', {
+      MPS_PASSWORD: 'P@ssw0rd'
+    })
+    expect(resSpy.status).toHaveBeenCalledWith(201)
+  })
   it('should handle error', async () => {
     vi.spyOn(req.db.ciraConfigs, 'insert').mockRejectedValue(null)
     await createCiraConfig(req, resSpy)

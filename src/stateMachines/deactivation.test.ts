@@ -272,6 +272,14 @@ describe('Deactivation State Machine', () => {
       deactivationService.send({ type: 'UNPROVISION', clientId, tenantId, output: null, error: null })
     }))
 
+  it('should delete the device secret from the tenant-scoped path', async () => {
+    await deactivation.configurator.ready
+    const deleteSecretSpy = vi
+      .spyOn(deactivation.configurator.secretsManager, 'deleteSecretAtPath')
+      .mockResolvedValue(true)
+    await deactivation.removeDeviceFromSecretProvider({ input: { ...deactivationContext, tenantId: 'tenant-a' } })
+    expect(deleteSecretSpy).toHaveBeenCalledWith(`tenants/tenant-a/devices/${clientId}`)
+  })
   it('should invoke unprovision and return promise', async () => {
     await deactivation.invokeUnprovision({ input: deactivationContext })
     expect(setupAndConfigurationServiceSpy).toHaveBeenCalled()

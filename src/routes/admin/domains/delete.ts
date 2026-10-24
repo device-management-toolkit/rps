@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { domainCertSecretPath } from '../../../utils/secretPaths.js'
+
 import { NOT_FOUND_EXCEPTION, NOT_FOUND_MESSAGE } from '../../../utils/constants.js'
 import { type AMTDomain } from '../../../models/index.js'
 import Logger from '../../../Logger.js'
@@ -22,7 +24,7 @@ export async function deleteDomain(req: Request, res: Response): Promise<void> {
       const results = await req.db.domains.delete(domainName, req.tenantId)
       if (results) {
         if (req.secretsManager) {
-          await req.secretsManager.deleteSecretAtPath(`certs/${domain.profileName}`)
+          await req.secretsManager.deleteSecretAtPath(domainCertSecretPath(domain.profileName, req.tenantId))
         }
         MqttProvider.publishEvent('success', ['deleteDomain'], `Domain Deleted : ${domainName}`)
         res.status(204).end()

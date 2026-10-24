@@ -38,6 +38,13 @@ describe('Wireless - Create', () => {
     expect(insertSpy).toHaveBeenCalledTimes(1)
     expect(resSpy.status).toHaveBeenCalledWith(201)
   })
+  it('should write the passphrase under the request tenant', async () => {
+    req.tenantId = 'tenant-a'
+    req.body = { profileName: 'wifi1', ieee8021xProfileName: null, pskPassphrase: 'passPhrase' }
+    await createWirelessProfile(req, resSpy)
+    expect(writeSpy).toHaveBeenCalledWith('tenants/tenant-a/Wireless/wifi1', { PSK_PASSPHRASE: 'passPhrase' })
+    expect(resSpy.status).toHaveBeenCalledWith(201)
+  })
   it('should create 8021x', async () => {
     req.body = { ieee8021xProfileName: '8021x', pskPassphrase: null }
     await createWirelessProfile(req, resSpy)

@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { ciraConfigSecretPath, deviceSecretPath } from '../utils/secretPaths.js'
+
 import { type AMT } from '@device-management-toolkit/wsman-messages'
 import { assign, fromPromise, setup } from 'xstate'
 import { CertManager } from '../certManager.js'
@@ -75,18 +77,25 @@ export class CIRAConfiguration {
     if (clientObj.tls?.issuedCertPEM) {
       secretData.TLS_ISSUED_CERTIFICATE = clientObj.tls.issuedCertPEM
     } else {
-      const existing: any = await this.configurator.secretsManager.getSecretAtPath(`devices/${clientObj.uuid}`)
+      const existing: any = await this.configurator.secretsManager.getSecretAtPath(
+        deviceSecretPath(clientObj.uuid, input.tenantId)
+      )
       if (existing?.TLS_ISSUED_CERTIFICATE) {
         secretData.TLS_ISSUED_CERTIFICATE = existing.TLS_ISSUED_CERTIFICATE
       }
     }
 
-    const data = await this.configurator.secretsManager.writeSecretWithObject(`devices/${clientObj.uuid}`, secretData)
+    const data = await this.configurator.secretsManager.writeSecretWithObject(
+      deviceSecretPath(clientObj.uuid, input.tenantId),
+      secretData
+    )
     return data
   }
 
   getMPSPassword = async ({ input }: { input: CIRAConfigContext }): Promise<any> => {
-    const data = await this.configurator.secretsManager.getSecretAtPath(`CIRAConfigs/${input.ciraConfig?.configName}`)
+    const data = await this.configurator.secretsManager.getSecretAtPath(
+      ciraConfigSecretPath(input.ciraConfig?.configName, input.tenantId)
+    )
     return data
   }
 

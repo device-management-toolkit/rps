@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { deviceSecretPath } from '../../utils/secretPaths.js'
+
 import { assign, fromPromise, sendTo, setup } from 'xstate'
 import {
   type CommonMaintenanceContext,
@@ -96,7 +98,9 @@ export class ChangePassword {
     const smcf = new SecretManagerCreatorFactory()
     const secretMgr = await smcf.getSecretManager(new Logger('SecretManagerService'))
     const clientObj = devices[input.clientId]
-    let credentials = (await secretMgr.getSecretAtPath(`devices/${clientObj.uuid}`)) as DeviceCredentials
+    // Maintenance contexts carry no tenant; the validated client message does.
+    const tenantId: string = clientObj.ClientData?.tenantId ?? ''
+    let credentials = (await secretMgr.getSecretAtPath(deviceSecretPath(clientObj.uuid, tenantId))) as DeviceCredentials
     if (!credentials) {
       logger.debug(`creating new DeviceCredentials for ${clientObj.uuid}`)
       credentials = { AMT_PASSWORD: '', MEBX_PASSWORD: '' }
@@ -104,7 +108,10 @@ export class ChangePassword {
     if (input.updatedPassword != null) {
       credentials.AMT_PASSWORD = clientObj.amtPassword = input.updatedPassword
       logger.debug(`saving DeviceCredentials for ${clientObj.uuid}`)
-      const writtenCredentials = await secretMgr.writeSecretWithObject(`devices/${clientObj.uuid}`, credentials)
+      const writtenCredentials = await secretMgr.writeSecretWithObject(
+        deviceSecretPath(clientObj.uuid, tenantId),
+        credentials
+      )
       if (!writtenCredentials) {
         throw new Error('saved credentials were not returned as expected')
       }
@@ -115,6 +122,8 @@ export class ChangePassword {
 
   refreshMPS = async ({ input }: { input: ChangePasswordContext }): Promise<boolean> => {
     const clientObj = devices[input.clientId]
+    // Maintenance contexts carry no tenant; the validated client message does.
+    const tenantId: string = clientObj.ClientData?.tenantId ?? ''
     const url = `${Environment.Config.mps_server}/api/v1/devices/refresh/${clientObj.uuid}`
     let rsp: any
     let rsperr: any

@@ -146,6 +146,32 @@ describe('CIRA Configuration State Machine', () => {
     }
   })
 
+  describe('tenant-scoped secrets', () => {
+    beforeEach(async () => {
+      await ciraStateMachineImpl.configurator.ready
+      devices[clientId].uuid = 'cira-uuid'
+      devices[clientId].amtPassword = 'amtPw'
+      machineContext.tenantId = 'tenant-a'
+      machineContext.ciraConfig = ciraConfig
+      machineContext.profile = { activation: 'ccmactivate' } as any
+    })
+    it('should write the device secret under the tenant', async () => {
+      vi.spyOn(ciraStateMachineImpl.configurator.secretsManager, 'getSecretAtPath').mockResolvedValue(null)
+      const writeSpy = vi
+        .spyOn(ciraStateMachineImpl.configurator.secretsManager, 'writeSecretWithObject')
+        .mockResolvedValue(true)
+      await ciraStateMachineImpl.saveMPSPasswordToSecretProvider({ input: machineContext })
+      expect(writeSpy).toHaveBeenCalledWith('tenants/tenant-a/devices/cira-uuid', expect.anything())
+    })
+    it('should read the MPS password from the tenant-scoped CIRA config path', async () => {
+      const getSpy = vi
+        .spyOn(ciraStateMachineImpl.configurator.secretsManager, 'getSecretAtPath')
+        .mockResolvedValue({ MPS_PASSWORD: 'mps' } as any)
+      await ciraStateMachineImpl.getMPSPassword({ input: machineContext })
+      expect(getSpy).toHaveBeenCalledWith('tenants/tenant-a/CIRAConfigs/config1')
+    })
+  })
+
   it('should succeed for happy path', () =>
     new Promise<void>((resolve, reject) => {
       const mockCiraConfigurationMachine = ciraStateMachineImpl.machine.provide(machineConfig)

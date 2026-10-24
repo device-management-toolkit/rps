@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { profileSecretPath, profileTlsSecretPath } from '../../../utils/secretPaths.js'
+
 import Logger from '../../../Logger.js'
 import { API_UNEXPECTED_EXCEPTION, NOT_FOUND_EXCEPTION, NOT_FOUND_MESSAGE } from '../../../utils/constants.js'
 import { type AMTConfiguration } from '../../../models/index.js'
@@ -58,7 +60,7 @@ export async function editProfile(req: Request, res: Response): Promise<void> {
         amtConfig.activation === ClientAction.ADMINCTLMODE
       if (req.secretsManager && (needsStoredAmt || needsStoredMebx)) {
         const stored = (await req.secretsManager.getSecretAtPath(
-          `profiles/${oldConfig.profileName}`
+          profileSecretPath(oldConfig.profileName, req.tenantId)
         )) as DeviceCredentials | null
         // null = secret genuinely absent (errors already threw). Refuse rather than
         // write the DB placeholder literal over the real password.
@@ -108,9 +110,11 @@ export async function editProfile(req: Request, res: Response): Promise<void> {
         // then check if certificate exists in vault and generate self-signed if it does not exist
         if (amtConfig.tlsSigningAuthority === TlsSigningAuthority.SELF_SIGNED) {
           // generate self-signed certificates for use with TLS config if applicable
-          const existingTLSCert = await req.secretsManager.getSecretAtPath(`TLS/${oldConfig.profileName}`)
+          const existingTLSCert = await req.secretsManager.getSecretAtPath(
+            profileTlsSecretPath(oldConfig.profileName, req.tenantId)
+          )
           if (existingTLSCert == null) {
-            await generateSelfSignedCertificate(req.secretsManager, newConfig.profileName)
+            await generateSelfSignedCertificate(req.secretsManager, newConfig.profileName, req.tenantId)
           }
         }
 
@@ -118,7 +122,7 @@ export async function editProfile(req: Request, res: Response): Promise<void> {
         if (oldConfig.amtPassword !== null || oldConfig.mebxPassword !== null) {
           if (req.secretsManager) {
             log.debug('Delete in vault') // User might be flipping from false to true which we dont know. So try deleting either way.
-            await req.secretsManager.deleteSecretAtPath(`profiles/${amtConfig.profileName}`)
+            await req.secretsManager.deleteSecretAtPath(profileSecretPath(amtConfig.profileName, req.tenantId))
             log.debug('Password deleted from vault')
           }
         }
@@ -135,7 +139,7 @@ export async function editProfile(req: Request, res: Response): Promise<void> {
             log.debug('MEBX Password written to vault')
           }
           if (data.AMT_PASSWORD != null || data.MEBX_PASSWORD != null) {
-            await req.secretsManager.writeSecretWithObject(`profiles/${amtConfig.profileName}`, data)
+            await req.secretsManager.writeSecretWithObject(profileSecretPath(amtConfig.profileName, req.tenantId), data)
           }
         }
         log.verbose(`Updated AMT profile: ${newConfig.profileName}`)

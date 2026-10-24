@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { profileSecretPath } from '../../../utils/secretPaths.js'
+
 import Logger from '../../../Logger.js'
 import { type AMTConfiguration } from '../../../models/index.js'
 import { MqttProvider } from '../../../utils/MqttProvider.js'
@@ -55,7 +57,10 @@ export async function createProfile(req: Request, res: Response): Promise<void> 
         if (!amtConfig.generateRandomMEBxPassword) {
           log.debug('MEBX Password written to vault')
         }
-        vaultStatus = await req.secretsManager.writeSecretWithObject(`profiles/${amtConfig.profileName}`, data)
+        vaultStatus = await req.secretsManager.writeSecretWithObject(
+          profileSecretPath(amtConfig.profileName, req.tenantId),
+          data
+        )
         if (vaultStatus == null) {
           const dbResults: any = await req.db.profiles.delete(amtConfig.profileName, req.tenantId)
           if (dbResults == null) {
@@ -68,7 +73,7 @@ export async function createProfile(req: Request, res: Response): Promise<void> 
       if (amtConfig.tlsMode != null) {
         // API compatibility: default to self-signed if no other option is indicated
         if (!amtConfig.tlsSigningAuthority || amtConfig.tlsSigningAuthority === TlsSigningAuthority.SELF_SIGNED) {
-          await generateSelfSignedCertificate(req.secretsManager, amtConfig.profileName)
+          await generateSelfSignedCertificate(req.secretsManager, amtConfig.profileName, req.tenantId)
         }
       }
     }

@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { wirelessSecretPath } from '../../../utils/secretPaths.js'
+
 import { type WirelessConfig } from '../../../models/RCS.Config.js'
 import Logger from '../../../Logger.js'
 import { MqttProvider } from '../../../utils/MqttProvider.js'
@@ -23,7 +25,7 @@ export async function createWirelessProfile(req: Request, res: Response): Promis
     // store the password into Vault
     if (req.secretsManager) {
       if (req.body.ieee8021xProfileName == null) {
-        await req.secretsManager.writeSecretWithObject(`Wireless/${wirelessConfig.profileName}`, {
+        await req.secretsManager.writeSecretWithObject(wirelessSecretPath(wirelessConfig.profileName, req.tenantId), {
           PSK_PASSPHRASE: passphrase
         } as WifiCredentials)
         log.debug(`pskPassphrase stored in Vault for wireless profile: ${wirelessConfig.profileName}`)

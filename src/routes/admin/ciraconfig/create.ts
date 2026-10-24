@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { ciraConfigSecretPath } from '../../../utils/secretPaths.js'
+
 import { type CIRAConfig } from '../../../models/RCS.Config.js'
 import Logger from '../../../Logger.js'
 import { MqttProvider } from '../../../utils/MqttProvider.js'
@@ -21,7 +23,10 @@ export async function createCiraConfig(req: Request, res: Response): Promise<voi
       const secrets: CiraConfigSecrets = {
         MPS_PASSWORD: ciraConfig.password
       }
-      const secretRsp = await req.secretsManager.writeSecretWithObject(`CIRAConfigs/${ciraConfig.configName}`, secrets)
+      const secretRsp = await req.secretsManager.writeSecretWithObject(
+        ciraConfigSecretPath(ciraConfig.configName, req.tenantId),
+        secrets
+      )
       if (secretRsp == null) {
         throw new Error('Error saving cira configuration secrets to secret provider')
       }

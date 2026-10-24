@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { deviceSecretPath } from '../utils/secretPaths.js'
+
 import { AMT } from '@device-management-toolkit/wsman-messages'
 import { assign, createActor, sendTo, fromPromise, setup } from 'xstate'
 import { Configurator } from '../Configurator.js'
@@ -43,7 +45,9 @@ export class Deactivation {
   }
 
   removeDeviceFromSecretProvider = async ({ input }: { input: DeactivationContext }): Promise<boolean> =>
-    await this.configurator.secretsManager.deleteSecretAtPath(`devices/${devices[input.clientId].uuid}`)
+    await this.configurator.secretsManager.deleteSecretAtPath(
+      deviceSecretPath(devices[input.clientId].uuid, input.tenantId)
+    )
 
   removeDeviceFromMPS = async ({ input }: { input: DeactivationContext }): Promise<any> =>
     await got(
