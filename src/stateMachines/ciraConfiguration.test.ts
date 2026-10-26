@@ -19,6 +19,12 @@ import { HttpHandler } from '../HttpHandler.js'
 import { type MachineImplementationsSimplified, createActor, fromPromise } from 'xstate'
 import { HttpResponseError, coalesceMessage, isDigestRealmValid } from './common.js'
 
+vi.mock('../Configurator.js', () => ({
+  Configurator: function () {
+    return { ready: Promise.resolve() }
+  }
+}))
+
 Environment.Config = config
 
 const invokeWsmanCallSpy = vi.hoisted(() => vi.fn<any>())
