@@ -60,6 +60,31 @@ export class NodeForge {
     return forge.pki.publicKeyFromPem(pem)
   }
 
+  /**
+   * Build the to-be-signed half of a certificate without signing it, so the
+   * caller can replace a field forge cannot express (an EC SubjectPublicKeyInfo)
+   * before the digest is taken. forge.pki.certificateToAsn1 re-uses a
+   * caller-supplied cert.tbsCertificate, so the edited version is what gets
+   * emitted.
+   */
+  getTBSCertificate(cert: forge.pki.Certificate): forge.asn1.Asn1 {
+    // Present in node-forge (lib/x509.js) but missing from @types/node-forge.
+    return (forge.pki as any).getTBSCertificate(cert)
+  }
+
+  setRsaPublicKey(n: any, e: any): forge.pki.rsa.PublicKey {
+    return forge.pki.setRsaPublicKey(n, e)
+  }
+
+  /** OID for an RSA signature over the given digest, e.g. sha384WithRSAEncryption. */
+  rsaSignatureOid(hashAlgorithm: string): string {
+    const oid = (forge.pki.oids as Record<string, string>)[`${hashAlgorithm}WithRSAEncryption`]
+    if (!oid) {
+      throw new Error(`No RSA signature OID for digest '${hashAlgorithm}'`)
+    }
+    return oid
+  }
+
   rsaGenerateKeyPair(length: number): forge.pki.rsa.KeyPair {
     return forge.pki.rsa.generateKeyPair(length)
   }

@@ -113,11 +113,24 @@ export class TLS {
       }
       // Use the MPS root key or pre-stored root key if available,
       // otherwise create a new root cert (backwards compatibility)
+      const policy = getAMTCertificatePolicy(
+        clientObj.ClientData?.payload?.weakAlgorithmsRemoved,
+        clientObj.ClientData?.payload?.ver
+      )
       let rootKey: any
       if (clientObj.tls?.rootCertKey) {
         rootKey = clientObj.tls.rootCertKey
       } else {
-        const rootCert = this.certManager.createCertificate(issuerAttributes)
+        const rootCert = this.certManager.createCertificate(
+          issuerAttributes,
+          null,
+          null,
+          null,
+          null,
+          undefined,
+          policy.hashAlgorithm,
+          policy.rsaKeySize
+        )
         rootKey = rootCert.key
       }
 
@@ -127,7 +140,9 @@ export class TLS {
         certAttributes,
         issuerAttributes,
         keyUsages,
-        clientObj.tls?.mpsRootCertPEM
+        clientObj.tls?.mpsRootCertPEM,
+        policy.hashAlgorithm,
+        policy.rsaKeySize
       )
       cert = certResult.pem.substring(27, certResult.pem.length - 25)
 

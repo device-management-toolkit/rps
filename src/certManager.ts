@@ -4,7 +4,7 @@
  **********************************************************************/
 
 import { randomBytes } from 'node:crypto'
-import { type pkcs12, type pki } from 'node-forge'
+import { type asn1, type md, type pkcs12, type pki } from 'node-forge'
 import { type ILogger } from './interfaces/ILogger.js'
 import type Logger from './Logger.js'
 import {
@@ -306,19 +306,123 @@ export class CertManager {
     return str
   }
 
+  /**
+   * Index of the SubjectPublicKeyInfo inside a forge TBSCertificate.
+   * forge.pki.getTBSCertificate always emits version, serialNumber, signature,
+   * issuer, validity, subject, subjectPublicKeyInfo in that order, with the
+   * version tag unconditional (node-forge lib/x509.js, getTBSCertificate).
+   */
+  private static readonly TBS_SPKI_INDEX = 6
+
+  /**
+   * Accept a device public key node-forge cannot represent.
+   *
+   * AMT returns AMT_PublicPrivateKeyPair.DERKey as a DER SubjectPublicKeyInfo.
+   * For an RSA key forge parses it directly; for the ECC-384 key AMT 22
+   * generates, publicKeyFromPem throws because forge is RSA-only. It does not
+   * need to understand the key: the leaf is signed with the RPS root's *RSA*
+   * key, and the device key is only ever embedded. So the SPKI is kept as an
+   * opaque ASN.1 node and copied into the certificate byte-for-byte.
+   */
+  parseExternalPublicKey(DERKey: string, forgeError: unknown): asn1.Asn1 {
+    let spki: asn1.Asn1
+    try {
+      spki = this.nodeForge.asn1FromDer(Buffer.from(DERKey, 'base64').toString('binary'))
+    } catch (err) {
+      throw new UnsupportedCertificateError(
+        `AMT returned a public key that is neither a parsable RSA key (${String(forgeError)}) ` +
+          `nor valid DER (${String(err)})`
+      )
+    }
+    if (!Array.isArray(spki.value) || spki.value.length !== 2) {
+      throw new UnsupportedCertificateError('AMT returned a public key that is not a SubjectPublicKeyInfo')
+    }
+    this.logger.debug('AMT public key is not RSA; embedding its SubjectPublicKeyInfo verbatim')
+    return spki
+  }
+
+  /**
+   * Give forge a stand-in public key so it can build a TBSCertificate and derive
+   * a subjectKeyIdentifier. The CA's own RSA key is used because it is already
+   * to hand and costs nothing to reuse; it never reaches the output, because
+   * signWithExternalPublicKey replaces the SubjectPublicKeyInfo before the
+   * digest is taken.
+   *
+   * The subjectKeyIdentifier would otherwise be computed over the stand-in, so
+   * it is overridden here with the real one: RFC 5280 §4.2.1.2 method (1),
+   * SHA-1 over the subjectPublicKey BIT STRING contents, excluding the
+   * unused-bits octet.
+   */
+  standInForExternalPublicKey(cert: pki.Certificate, spki: asn1.Asn1, caPrivateKey: pki.rsa.PrivateKey): void {
+    cert.publicKey = this.nodeForge.setRsaPublicKey(caPrivateKey.n, caPrivateKey.e)
+    const bitString = (spki.value as asn1.Asn1[])[1]
+    const keyBits = (bitString.value as string).replace(/^\0/, '')
+    cert.generateSubjectKeyIdentifier = () => {
+      const digest = this.nodeForge.sha1Create()
+      digest.update(keyBits)
+      return digest.digest()
+    }
+  }
+
+  /**
+   * cert.sign() would regenerate the TBSCertificate from cert.publicKey and so
+   * sign over the stand-in key. Do the same steps by hand with the real
+   * SubjectPublicKeyInfo spliced in, and cache the result on the certificate —
+   * forge.pki.certificateToAsn1 prefers a cached cert.tbsCertificate, so both
+   * the PEM and the DER emitted below carry the device's key and a signature
+   * that actually covers it.
+   */
+  signWithExternalPublicKey(
+    cert: pki.Certificate,
+    spki: asn1.Asn1,
+    caPrivateKey: pki.rsa.PrivateKey,
+    digest: md.MessageDigest,
+    hashAlgorithm: 'sha256' | 'sha384'
+  ): void {
+    cert.signatureOid = cert.siginfo.algorithmOid = this.nodeForge.rsaSignatureOid(hashAlgorithm)
+    const tbs = this.nodeForge.getTBSCertificate(cert)
+    ;(tbs.value as asn1.Asn1[])[CertManager.TBS_SPKI_INDEX] = spki
+    cert.tbsCertificate = tbs
+    cert.md = digest
+    digest.update(this.nodeForge.asn1ToDer(tbs).getBytes())
+    cert.signature = caPrivateKey.sign(digest)
+  }
+
   amtCertSignWithCAKey(
     DERKey: string,
     caPrivateKey: pki.PrivateKey | null,
     certAttributes: CertAttributes,
     issuerAttributes: CertAttributes,
     extKeyUsage: AMTKeyUsage,
-    rootCertPem?: string
+    rootCertPem?: string,
+    hashAlgorithm: 'sha256' | 'sha384' = 'sha256',
+    rsaKeySize: 2048 | 3072 = 2048
   ): CertCreationResult {
     if (!caPrivateKey || caPrivateKey == null) {
-      const certAndKey = this.createCertificate(issuerAttributes)
+      // Fallback CA: honour the policy key size here too, otherwise an AMT 22
+      // profile silently gets a 2048-bit signing key.
+      const certAndKey = this.createCertificate(
+        issuerAttributes,
+        null,
+        null,
+        null,
+        null,
+        undefined,
+        hashAlgorithm,
+        rsaKeySize
+      )
       caPrivateKey = certAndKey.key
     }
-    return this.createCertificate(certAttributes, caPrivateKey, DERKey, issuerAttributes, extKeyUsage, rootCertPem)
+    return this.createCertificate(
+      certAttributes,
+      caPrivateKey,
+      DERKey,
+      issuerAttributes,
+      extKeyUsage,
+      rootCertPem,
+      hashAlgorithm,
+      rsaKeySize
+    )
   }
 
   // Generate a certificate with a set of attributes signed by a rootCert. If the rootCert is omitted, the generated certificate is self-signed.
@@ -329,16 +433,25 @@ export class CertManager {
     DERKey: string | null = null,
     issuerAttributes: CertAttributes | null = null,
     extKeyUsage: AMTKeyUsage | null = null,
-    rootCertPem?: string
+    rootCertPem?: string,
+    hashAlgorithm: 'sha256' | 'sha384' = 'sha256',
+    rsaKeySize: 2048 | 3072 = 2048
   ): CertCreationResult {
     // Generate a keypair and create an X.509v3 certificate
     let keys
+    // Set when the AMT-supplied key is not RSA (AMT 22 generates ECC-384). Holds
+    // the device's SubjectPublicKeyInfo, to be spliced in below.
+    let externalSpki: asn1.Asn1 | null = null
     let cert = this.nodeForge.createCert()
     if (!DERKey) {
-      keys = this.nodeForge.rsaGenerateKeyPair(2048)
+      keys = this.nodeForge.rsaGenerateKeyPair(rsaKeySize)
       cert.publicKey = keys.publicKey
     } else {
-      cert.publicKey = this.nodeForge.publicKeyFromPem(`-----BEGIN PUBLIC KEY-----${DERKey}-----END PUBLIC KEY-----`)
+      try {
+        cert.publicKey = this.nodeForge.publicKeyFromPem(`-----BEGIN PUBLIC KEY-----${DERKey}-----END PUBLIC KEY-----`)
+      } catch (err) {
+        externalSpki = this.parseExternalPublicKey(DERKey, err)
+      }
     }
     // RFC 5280: serialNumber must be a positive integer. node-forge reads this as a hex string and
     // DER-encodes it as a signed two's-complement INTEGER, so the high bit of the first byte must
@@ -383,13 +496,22 @@ export class CertManager {
       if (issuerAttributes?.ST) rootattrs.push({ shortName: 'ST', value: issuerAttributes.ST })
       if (issuerAttributes?.O) rootattrs.push({ name: 'organizationName', value: issuerAttributes.O })
       cert.setIssuer(rootattrs)
+      if (externalSpki) {
+        this.standInForExternalPublicKey(cert, externalSpki, caPrivateKey as pki.rsa.PrivateKey)
+      }
       cert = this.generateLeafCertificate(cert, extKeyUsage)
-      cert.sign(caPrivateKey as pki.rsa.PrivateKey, this.nodeForge.sha256Create())
+      const digest = hashAlgorithm === 'sha384' ? this.nodeForge.sha384Create() : this.nodeForge.sha256Create()
+      if (externalSpki) {
+        this.signWithExternalPublicKey(cert, externalSpki, caPrivateKey as pki.rsa.PrivateKey, digest, hashAlgorithm)
+      } else {
+        cert.sign(caPrivateKey as pki.rsa.PrivateKey, digest)
+      }
     } else {
       // Use our own attributes
       cert.setIssuer(attrs)
       cert = this.generateRootCertificate(cert)
-      cert.sign(keys.privateKey, this.nodeForge.sha256Create())
+      const digest = hashAlgorithm === 'sha384' ? this.nodeForge.sha384Create() : this.nodeForge.sha256Create()
+      cert.sign(keys.privateKey, digest)
     }
 
     return {
