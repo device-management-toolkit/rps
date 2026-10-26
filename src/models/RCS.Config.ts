@@ -278,6 +278,7 @@ export interface Payload {
   profile?: any
   tlsEnforced?: boolean
   tlsTunnel?: boolean
+  lmsInstalled?: boolean
 }
 
 export interface ConnectionObject {

@@ -1,3 +1,10 @@
+# [2.41.0](https://github.com/device-management-toolkit/rps/compare/v2.40.2...v2.41.0) (2026-10-14)
+
+
+### Features
+
+* Add AMT Local Time Synchronization Support ([#2912](https://github.com/device-management-toolkit/rps/issues/2912)) ([c4a5695](https://github.com/device-management-toolkit/rps/commit/c4a5695bba51f3f2ddd2603100c56219cc28bcb7)), closes [#2905](https://github.com/device-management-toolkit/rps/issues/2905)
+
 ## [2.40.2](https://github.com/device-management-toolkit/rps/compare/v2.40.1...v2.40.2) (2026-09-21)
 
 ## [2.40.1](https://github.com/device-management-toolkit/rps/compare/v2.40.0...v2.40.1) (2026-08-26)
