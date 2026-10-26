@@ -41,7 +41,10 @@ describe('getAMTCertificatePolicy', () => {
     { weakAlgorithmsRemoved: undefined, version: '21.0.6', expected: LEGACY },
     { weakAlgorithmsRemoved: undefined, version: '12.0.95', expected: LEGACY },
     { weakAlgorithmsRemoved: undefined, version: 'not-a-version', expected: LEGACY },
-    { weakAlgorithmsRemoved: undefined, version: undefined, expected: LEGACY }
+    { weakAlgorithmsRemoved: undefined, version: undefined, expected: LEGACY },
+    // The payload is device-supplied JSON; a non-boolean is not a report, so the version decides.
+    { weakAlgorithmsRemoved: 'false' as any, version: '22.0.0', expected: HARDENED },
+    { weakAlgorithmsRemoved: 'true' as any, version: '21.0.6', expected: LEGACY }
   ])(
     'weakAlgorithmsRemoved=$weakAlgorithmsRemoved version=$version selects the matching policy',
     ({ weakAlgorithmsRemoved, version, expected }) => {

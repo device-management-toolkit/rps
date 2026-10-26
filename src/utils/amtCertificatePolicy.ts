@@ -156,7 +156,9 @@ const HARDENED_CRYPTO_POLICY: AMTCertificatePolicy = {
  * only when nothing is reported: an explicit `false` is never overridden.
  */
 export function getAMTCertificatePolicy(weakAlgorithmsRemoved?: boolean, version?: unknown): AMTCertificatePolicy {
-  const hardened = weakAlgorithmsRemoved ?? isHardenedByVersion(version)
+  // The payload is device-supplied JSON, so anything that is not a boolean counts as not reported.
+  const reported = typeof weakAlgorithmsRemoved === 'boolean' ? weakAlgorithmsRemoved : undefined
+  const hardened = reported ?? isHardenedByVersion(version)
   return hardened ? HARDENED_CRYPTO_POLICY : LEGACY_CRYPTO_POLICY
 }
 
