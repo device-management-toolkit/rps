@@ -197,6 +197,17 @@ export class Activation {
     })
   }
 
+  /**
+   * The digest of the provisioning certificate when the device's firmware cannot accept it, else null.
+   * Hardened firmware refuses a chain that is not SHA-384, so this is checked before anything is sent.
+   */
+  rejectedProvisioningCertDigest(clientId: string, certDigest: string | null | undefined): string | null {
+    const payload = devices[clientId]?.ClientData?.payload
+    const policy = getAMTCertificatePolicy(payload?.weakAlgorithmsRemoved, payload?.ver)
+    const digest = certDigest?.toLowerCase()
+    return policy.requiresSha384ProvisioningCert && digest !== 'sha384' ? digest ?? 'unknown' : null
+  }
+
   createSignedString(clientId: string, hashAlgorithm: string): boolean {
     const clientObj = devices[clientId]
     const amtVersion = clientObj.ClientData?.payload?.ver
@@ -1395,6 +1406,9 @@ export class Activation {
         context.message.Envelope.Body?.UpgradeClientToAdmin_OUTPUT?.ReturnValue === 0,
       isCertExtracted: ({ context }) => context.certChainPfx != null,
       isValidCert: ({ context }) => devices[context.clientId].certObj != null,
+      isProvisioningCertDigestRejected: ({ context }) =>
+        devices[context.clientId].certObj != null &&
+        this.rejectedProvisioningCertDigest(context.clientId, context.certChainPfx?.hashAlgorithm) != null,
       isDigestRealmInvalid: ({ context }) =>
         !this.validator.isDigestRealmValid(devices[context.clientId].ClientData.payload.digestRealm),
       maxCertLength: ({ context }) => {
@@ -1660,6 +1674,20 @@ export class Activation {
       COMPARE_DEVICE_HASHES: {
         entry: 'Compare Domain Cert Hashes',
         always: [
+          {
+            // Reject before any request is sent to the device, and name the digest.
+            guard: 'isProvisioningCertDigestRejected',
+            actions: assign(({ context }) => {
+              const digest = this.rejectedProvisioningCertDigest(context.clientId, context.certChainPfx?.hashAlgorithm)
+              return {
+                errorMessage:
+                  `Device ${devices[context.clientId]?.uuid ?? context.clientId} activation failed. ` +
+                  `Firmware that has removed weak algorithms requires a SHA-384 provisioning certificate, ` +
+                  `but the provisioning certificate is signed with ${digest}`
+              }
+            }),
+            target: 'FAILED'
+          },
           {
             guard: 'isValidCert',
             actions: ({ context }) => {

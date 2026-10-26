@@ -2690,6 +2690,37 @@ describe('Activation State Machine', () => {
         vi.runAllTicks()
       }))
 
+    describe('provisioning certificate digest check', () => {
+      it.each([
+        // Hardened firmware refuses anything but a SHA-384 chain, so it is rejected before the device is contacted.
+        { payload: { ver: '22.0.0', weakAlgorithmsRemoved: true }, digest: 'sha256', expected: 'sha256' },
+        { payload: { ver: '22.0.0' }, digest: 'SHA256', expected: 'sha256' },
+        { payload: { ver: '22.0.0', weakAlgorithmsRemoved: true }, digest: undefined, expected: 'unknown' },
+        { payload: { ver: '22.0.0', weakAlgorithmsRemoved: true }, digest: 'sha384', expected: null },
+        // Other firmware accepts either digest.
+        { payload: { ver: '21.0.6' }, digest: 'sha256', expected: null },
+        { payload: { ver: '22.0.0', weakAlgorithmsRemoved: false }, digest: 'sha256', expected: null }
+      ])('reports $expected for a $digest certificate given $payload', ({ payload, digest, expected }) => {
+        devices[clientId].ClientData = { payload } as any
+        expect(activation.rejectedProvisioningCertDigest(clientId, digest)).toBe(expected)
+      })
+
+      it('fails COMPARE_DEVICE_HASHES before any request is sent', () => {
+        const compare = (activation.machine.config.states as any).COMPARE_DEVICE_HASHES
+        expect(compare.always[0].guard).toBe('isProvisioningCertDigestRejected')
+        expect(compare.always[0].target).toBe('FAILED')
+
+        devices[clientId].ClientData = { payload: { ver: '22.0.0', weakAlgorithmsRemoved: true } } as any
+        devices[clientId].certObj = {} as any
+        const guard = (activation.machine as any).implementations.guards.isProvisioningCertDigestRejected
+        expect(guard({ context: { clientId, certChainPfx: { hashAlgorithm: 'sha256' } } })).toBe(true)
+        expect(guard({ context: { clientId, certChainPfx: { hashAlgorithm: 'sha384' } } })).toBe(false)
+        // An untrusted certificate keeps its own error message.
+        devices[clientId].certObj = null as any
+        expect(guard({ context: { clientId, certChainPfx: { hashAlgorithm: 'sha256' } } })).toBe(false)
+      })
+    })
+
     it('should verify FEATURES_CONFIGURATION transitions route correctly', () => {
       const states = activation.machine.config.states as any
       const featuresConfig = states.FEATURES_CONFIGURATION
