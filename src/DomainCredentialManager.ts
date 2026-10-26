@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { domainCertSecretPath } from './utils/secretPaths.js'
+
 import { type IDomainCredentialManager } from './interfaces/IDomainCredentialManager.js'
 import { type ILogger } from './interfaces/ILogger.js'
 import { type IDomainsTable } from './interfaces/database/IDomainsDb.js'
@@ -32,7 +34,9 @@ export class DomainCredentialManager implements IDomainCredentialManager {
 
     if (domain?.provisioningCert) {
       if (this.secretsManager) {
-        const certPwd = (await this.secretsManager.getSecretAtPath(`certs/${domain.profileName}`)) as CertCredentials
+        const certPwd = (await this.secretsManager.getSecretAtPath(
+          domainCertSecretPath(domain.profileName, tenantId)
+        )) as CertCredentials
         this.logger.debug('Received CertPwd from vault')
         domain.provisioningCert = certPwd.CERT
         domain.provisioningCertPassword = certPwd.CERT_PASSWORD

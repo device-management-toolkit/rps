@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { wirelessSecretPath } from '../../../utils/secretPaths.js'
+
 import { NOT_FOUND_EXCEPTION, NOT_FOUND_MESSAGE } from '../../../utils/constants.js'
 import { type WirelessConfig } from '../../../models/RCS.Config.js'
 import Logger from '../../../Logger.js'
@@ -27,7 +29,7 @@ export async function editWirelessProfile(req: Request, res: Response): Promise<
       updateConfig.version = null
     }
     if (req.secretsManager && passphrase) {
-      await req.secretsManager.writeSecretWithObject(`Wireless/${updateConfig.profileName}`, {
+      await req.secretsManager.writeSecretWithObject(wirelessSecretPath(updateConfig.profileName, req.tenantId), {
         PSK_PASSPHRASE: passphrase
       })
       log.debug(`pskPassphrase stored in Vault for wireless profile: ${updateConfig.profileName}`)

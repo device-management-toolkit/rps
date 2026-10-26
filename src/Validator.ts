@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { deviceSecretPath } from './utils/secretPaths.js'
+
 import type * as WebSocket from 'ws'
 import { type IValidator } from './interfaces/IValidator.js'
 import { type ILogger } from './interfaces/ILogger.js'
@@ -168,7 +170,7 @@ export class Validator implements IValidator {
     if (msg.payload.force) {
       this.logger.debug('bypassing password check')
     } else {
-      await this.verifyDevicePassword(payload, clientId)
+      await this.verifyDevicePassword(payload, clientId, msg.tenantId)
     }
     // Store the client message
     clientObj.uuid = payload.uuid
@@ -234,17 +236,17 @@ export class Validator implements IValidator {
     if (msg.payload.force) {
       this.logger.debug('bypassing password check')
     } else {
-      await this.verifyDevicePassword(payload, clientId)
+      await this.verifyDevicePassword(payload, clientId, msg.tenantId)
     }
     clientObj.uuid = payload.uuid
     clientObj.ClientData = msg
   }
 
-  async verifyDevicePassword(payload: Payload, clientId: string): Promise<void> {
+  async verifyDevicePassword(payload: Payload, clientId: string, tenantId: string): Promise<void> {
     try {
       const clientObj = devices[clientId]
       const amtDevice = (await this.configurator.secretsManager.getSecretAtPath(
-        `devices/${payload.uuid}`
+        deviceSecretPath(payload.uuid, tenantId)
       )) as DeviceCredentials
 
       if (amtDevice?.AMT_PASSWORD && payload.password && payload.password === amtDevice.AMT_PASSWORD) {
@@ -374,7 +376,9 @@ export class Validator implements IValidator {
 
   async getDeviceCredentials(msg: ClientMsg): Promise<DeviceCredentials | null> {
     try {
-      const secretData = await this.configurator.secretsManager.getSecretAtPath(`devices/${msg.payload.uuid}`)
+      const secretData = await this.configurator.secretsManager.getSecretAtPath(
+        deviceSecretPath(msg.payload.uuid, msg.tenantId)
+      )
 
       if (secretData == null) {
         this.logger.error(`AMT device DOES NOT exists ${msg.payload.uuid}`)

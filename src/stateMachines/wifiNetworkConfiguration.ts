@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { wirelessSecretPath } from '../utils/secretPaths.js'
+
 import { type AMT, type CIM } from '@device-management-toolkit/wsman-messages'
 import { assign, sendTo, fromPromise, setup } from 'xstate'
 import { type WirelessConfig } from '../models/RCS.Config.js'
@@ -97,7 +99,7 @@ export class WiFiConfiguration {
         if (this.configurator?.secretsManager) {
           // Get WiFi profile pskPassphrase from vault
           const data = (await this.configurator.secretsManager.getSecretAtPath(
-            `Wireless/${input.wifiProfile.profileName}`
+            wirelessSecretPath(input.wifiProfile.profileName, input.wifiProfile.tenantId)
           )) as WifiCredentials
           if (data != null) {
             input.wifiProfile.pskPassphrase = data.PSK_PASSPHRASE

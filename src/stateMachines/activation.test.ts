@@ -721,6 +721,19 @@ describe('Activation State Machine', () => {
       expect(insertSpy).toHaveBeenCalled()
       expect(response).toBe(true)
     })
+    it('should write the device secret under the activation tenant', async () => {
+      const clientObj: any = devices[clientId]
+      clientObj.amtPassword = 'testPw'
+      clientObj.mebxPassword = 'testPw'
+      const getSpy = vi.spyOn(activation.configurator.secretsManager, 'getSecretAtPath').mockResolvedValueOnce(null)
+      const insertSpy = vi
+        .spyOn(activation.configurator.secretsManager, 'writeSecretWithObject')
+        .mockImplementation(async () => true)
+      const response = await activation.saveDeviceInfoToSecretProvider({ input: { ...context, tenantId: 'tenant-a' } })
+      expect(response).toBe(true)
+      expect(getSpy).toHaveBeenCalledWith(`tenants/tenant-a/devices/${clientObj.uuid}`)
+      expect(insertSpy).toHaveBeenCalledWith(`tenants/tenant-a/devices/${clientObj.uuid}`, expect.anything())
+    })
     it('should return false if not able to save data', async () => {
       const err = new Error('Unable to save')
       const clientObj: any = devices[clientId]
@@ -2965,6 +2978,19 @@ describe('Activation State Machine', () => {
           MEBX_PASSWORD: 'testMEBXpw',
           TLS_ISSUED_CERTIFICATE: 'issuedCert'
         })
+      })
+
+      it('should save leaf cert under the activation tenant', async () => {
+        const clientObj = devices[clientId]
+        clientObj.uuid = 'test-uuid'
+        clientObj.amtPassword = 'testAMTpw'
+        clientObj.tls = { issuedCertPEM: 'issuedCert' } as any
+        const insertSpy = vi
+          .spyOn(activation.configurator.secretsManager, 'writeSecretWithObject')
+          .mockImplementation(async () => true)
+        const result = await activation.saveTlsTunnelCerts({ input: { ...context, tenantId: 'tenant-a' } } as any)
+        expect(result).toBe(true)
+        expect(insertSpy).toHaveBeenCalledWith('tenants/tenant-a/devices/test-uuid', expect.anything())
       })
 
       it('should save leaf cert to vault for CCM (mebxPassword null)', async () => {

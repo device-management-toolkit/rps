@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { profileSecretPath, profileTlsSecretPath } from '../../../utils/secretPaths.js'
+
 import Logger from '../../../Logger.js'
 import { type AMTConfiguration } from '../../../models/index.js'
 import { API_UNEXPECTED_EXCEPTION, NOT_FOUND_EXCEPTION, NOT_FOUND_MESSAGE } from '../../../utils/constants.js'
@@ -23,9 +25,9 @@ export async function deleteProfile(req: Request, res: Response): Promise<void> 
       if (results) {
         if (req.secretsManager) {
           if (!profile.generateRandomPassword || !profile.generateRandomMEBxPassword) {
-            await req.secretsManager.deleteSecretAtPath(`profiles/${profile.profileName}`)
+            await req.secretsManager.deleteSecretAtPath(profileSecretPath(profile.profileName, req.tenantId))
           }
-          await req.secretsManager.deleteSecretAtPath(`TLS/${profile.profileName}`)
+          await req.secretsManager.deleteSecretAtPath(profileTlsSecretPath(profile.profileName, req.tenantId))
         }
 
         MqttProvider.publishEvent('success', ['deleteProfile'], `Deleted Profile : ${profileName}`)

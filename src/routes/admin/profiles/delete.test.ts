@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { Environment } from '../../../utils/Environment.js'
+
 import { createSpyObj } from '../../../test/helper/testUtils.js'
 import { deleteProfile } from './delete.js'
 
@@ -34,6 +36,20 @@ describe('Profiles - Delete', () => {
   })
   it('should delete', async () => {
     await deleteProfile(req, resSpy)
+    expect(resSpy.status).toHaveBeenCalledWith(204)
+  })
+  it('should delete profile and TLS secrets under the request tenant', async () => {
+    Environment.Config = { ...Environment.Config, secrets_tenant_partition: true } as any
+    req.tenantId = 'tenant-a'
+    req.secretsManager = { deleteSecretAtPath: vi.fn().mockResolvedValue(true) }
+    vi.spyOn(req.db.profiles, 'getByName').mockResolvedValue({
+      profileName: 'profileName',
+      generateRandomPassword: false,
+      generateRandomMEBxPassword: true
+    })
+    await deleteProfile(req, resSpy)
+    expect(req.secretsManager.deleteSecretAtPath).toHaveBeenCalledWith('tenants/tenant-a/profiles/profileName')
+    expect(req.secretsManager.deleteSecretAtPath).toHaveBeenCalledWith('tenants/tenant-a/TLS/profileName')
     expect(resSpy.status).toHaveBeenCalledWith(204)
   })
   it('should handle not found', async () => {

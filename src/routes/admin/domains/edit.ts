@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { domainCertSecretPath } from '../../../utils/secretPaths.js'
+
 import { type AMTDomain } from '../../../models/index.js'
 import Logger from '../../../Logger.js'
 import { NOT_FOUND_EXCEPTION, NOT_FOUND_MESSAGE } from '../../../utils/constants.js'
@@ -35,7 +37,7 @@ export async function editDomain(req: Request, res: Response): Promise<void> {
         resolvedCertPassword = newDomain.provisioningCertPassword
       } else if (req.secretsManager && isNewCert) {
         const existingSecrets = (await req.secretsManager.getSecretAtPath(
-          `certs/${newDomain.profileName}`
+          domainCertSecretPath(newDomain.profileName, req.tenantId)
         )) as CertCredentials | null
         if (existingSecrets?.CERT_PASSWORD) {
           resolvedCertPassword = existingSecrets.CERT_PASSWORD
@@ -60,7 +62,10 @@ export async function editDomain(req: Request, res: Response): Promise<void> {
             CERT: cert,
             CERT_PASSWORD: domainPwd
           }
-          await req.secretsManager.writeSecretWithObject(`certs/${amtDomain.profileName}`, data)
+          await req.secretsManager.writeSecretWithObject(
+            domainCertSecretPath(amtDomain.profileName, req.tenantId),
+            data
+          )
           log.debug(`Updated AMT Domain : ${amtDomain.profileName} in vault`)
         }
         delete results.provisioningCert

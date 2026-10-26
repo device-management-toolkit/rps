@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { Environment } from '../../../utils/Environment.js'
+
 import { createSpyObj } from '../../../test/helper/testUtils.js'
 import { createWirelessProfile } from './create.js'
 
@@ -36,6 +38,14 @@ describe('Wireless - Create', () => {
     await createWirelessProfile(req, resSpy)
     req.body = { ieee8021xProfileName: null, pskPassphrase: 'passPhrase' }
     expect(insertSpy).toHaveBeenCalledTimes(1)
+    expect(resSpy.status).toHaveBeenCalledWith(201)
+  })
+  it('should write the passphrase under the request tenant', async () => {
+    Environment.Config = { ...Environment.Config, secrets_tenant_partition: true } as any
+    req.tenantId = 'tenant-a'
+    req.body = { profileName: 'wifi1', ieee8021xProfileName: null, pskPassphrase: 'passPhrase' }
+    await createWirelessProfile(req, resSpy)
+    expect(writeSpy).toHaveBeenCalledWith('tenants/tenant-a/Wireless/wifi1', { PSK_PASSPHRASE: 'passPhrase' })
     expect(resSpy.status).toHaveBeenCalledWith(201)
   })
   it('should create 8021x', async () => {

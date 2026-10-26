@@ -26,5 +26,6 @@
   "amt_legacy_tls_compatibility": true,
   "amt_post_tls_reject": true,
   "amt_tls_tunnel_persistent": true,
-  "prevent_orphaned_devices": false
+  "prevent_orphaned_devices": false,
+  "secrets_tenant_partition": false
 }

@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { profileSecretPath, profileTlsSecretPath } from './utils/secretPaths.js'
+
 import { type AMTConfiguration } from './models/index.js'
 import { type ILogger } from './interfaces/ILogger.js'
 import { type IProfileManager } from './interfaces/IProfileManager.js'
@@ -84,7 +86,10 @@ export class ProfileManager implements IProfileManager {
           this.logger.error(`unable to create a random password for ${profile.profileName}`)
         }
       } else if (this.secretsManager) {
-        amtPassword = await this.secretsManager.getSecretFromKey(`profiles/${profileName}`, 'AMT_PASSWORD')
+        amtPassword = await this.secretsManager.getSecretFromKey(
+          profileSecretPath(profileName, tenantId),
+          'AMT_PASSWORD'
+        )
       } else {
         if (profile.amtPassword) {
           amtPassword = profile.amtPassword
@@ -120,7 +125,10 @@ export class ProfileManager implements IProfileManager {
           this.logger.error(`unable to create MEBx random password for ${profile.profileName}`)
         }
       } else if (this.secretsManager) {
-        mebxPassword = await this.secretsManager.getSecretFromKey(`profiles/${profileName}`, 'MEBX_PASSWORD')
+        mebxPassword = await this.secretsManager.getSecretFromKey(
+          profileSecretPath(profileName, tenantId),
+          'MEBX_PASSWORD'
+        )
       } else {
         if (profile.mebxPassword) {
           mebxPassword = profile.mebxPassword
@@ -192,7 +200,9 @@ export class ProfileManager implements IProfileManager {
       // If the TLS Config associated with profile, retrieves from DB
       if (amtProfile.tlsMode != null && amtProfile.tlsSigningAuthority) {
         if (this.secretsManager) {
-          const results = await this.secretsManager.getSecretAtPath(`TLS/${amtProfile.profileName}`)
+          const results = await this.secretsManager.getSecretAtPath(
+            profileTlsSecretPath(amtProfile.profileName, tenantId)
+          )
           amtProfile.tlsCerts = results as TLSCredentials
         }
       }
