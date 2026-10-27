@@ -10,6 +10,8 @@ import { doneFail, doneSuccess } from './doneResponse.js'
 import { devices } from '../../devices.js'
 import got from 'got'
 import { Environment } from '../../utils/Environment.js'
+import { getHostInventory } from '../../utils/hostInventory.js'
+import { type UPIDInfo } from '../../models/RCS.Config.js'
 
 export interface DeviceInfo {
   ver: string
@@ -18,6 +20,11 @@ export interface DeviceInfo {
   currentMode: string
   features: string
   ipConfiguration: { ipAddress: string }
+  osName?: string
+  osVersion?: string
+  osDistro?: string
+  serialNumber?: string
+  upid?: UPIDInfo
 }
 
 export const SyncDeviceInfoEventType = 'SYNC_DEVICE_INFO'
@@ -45,6 +52,7 @@ export class SyncDeviceInfo {
       currentMode: input.deviceInfo?.currentMode?.toString(),
       features: input.deviceInfo?.features,
       ipAddress: input.deviceInfo?.ipConfiguration.ipAddress,
+      ...getHostInventory(input.deviceInfo),
       lastUpdated: new Date()
     }
     const jsonData = {

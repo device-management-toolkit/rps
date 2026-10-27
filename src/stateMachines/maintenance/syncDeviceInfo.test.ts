@@ -99,6 +99,37 @@ describe('SyncDeviceInfo State Machine', () => {
     await implementation.saveToMPS({ input: context })
     expect(gotSpy).toHaveBeenCalled()
   })
+  it('should include host OS, serial number, and UPID in deviceInfo sent to MPS', async () => {
+    const upid = { csmeId: '094BB130B1EB87DC', oemPlatformIdType: 'Not Set (0)' }
+    context.deviceInfo = {
+      ...deviceInfo,
+      osName: 'linux',
+      osVersion: '6.8.0-45-generic',
+      osDistro: 'Ubuntu 24.04.1 LTS',
+      serialNumber: 'PF4ABCDE',
+      upid
+    }
+    gotSpy = vi.spyOn(got, 'patch').mockImplementation(() => mpsRsp)
+    await implementation.saveToMPS({ input: context })
+    const sent = (gotSpy.mock.calls[0][1] as any).json.deviceInfo
+    expect(sent).toMatchObject({
+      fwVersion: '16.1.1',
+      osName: 'linux',
+      osVersion: '6.8.0-45-generic',
+      osDistro: 'Ubuntu 24.04.1 LTS',
+      serialNumber: 'PF4ABCDE',
+      upid
+    })
+  })
+  it('should omit host inventory keys an older rpc-go does not send', async () => {
+    context.deviceInfo = deviceInfo
+    gotSpy = vi.spyOn(got, 'patch').mockImplementation(() => mpsRsp)
+    await implementation.saveToMPS({ input: context })
+    const sent = (gotSpy.mock.calls[0][1] as any).json.deviceInfo
+    expect(sent).not.toHaveProperty('osName')
+    expect(sent).not.toHaveProperty('serialNumber')
+    expect(sent).not.toHaveProperty('upid')
+  })
   it('should fail on bad response from MPS', async () => {
     mpsRsp.statusCode = 404
     mpsRsp.statusMessage = 'Device not found'

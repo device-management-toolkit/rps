@@ -281,6 +281,20 @@ export interface Payload {
   // Reported by rpc-go from the firmware; omitted by older rpc-go builds.
   weakAlgorithmsRemoved?: boolean
   lmsInstalled?: boolean
+  // Host inventory reported by rpc-go on activation and syncdeviceinfo; omitted by older builds
+  // or when the value is unavailable on the platform.
+  osName?: string
+  osVersion?: string
+  osDistro?: string
+  serialNumber?: string
+  upid?: UPIDInfo
+}
+
+// Intel Unique Platform ID as reported by rpc-go (IDs are uppercase hex).
+export interface UPIDInfo {
+  csmeId?: string
+  oemId?: string
+  oemPlatformIdType?: string
 }
 
 export interface ConnectionObject {

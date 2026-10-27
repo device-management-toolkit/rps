@@ -23,6 +23,7 @@ import { Configurator } from '../Configurator.js'
 import { Validator } from '../Validator.js'
 import { DbCreatorFactory } from '../factories/DbCreatorFactory.js'
 import { AMTUserName, GATEWAY_TIMEOUT_ERROR, asArray } from '../utils/constants.js'
+import { getHostInventory } from '../utils/hostInventory.js'
 import { CIRAConfiguration } from './ciraConfiguration.js'
 import { TLS } from './tls.js'
 import { TimeSync } from './timeMachine.js'
@@ -535,6 +536,8 @@ export class Activation {
       currentMode: clientObj.ClientData.payload.currentMode?.toString(),
       features: clientObj.ClientData.payload.features,
       ipAddress: clientObj.ClientData.payload.ipConfiguration?.ipAddress,
+      // Host OS, SMBIOS serial number, and Intel UPID reported by rpc-go.
+      ...getHostInventory(clientObj.ClientData.payload, clientObj.existingDeviceInfo),
       // Full structured per-component provisioning status (issue #2665): the exact
       // Components object RPS logs and returns to RPC, stored verbatim under `status`.
       status: applicableComponents(clientObj.status?.Components),
