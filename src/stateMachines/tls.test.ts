@@ -354,6 +354,28 @@ describe('TLS State Machine', () => {
   })
 
   it.each([
+    // [payload, root key size, expected to warn]
+    { payload: { ver: '22.0.0', weakAlgorithmsRemoved: true }, rootBits: 1024, warns: true },
+    { payload: { ver: '21.0.6' }, rootBits: 1024, warns: true },
+    { payload: { ver: '21.0.6' }, rootBits: 2048, warns: false }
+  ])(
+    'should warn=$warns when an MPS root of $rootBits bits signs for $payload',
+    async ({ payload, rootBits, warns }) => {
+      const event: TLSEvent = { type: 'CONFIGURE_TLS', clientId: clientId as string, output: { response: '' } }
+      devices[clientId].ClientData = { payload }
+      devices[clientId].tls = { rootCertKey: forge.pki.rsa.generateKeyPair(rootBits).privateKey } as any
+      context.keyPairHandle = TEST_KEY_PAIR_HANDLE
+      context.message = testKeyPairPullResponse
+      const warnSpy = vi.spyOn(tls.logger, 'warn')
+
+      await tls.addCertificate({ input: { context, event } })
+
+      const rootWarnings = warnSpy.mock.calls.filter((call) => String(call[0]).startsWith('MPS root key is'))
+      expect(rootWarnings.length).toBe(warns ? 1 : 0)
+    }
+  )
+
+  it.each([
     // Hardened firmware needs a SHA-384 leaf and a 3072-bit RPS root; the rest keep SHA-256 / 2048.
     { payload: { ver: '22.0.0', weakAlgorithmsRemoved: true }, hash: 'sha384', size: 3072 },
     { payload: { ver: '22.0.0' }, hash: 'sha384', size: 3072 },

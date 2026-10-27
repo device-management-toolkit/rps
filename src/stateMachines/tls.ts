@@ -120,6 +120,17 @@ export class TLS {
       let rootKey: any
       if (clientObj.tls?.rootCertKey) {
         rootKey = clientObj.tls.rootCertKey
+        // The MPS root's size is whatever MPS created; the policy's size only applies to a root RPS
+        // creates. Make a root that is smaller than the policy visible, since it is untested on hardened firmware.
+        const rootKeySize: number | undefined = rootKey?.n?.bitLength?.()
+        if (rootKeySize != null && rootKeySize < policy.rsaKeySize) {
+          this.logger.warn(
+            `MPS root key is ${rootKeySize}-bit, below the ${policy.rsaKeySize}-bit root size of the certificate policy ` +
+              `(version=${clientObj.ClientData?.payload?.ver ?? 'unknown'}, ` +
+              `weakAlgorithmsRemoved=${clientObj.ClientData?.payload?.weakAlgorithmsRemoved ?? 'not reported'}); ` +
+              `signing the TLS certificate with it anyway`
+          )
+        }
       } else {
         const rootCert = this.certManager.createCertificate(
           issuerAttributes,
