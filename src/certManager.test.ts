@@ -272,7 +272,6 @@ describe('certManager tests', () => {
       expect(rootCert.cert.md.algorithm).toBe('sha384')
       expect((rootCert.cert.publicKey as forge.pki.rsa.PublicKey).n.bitLength()).toBe(3072)
     })
-
   })
 
   describe('EC device keys', () => {
