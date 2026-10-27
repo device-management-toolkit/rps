@@ -1,3 +1,10 @@
+# [2.42.0](https://github.com/device-management-toolkit/rps/compare/v2.41.1...v2.42.0) (2026-10-27)
+
+
+### Features
+
+* **secrets:** add Google Cloud Secret Manager provider ([#2947](https://github.com/device-management-toolkit/rps/issues/2947)) ([5f18f66](https://github.com/device-management-toolkit/rps/commit/5f18f66714f0cdbcd4c8c4cbb231ccb1c3f79fa0)), closes [#2945](https://github.com/device-management-toolkit/rps/issues/2945)
+
 ## [2.41.1](https://github.com/device-management-toolkit/rps/compare/v2.41.0...v2.41.1) (2026-10-26)
 
 # [2.41.0](https://github.com/device-management-toolkit/rps/compare/v2.40.2...v2.41.0) (2026-10-14)
