@@ -4,20 +4,38 @@
  **********************************************************************/
 
 import { AMT } from '@device-management-toolkit/wsman-messages'
-import { assign, fromPromise, setup } from 'xstate'
-import { type CommonContext, invokeWsmanCall } from './common.js'
+import { assign, fromPromise, sendTo, setup } from 'xstate'
+import { coalesceMessage, type CommonContext, invokeWsmanCall } from './common.js'
+import { Error as ErrorStateMachine } from './error.js'
+import Logger from '../Logger.js'
 
 export interface TimeSyncContext extends CommonContext {
   status: string
+  lmsInstalled?: boolean
 }
 
 export interface TimeSyncEvent {
-  type: 'TIMETRAVEL' | 'ONFAILED'
-  clientId: string
-  data: any
+  type: 'ONFAILED'
+  output?: any
 }
 
 export class TimeSync {
+  logger = new Logger('ActivationTimeSync')
+  error: ErrorStateMachine = new ErrorStateMachine()
+
+  enableLocalTimeSync = async ({ input }: { input: TimeSyncContext }): Promise<any> => {
+    this.logger.debug('Activation time sync: sending EnableLocalTimeSync(true)')
+    const amt = new AMT.Messages()
+    input.xmlMessage = amt.TimeSynchronizationService.EnableLocalTimeSync(true)
+    const response = await invokeWsmanCall<{
+      Envelope: { Body: { EnableLocalTimeSync_OUTPUT: { ReturnValue: number } } }
+    }>(input)
+    if (response.Envelope.Body?.EnableLocalTimeSync_OUTPUT?.ReturnValue !== 0) {
+      throw new Error('Failed to ENABLE_LOCAL_TIME_SYNC')
+    }
+    return response
+  }
+
   setHighAccuracyTimeSync = async ({ input }: { input: TimeSyncContext }): Promise<any> => {
     const Tm1 = Math.round(new Date().getTime() / 1000)
     const Ta0: number = input.message.Envelope.Body.GetLowAccuracyTimeSynch_OUTPUT.Ta0
@@ -40,14 +58,21 @@ export class TimeSync {
       input: TimeSyncContext
     },
     actors: {
+      enableLocalTimeSync: fromPromise(this.enableLocalTimeSync),
       getLowAccuracyTimeSync: fromPromise(this.getLowAccuracyTimeSync),
-      setHighAccuracyTimeSync: fromPromise(this.setHighAccuracyTimeSync)
+      setHighAccuracyTimeSync: fromPromise(this.setHighAccuracyTimeSync),
+      error: this.error.machine
     },
     guards: {
+      isLmsInstalled: ({ context }) => context.lmsInstalled === true,
+      isEnableLocalTimeSyncSuccessful: ({ context }) =>
+        context.message.Envelope.Body?.EnableLocalTimeSync_OUTPUT?.ReturnValue === 0,
       isGetLowAccuracyTimeSynchSuccessful: ({ context }) =>
         context.message.Envelope.Body?.GetLowAccuracyTimeSynch_OUTPUT?.ReturnValue === 0,
       isSetHighAccuracyTimeSynchSuccessful: ({ context }) =>
-        context.message.Envelope.Body?.SetHighAccuracyTimeSynch_OUTPUT?.ReturnValue === 0
+        context.message.Envelope.Body?.SetHighAccuracyTimeSynch_OUTPUT?.ReturnValue === 0,
+      isEnableLocalTimeSync: ({ context }) => context.targetAfterError === 'ENABLE_LOCAL_TIME_SYNC',
+      isGetLowAccuracyTimeSync: ({ context }) => context.targetAfterError === 'GET_LOW_ACCURACY_TIME_SYNCH'
     }
   }).createMachine({
     context: ({ input }) => ({
@@ -57,17 +82,50 @@ export class TimeSync {
       status: input.status,
       statusMessage: input.statusMessage,
       errorMessage: input.errorMessage,
-      httpHandler: input.httpHandler
+      httpHandler: input.httpHandler,
+      lmsInstalled: input.lmsInstalled,
+      targetAfterError: input.targetAfterError
     }),
+    output: ({ context }) => ({ status: context.status, errorMessage: context.errorMessage }),
     id: 'time-machine',
     initial: 'THE_PAST',
     states: {
       THE_PAST: {
-        on: {
-          TIMETRAVEL: {
+        always: [
+          {
+            guard: 'isLmsInstalled',
+            target: 'ENABLE_LOCAL_TIME_SYNC'
+          },
+          {
             target: 'GET_LOW_ACCURACY_TIME_SYNCH'
           }
+        ]
+      },
+      ENABLE_LOCAL_TIME_SYNC: {
+        entry: assign({ message: () => '', errorMessage: () => '' }),
+        invoke: {
+          id: 'enable-local-time-sync',
+          src: 'enableLocalTimeSync',
+          input: ({ context }) => context,
+          onDone: {
+            actions: assign({ message: ({ event }) => event.output }),
+            target: 'ENABLE_LOCAL_TIME_SYNC_RESPONSE'
+          },
+          onError: {
+            actions: assign({
+              message: ({ event }) => event.error,
+              errorMessage: ({ event }) => coalesceMessage('at ENABLE_LOCAL_TIME_SYNC', event.error),
+              targetAfterError: () => 'ENABLE_LOCAL_TIME_SYNC'
+            }),
+            target: 'ERROR'
+          }
         }
+      },
+      ENABLE_LOCAL_TIME_SYNC_RESPONSE: {
+        always: [
+          { guard: 'isEnableLocalTimeSyncSuccessful', target: 'SUCCESS' },
+          { actions: assign({ errorMessage: 'Failed to ENABLE_LOCAL_TIME_SYNC' }), target: 'FAILED' }
+        ]
       },
       GET_LOW_ACCURACY_TIME_SYNCH: {
         invoke: {
@@ -82,9 +140,11 @@ export class TimeSync {
           ],
           onError: {
             actions: assign({
-              message: ({ event }) => event.error
+              message: ({ event }) => event.error,
+              errorMessage: ({ event }) => coalesceMessage('at GET_LOW_ACCURACY_TIME_SYNCH', event.error),
+              targetAfterError: () => 'GET_LOW_ACCURACY_TIME_SYNCH'
             }),
-            target: 'FAILED'
+            target: 'ERROR'
           }
         }
       },
@@ -135,10 +195,41 @@ export class TimeSync {
           }
         ]
       },
+      ERROR: {
+        entry: sendTo('error-machine', { type: 'PARSE' }),
+        invoke: {
+          src: 'error',
+          id: 'error-machine',
+          input: ({ context }) => ({ message: context.message, clientId: context.clientId }),
+          onError: {
+            actions: assign({ message: ({ event }) => event.error }),
+            target: 'FAILED'
+          },
+          onDone: 'NEXT_STATE'
+        },
+        on: {
+          ONFAILED: {
+            actions: assign({ errorMessage: ({ context, event }) => coalesceMessage(context.message, event.output) }),
+            target: 'FAILED'
+          }
+        }
+      },
+      NEXT_STATE: {
+        always: [
+          { guard: 'isEnableLocalTimeSync', target: 'ENABLE_LOCAL_TIME_SYNC' },
+          { guard: 'isGetLowAccuracyTimeSync', target: 'GET_LOW_ACCURACY_TIME_SYNCH' },
+          { target: 'SET_HIGH_ACCURACY_TIME_SYNCH' }
+        ]
+      },
       FAILED: {
+        entry: assign({
+          status: () => 'error',
+          errorMessage: ({ context }) => context.errorMessage || 'Time synchronization failed'
+        }),
         type: 'final'
       },
       SUCCESS: {
+        entry: assign({ status: () => 'success' }),
         type: 'final'
       }
     }

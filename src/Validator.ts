@@ -9,12 +9,14 @@ import { type ILogger } from './interfaces/ILogger.js'
 import { type ClientMsg, ClientAction, type Payload, ClientMethods } from './models/RCS.Config.js'
 import { ClientMsgJsonParser } from './utils/ClientMsgJsonParser.js'
 import { RPSError } from './utils/RPSError.js'
+import { getAMTCertificatePolicy } from './utils/amtCertificatePolicy.js'
 import { CommandParser } from './CommandParser.js'
 import { VersionChecker } from './VersionChecker.js'
 import { AMTUserName } from './utils/constants.js'
 import { Environment } from './utils/Environment.js'
 import got from 'got'
 import { devices } from './devices.js'
+import { applicableComponents, finalizeComponentResults, recordComponentResult } from './stateMachines/common.js'
 import { type AMTConfiguration } from './models/index.js'
 import { type Configurator } from './Configurator.js'
 import { type DeviceCredentials } from './interfaces/ISecretManagerService.js'
@@ -77,6 +79,28 @@ export class Validator implements IValidator {
     // Check for password
     if (!payload.password) {
       throw new RPSError(`Device ${payload.uuid} activation failed. Missing password.`)
+    }
+    const { deviceKeyPair } = getAMTCertificatePolicy(payload.weakAlgorithmsRemoved, payload.ver)
+    this.logger.info(
+      `Device ${payload.uuid} AMT certificate policy: version=${payload.ver ?? 'unknown'} ` +
+        `weakAlgorithmsRemoved=${payload.weakAlgorithmsRemoved ?? 'not reported'} ` +
+        `deviceKey=${deviceKeyPair.KeyAlgorithm === 1 ? 'ECC' : 'RSA'}-${deviceKeyPair.KeyLength}`
+    )
+    // Hardened firmware (AMT 22: reported by the device, or inferred from the version by an older
+    // rpc-go) needs SHA-384 provisioning, which RPS does not support yet. Fail here rather than
+    // part-way through activation.
+    if (deviceKeyPair.KeyAlgorithm === 1) {
+      const reason =
+        `AMT 22 firmware (weak algorithms removed) is not supported by RPS yet ` +
+        `(version=${payload.ver}, weakAlgorithmsRemoved=${payload.weakAlgorithmsRemoved ?? 'not reported'})`
+      // No activation state machine runs for a rejected device, so log the same per-component
+      // status it would have logged on completion.
+      recordComponentResult(clientId, 'Activation', { Result: 'Failure', Details: reason })
+      finalizeComponentResults(clientId, false)
+      this.logger.info(
+        `Provisioning status: ${JSON.stringify({ status: applicableComponents(clientObj.status?.Components) }, null, '\t')}`
+      )
+      throw new RPSError(`Device ${payload.uuid} activation failed. ${reason}.`)
     }
     // Extract TLS enforcement flag from payload
     if (msg.payload.tlsEnforced != null) {
@@ -313,6 +337,7 @@ export class Validator implements IValidator {
     switch (msg.payload.currentMode) {
       case 0: {
         this.logger.debug(`Device ${msg.payload.uuid} is in pre-provisioning mode`)
+        await this.verifyDeviceNotAlreadyRegistered(msg, profile)
         break
       }
       case 1: {
@@ -340,6 +365,43 @@ export class Validator implements IValidator {
       default: {
         throw new RPSError(`Device ${msg.payload.uuid} activation failed. It is in unknown mode.`)
       }
+    }
+  }
+
+  /**
+   * When `prevent_orphaned_devices` is enabled, refuse to re-provision a currentMode=0 device that still has an MPS record.
+   * Fails open on any lookup failure (404, unreachable MPS, auth/server errors) so the flag never blocks activation
+   * when MPS cannot answer. A non-empty response that is not parseable JSON is treated as "registered" (fail closed),
+   * matching getDeviceFromMPS in the activation state machine.
+   */
+  async verifyDeviceNotAlreadyRegistered(msg: ClientMsg, profile: AMTConfiguration): Promise<void> {
+    if (Environment.Config.prevent_orphaned_devices !== true) {
+      return
+    }
+    let isRegistered = false
+    try {
+      const result = await got(
+        `${Environment.Config.mps_server}/api/v1/devices/${msg.payload.uuid}?tenantId=${encodeURIComponent(profile.tenantId ?? '')}`,
+        { method: 'GET' }
+      )
+      if (result?.body != null && result.body !== '') {
+        try {
+          const existing = typeof result.body === 'string' ? JSON.parse(result.body) : result.body
+          isRegistered = existing?.guid != null
+        } catch {
+          // MPS returned a non-empty but unparseable body for this GUID: assume a record exists.
+          isRegistered = true
+        }
+      }
+    } catch (err) {
+      this.logger.debug(`MPS lookup for ${msg.payload.uuid} failed (${err?.message ?? err}); allowing activation`)
+      return
+    }
+    if (isRegistered) {
+      throw new RPSError(
+        `Device ${msg.payload.uuid} already has a record in MPS and cannot be re-provisioned from ` +
+          `pre-provisioning mode. Remove the device (rpc-go deactivation or the REST API) before re-adding it.`
+      )
     }
   }
 

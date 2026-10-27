@@ -25,6 +25,7 @@ import { DbCreatorFactory } from '../factories/DbCreatorFactory.js'
 import { AMTUserName, GATEWAY_TIMEOUT_ERROR, asArray } from '../utils/constants.js'
 import { CIRAConfiguration } from './ciraConfiguration.js'
 import { TLS } from './tls.js'
+import { TimeSync } from './timeMachine.js'
 import {
   type CommonContext,
   invokeWsmanCall,
@@ -89,6 +90,12 @@ export class Activation {
   cira: CIRAConfiguration = new CIRAConfiguration()
   unconfiguration: Unconfiguration = new Unconfiguration()
   tls: TLS = new TLS()
+  timeSync: TimeSync = new TimeSync()
+
+  logActivationTimeSyncDecision = ({ context }: { context: ActivationContext }): void => {
+    const lmsInstalled = devices[context.clientId]?.ClientData?.payload?.lmsInstalled === true
+    this.logger.debug(`Activation time sync: lmsInstalled=${lmsInstalled}`)
+  }
 
   updateCredentials({ context }): void {
     const device = devices[context.clientId]
@@ -1286,6 +1293,7 @@ export class Activation {
       featuresConfiguration: this.featuresConfiguration.machine,
       cira: this.cira.machine,
       tls: this.tls.machine,
+      timeSync: this.timeSync.machine,
       error: this.error.machine
     },
     delays: {
@@ -2590,11 +2598,11 @@ export class Activation {
             {
               // AMT <19 with --tls-tunnel: certs already provisioned during tunnel setup, skip.
               guard: 'isTLSEnforced',
-              target: 'PROVISIONED'
+              target: 'SYNC_ACTIVATION_TIME'
             },
             {
               // AMT <19 without --tls-tunnel: no post-provisioning TLS needed, stay on port 16992.
-              target: 'PROVISIONED'
+              target: 'SYNC_ACTIVATION_TIME'
             }
           ]
         }
@@ -2615,7 +2623,7 @@ export class Activation {
             amt: context.amt,
             tenantId: context.tenantId
           }),
-          onDone: 'PROVISIONED'
+          onDone: 'SYNC_ACTIVATION_TIME'
         }
       },
       FETCH_POST_PROVISIONING_ROOT_KEY: {
@@ -2657,7 +2665,7 @@ export class Activation {
               guard: 'hasIssuedTlsCert',
               target: 'SAVE_POST_PROVISIONING_CERTS'
             },
-            { target: 'PROVISIONED' }
+            { target: 'SYNC_ACTIVATION_TIME' }
           ]
         }
       },
@@ -2677,7 +2685,7 @@ export class Activation {
               guard: 'hasCIRAProfile',
               target: 'CIRA'
             },
-            { target: 'PROVISIONED' }
+            { target: 'SYNC_ACTIVATION_TIME' }
           ],
           onError: [
             {
@@ -2689,7 +2697,7 @@ export class Activation {
               guard: 'hasCIRAProfile',
               target: 'CIRA'
             },
-            { target: 'PROVISIONED' }
+            { target: 'SYNC_ACTIVATION_TIME' }
           ]
         }
       },
@@ -2711,6 +2719,37 @@ export class Activation {
             }),
             target: 'FINAL'
           }
+        }
+      },
+      SYNC_ACTIVATION_TIME: {
+        entry: this.logActivationTimeSyncDecision,
+        invoke: {
+          src: 'timeSync',
+          id: 'activation-time-machine',
+          input: ({ context }) => ({
+            ...context,
+            lmsInstalled: devices[context.clientId]?.ClientData?.payload?.lmsInstalled === true
+          }),
+          onDone: [
+            {
+              guard: ({ event }) => (event.output as any)?.status === 'success',
+              target: 'PROVISIONED'
+            },
+            {
+              actions: assign({
+                errorMessage: ({ event }) =>
+                  `Time synchronization failed: ${(event.output as any)?.errorMessage ?? 'unknown error'}`
+              }),
+              target: 'FAILED'
+            }
+          ],
+          onError: {
+            actions: assign({ errorMessage: ({ event }) => `Time synchronization failed: ${String(event.error)}` }),
+            target: 'FAILED'
+          }
+        },
+        on: {
+          ONFAILED: 'FAILED'
         }
       },
       PROVISIONED: {

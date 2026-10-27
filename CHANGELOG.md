@@ -1,3 +1,30 @@
+# [2.42.0](https://github.com/device-management-toolkit/rps/compare/v2.41.1...v2.42.0) (2026-10-27)
+
+
+### Features
+
+* **secrets:** add Google Cloud Secret Manager provider ([#2947](https://github.com/device-management-toolkit/rps/issues/2947)) ([5f18f66](https://github.com/device-management-toolkit/rps/commit/5f18f66714f0cdbcd4c8c4cbb231ccb1c3f79fa0)), closes [#2945](https://github.com/device-management-toolkit/rps/issues/2945)
+
+## [2.41.1](https://github.com/device-management-toolkit/rps/compare/v2.41.0...v2.41.1) (2026-10-26)
+
+# [2.41.0](https://github.com/device-management-toolkit/rps/compare/v2.40.2...v2.41.0) (2026-10-14)
+
+
+### Features
+
+* Add AMT Local Time Synchronization Support ([#2912](https://github.com/device-management-toolkit/rps/issues/2912)) ([c4a5695](https://github.com/device-management-toolkit/rps/commit/c4a5695bba51f3f2ddd2603100c56219cc28bcb7)), closes [#2905](https://github.com/device-management-toolkit/rps/issues/2905)
+
+## [2.40.2](https://github.com/device-management-toolkit/rps/compare/v2.40.1...v2.40.2) (2026-09-21)
+
+## [2.40.1](https://github.com/device-management-toolkit/rps/compare/v2.40.0...v2.40.1) (2026-08-26)
+
+# [2.40.0](https://github.com/device-management-toolkit/rps/compare/v2.39.4...v2.40.0) (2026-08-21)
+
+
+### Features
+
+* **activation:** prevent orphaned MPS device records on re-provision ([#2873](https://github.com/device-management-toolkit/rps/issues/2873)) ([624c6d6](https://github.com/device-management-toolkit/rps/commit/624c6d6432abbf76c3a5bca25c416c3a12baa8dc))
+
 ## [2.39.4](https://github.com/device-management-toolkit/rps/compare/v2.39.3...v2.39.4) (2026-07-28)
 
 ## [2.39.3](https://github.com/device-management-toolkit/rps/compare/v2.39.2...v2.39.3) (2026-07-28)

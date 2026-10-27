@@ -15,8 +15,10 @@ import { VersionChecker } from './VersionChecker.js'
 import { devices } from './devices.js'
 import { ClientAction, type ClientObject } from './models/RCS.Config.js'
 import { type DeviceCredentials } from './interfaces/ISecretManagerService.js'
+import got from 'got'
 
 import { vi } from 'vitest'
+vi.mock('got')
 Environment.Config = config
 const configurator: Configurator = new Configurator()
 const validator = new Validator(new Logger('Validator'), configurator)
@@ -355,6 +357,39 @@ describe('validator', () => {
       expect(rpsError).toBeInstanceOf(RPSError)
       expect(rpsError.message).toEqual(`Device ${msg.payload.uuid} activation failed. Missing password.`)
     })
+    test.each([
+      { ver: '22.0.0', weakAlgorithmsRemoved: true }, // reported
+      { ver: '22.0.0', weakAlgorithmsRemoved: undefined }, // older rpc-go, inferred from the version
+      { ver: '21.0.6', weakAlgorithmsRemoved: true } // reported on an older version
+    ])('should reject hardened firmware: %j', async ({ ver, weakAlgorithmsRemoved }) => {
+      msg.payload.ver = ver
+      msg.payload.weakAlgorithmsRemoved = weakAlgorithmsRemoved
+      await expect(validator.validateActivationMsg(msg, clientId)).rejects.toThrow(
+        `Device ${msg.payload.uuid} activation failed. AMT 22 firmware (weak algorithms removed) is not supported by RPS yet ` +
+          `(version=${ver}, weakAlgorithmsRemoved=${weakAlgorithmsRemoved ?? 'not reported'}).`
+      )
+    })
+    test('should log the provisioning status of a rejected AMT 22 device', async () => {
+      devices[clientId].status = {} as any
+      msg.payload.ver = '22.0.0'
+      msg.payload.weakAlgorithmsRemoved = true
+      const infoSpy = vi.spyOn((validator as any).logger, 'info')
+
+      await expect(validator.validateActivationMsg(msg, clientId)).rejects.toThrow()
+
+      const statusLog = infoSpy.mock.calls
+        .map((call) => String(call[0]))
+        .find((line) => line.startsWith('Provisioning status:'))
+      expect(JSON.parse(statusLog.replace('Provisioning status: ', ''))).toEqual({
+        status: {
+          Activation: {
+            Result: 'Failure',
+            Details:
+              'AMT 22 firmware (weak algorithms removed) is not supported by RPS yet (version=22.0.0, weakAlgorithmsRemoved=true)'
+          }
+        }
+      })
+    })
     test('should throw an exception if profile does not match', async () => {
       const getAMTProfileSpy = vi.spyOn(configurator.profileManager, 'getAmtProfile').mockReturnValue(null as any)
       let rpsError: any = null
@@ -566,11 +601,70 @@ describe('validator', () => {
       }
       setNextStepsForConfigurationSpy = vi.spyOn(validator, 'setNextStepsForConfiguration')
     })
-    test('should set nothing when current mode is 0', async () => {
+    afterEach(() => {
+      Environment.Config.prevent_orphaned_devices = false
+    })
+    test('should set nothing when current mode is 0 and orphan prevention is disabled (default)', async () => {
       msg.payload.currentMode = 0
+      Environment.Config.prevent_orphaned_devices = false
+      vi.mocked(got).mockClear()
       devices[clientId] = { ClientId: clientId, ClientSocket: null as any, unauthCount: 0, status: {} } as any
       await validator.verifyCurrentModeForActivation(msg, profile, clientId)
       expect(devices[clientId].status.Status).toBeUndefined()
+      expect(got).not.toHaveBeenCalled()
+    })
+    test('should set nothing when current mode is 0 and device has no MPS record', async () => {
+      msg.payload.currentMode = 0
+      Environment.Config.prevent_orphaned_devices = true
+      devices[clientId] = { ClientId: clientId, ClientSocket: null as any, unauthCount: 0, status: {} } as any
+      vi.mocked(got).mockClear()
+      vi.mocked(got).mockResolvedValue({ body: '' } as any)
+      await validator.verifyCurrentModeForActivation(msg, profile, clientId)
+      expect(got).toHaveBeenCalledTimes(1)
+      expect(devices[clientId].status.Status).toBeUndefined()
+    })
+    test('should throw when current mode is 0 but a device record still exists in MPS', async () => {
+      msg.payload.currentMode = 0
+      Environment.Config.prevent_orphaned_devices = true
+      devices[clientId] = { ClientId: clientId, ClientSocket: null as any, unauthCount: 0, status: {} } as any
+      vi.mocked(got).mockResolvedValue({ body: JSON.stringify({ guid: msg.payload.uuid }) } as any)
+      let rpsError: any = null
+      try {
+        await validator.verifyCurrentModeForActivation(msg, profile, clientId)
+      } catch (error) {
+        rpsError = error
+      }
+      expect(rpsError).toBeInstanceOf(RPSError)
+      expect(rpsError.message).toContain('already has a record in MPS')
+    })
+    test('should proceed when current mode is 0 and MPS has no record (fails open)', async () => {
+      msg.payload.currentMode = 0
+      Environment.Config.prevent_orphaned_devices = true
+      devices[clientId] = { ClientId: clientId, ClientSocket: null as any, unauthCount: 0, status: {} } as any
+      vi.mocked(got).mockClear()
+      vi.mocked(got).mockRejectedValue(new Error('Response code 404'))
+      await validator.verifyCurrentModeForActivation(msg, profile, clientId)
+      expect(got).toHaveBeenCalledTimes(1)
+      expect(devices[clientId].status.Status).toBeUndefined()
+    })
+    test('should throw when current mode is 0 and MPS returns a non-empty unparseable body (fails closed)', async () => {
+      msg.payload.currentMode = 0
+      Environment.Config.prevent_orphaned_devices = true
+      devices[clientId] = { ClientId: clientId, ClientSocket: null as any, unauthCount: 0, status: {} } as any
+      vi.mocked(got).mockResolvedValue({ body: 'not json' } as any)
+      await expect(validator.verifyCurrentModeForActivation(msg, profile, clientId)).rejects.toThrow(
+        'already has a record in MPS'
+      )
+    })
+    test('should URL-encode tenantId in the MPS lookup', async () => {
+      msg.payload.currentMode = 0
+      Environment.Config.prevent_orphaned_devices = true
+      profile.tenantId = 'a b/c'
+      devices[clientId] = { ClientId: clientId, ClientSocket: null as any, unauthCount: 0, status: {} } as any
+      vi.mocked(got).mockClear()
+      vi.mocked(got).mockResolvedValue({ body: '' } as any)
+      await validator.verifyCurrentModeForActivation(msg, profile, clientId)
+      expect(vi.mocked(got).mock.calls[0][0]).toContain('tenantId=a%20b%2Fc')
     })
     test('should set status as already enabled in client mode, when current mode is 1', async () => {
       msg.payload.currentMode = 1

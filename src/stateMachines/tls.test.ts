@@ -42,6 +42,7 @@ describe('TLS State Machine', () => {
     devices[clientId] = {
       status: {},
       hostname: 'WinDev2211Eval',
+      ClientData: { payload: { lmsInstalled: true } },
       ClientSocket: { send: vi.fn() },
       tls: {}
     } as any
@@ -65,7 +66,6 @@ describe('TLS State Machine', () => {
 
     config = {
       actors: {
-        timeSync: fromPromise(async ({ input }) => await Promise.resolve({})),
         errorMachine: fromPromise(async ({ input }) => await Promise.resolve({})),
         enumeratePublicKeyCertificate: fromPromise(async ({ input }) => await Promise.resolve({})),
         pullPublicKeyCertificate: fromPromise(
@@ -139,7 +139,6 @@ describe('TLS State Machine', () => {
         'ENUMERATE_TLS_CREDENTIAL_CONTEXT',
         'PULL_TLS_CREDENTIAL_CONTEXT',
         'CREATE_TLS_CREDENTIAL_CONTEXT',
-        'SYNC_TIME',
         'ENUMERATE_TLS_DATA',
         'PULL_TLS_DATA',
         'PUT_REMOTE_TLS_DATA',
@@ -208,7 +207,6 @@ describe('TLS State Machine', () => {
         'ENUMERATE_TLS_CREDENTIAL_CONTEXT',
         'PULL_TLS_CREDENTIAL_CONTEXT',
         'PUT_TLS_CREDENTIAL_CONTEXT',
-        'SYNC_TIME',
         'ENUMERATE_TLS_DATA',
         'PULL_TLS_DATA',
         'PUT_REMOTE_TLS_DATA',
@@ -320,8 +318,22 @@ describe('TLS State Machine', () => {
     expect(invokeWsmanCallSpy).toHaveBeenCalled()
   })
 
-  it('should generateKeyPair', async () => {
+  it.each([
+    // The SDK allows exactly two key pairs: KeyAlgorithm 0 / RSA-2048 and
+    // KeyAlgorithm 1 / ECC-384. Any other size returns 2066 PT_STATUS_UNSUPPORTED.
+    { payload: { ver: '21.0.6' }, expected: { KeyAlgorithm: 0, KeyLength: 2048 } },
+    { payload: { ver: '22.0.0' }, expected: { KeyAlgorithm: 1, KeyLength: 384 } },
+    { payload: { ver: '22.0.0', weakAlgorithmsRemoved: false }, expected: { KeyAlgorithm: 0, KeyLength: 2048 } },
+    { payload: { ver: '21.0.6', weakAlgorithmsRemoved: true }, expected: { KeyAlgorithm: 1, KeyLength: 384 } }
+  ])('should ask AMT for $expected given $payload', async ({ payload, expected }) => {
+    devices[clientId].ClientData = { payload }
+    const generateKeyPairSpy = vi
+      .spyOn(context.amt.PublicKeyManagementService, 'GenerateKeyPair')
+      .mockReturnValue({} as any)
+
     await tls.generateKeyPair({ input: context })
+
+    expect(generateKeyPairSpy).toHaveBeenCalledWith(expected)
     expect(invokeWsmanCallSpy).toHaveBeenCalled()
   })
   it('should addTrustedRootCertificate with pre-configured cert', async () => {
@@ -522,7 +534,6 @@ describe('TLS State Machine', () => {
         'ENUMERATE_TLS_CREDENTIAL_CONTEXT',
         'PULL_TLS_CREDENTIAL_CONTEXT',
         'CREATE_TLS_CREDENTIAL_CONTEXT',
-        'SYNC_TIME',
         'ENUMERATE_TLS_DATA',
         'PULL_TLS_DATA',
         'PUT_REMOTE_TLS_DATA',

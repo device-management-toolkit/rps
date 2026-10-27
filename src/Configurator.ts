@@ -56,13 +56,11 @@ export class Configurator {
             .catch((err) => {
               log.error(err)
               reject(err)
-              throw new Error('Unable to get secret manager configuration')
             })
         })
         .catch((err) => {
           log.error(err)
           reject(err)
-          throw new Error('Unable to get db configuration')
         })
     })
   }

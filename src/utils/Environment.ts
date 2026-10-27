@@ -33,6 +33,10 @@ config.amt_legacy_tls_compatibility = config.amt_legacy_tls_compatibility ?? fal
 // When true, the TLS tunnel is reused across WSMAN calls (keep-alive). When false,
 // the tunnel is torn down and re-established for every message (Connection: close).
 config.amt_tls_tunnel_persistent = config.amt_tls_tunnel_persistent ?? true
+// When true, a device that reports pre-provisioning mode but still has a record in the
+// MPS devices table must be removed (rpc-go deactivation or the REST API) before it can be
+// re-provisioned. Keeps the MPS devices table free of orphaned records. Off by default.
+config.prevent_orphaned_devices = config.prevent_orphaned_devices ?? false
 log.silly(`config: ${JSON.stringify(config, null, 2)}`)
 
 const Environment = {

@@ -26,7 +26,7 @@ export async function getHealthCheck(req: Request, res: Response): Promise<void>
         status: 'OK'
       },
       secretStore: {
-        name: 'VAULT',
+        name: Environment.Config.secrets_provider.toUpperCase(),
         status: 'OK'
       }
     }
@@ -72,6 +72,10 @@ export async function getSecretStoreHealth(secretsManager: ISecretManagerService
     const secretProviderResponse = await secretsManager.health()
     return secretProviderResponse
   } catch (secretProviderError) {
+    // Providers other than Vault report their own status name instead of a Vault status code.
+    if (typeof secretProviderError?.healthStatus === 'string') {
+      return secretProviderError.healthStatus
+    }
     if (secretProviderError.error) {
       return VAULT_RESPONSE_CODES(secretProviderError.error.code)
     } else {

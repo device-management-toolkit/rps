@@ -33,10 +33,21 @@ export interface SetHighAccuracyTimeSynchResponse {
   }
 }
 
+export interface EnableLocalTimeSyncResponse {
+  Envelope: {
+    Body: {
+      EnableLocalTimeSync_OUTPUT: {
+        ReturnValue: number
+      }
+    }
+  }
+}
+
 export const SyncTimeEventType = 'SYNC_TIME'
 export interface SyncTimeEvent {
   type: typeof SyncTimeEventType | 'ONFAILED'
   clientId: string
+  lmsAvailable?: boolean
   output?: any
 }
 
@@ -52,6 +63,16 @@ const amt = new AMT.Messages()
 const logger = new Logger('syncTime')
 
 export class SyncTime {
+  enableLocalTimeSync = async ({ input }: { input: SyncTimeContext }): Promise<void> => {
+    input.xmlMessage = amt.TimeSynchronizationService.EnableLocalTimeSync(true)
+    const rsp = await invokeWsmanCall<EnableLocalTimeSyncResponse>(input)
+    const output = rsp.Envelope.Body.EnableLocalTimeSync_OUTPUT
+    if (output?.ReturnValue !== PTStatus.SUCCESS.value) {
+      const msg = `ReturnValue ${getPTStatusName(output?.ReturnValue)}`
+      throw new Error(msg)
+    }
+  }
+
   getLowAccuracyTimeSync = async ({ input }: { input: SyncTimeContext }): Promise<LowAccuracyData> => {
     input.xmlMessage = amt.TimeSynchronizationService.GetLowAccuracyTimeSynch()
     const rsp = await invokeWsmanCall<GetLowAccuracyTimeSynchResponse>(input)
@@ -91,12 +112,14 @@ export class SyncTime {
       input: SyncTimeContext
     },
     actors: {
+      enableLocalTimeSync: fromPromise(this.enableLocalTimeSync.bind(this)),
       getLowAccuracyTimeSync: fromPromise(this.getLowAccuracyTimeSync.bind(this)),
       setHighAccuracyTimeSynch: fromPromise(this.setHighAccuracyTimeSynch.bind(this)),
       error: this.error.machine
     },
     guards: {
-      isLowAccuracy: ({ context, event }) => context.targetAfterError === 'GET_LOW_ACCURACY_TIME_SYNCH'
+      isEnableLocalTimeSync: ({ context }) => context.targetAfterError === 'ENABLE_LOCAL_TIME_SYNC',
+      isLowAccuracy: ({ context }) => context.targetAfterError === 'GET_LOW_ACCURACY_TIME_SYNCH'
     }
   }).createMachine({
     /** @xstate-layout N4IgpgJg5mDOIC5SwJ4DsDGBaALgSwFswA6ASQDlSAVUgQQBkBiAZQE1yBhAfRoFkBRANoAGALqJQABwD2sPPmloJIAB6IsARgBsAZmIAmHVoAsATmMBWLQHZzwrQBoQKRKeLHj16wA59w75a2FhbeAL6hTqiYuIQkAOL8VFz0APIA6ly0HBwAqgBKWaw8pAJcbJwAEowQiiR4aABu0gDWJDA4WAA20gDuWACGGBgArgBOgygxRFhRGAAWIuJIIDJyCkrLagg6tsQ6xjveGho6wgcWlk4uCJqnxBreWqbe+7be9qbhkejY+ETECSSqQyWVyBQ4RT4-DK7A4VTAo1G0lGxEknX6OAAZsiCMR2l1egMhmMJlMwDMfgsxMpVvI8IplFsdm59odjqdzpdnIh9N49mdPKYTtYNPprIYviBZmTiMxElwKqQ4hVMtl8oViqVynDqrViPUmq1iLAwB05ngoHMiSNxhhJn9ybMqUspLI6QzNogNPY+fZRRofBYNMYNBZrFd1KG3P4dDp9LynpZjGEIlKfjK5UlFcrVWCNVCYZVGAikSi0RjsaNcSazRarYMbaSHRTMM6aW71oyvT7iH79AHvEGQ2GIzdjvpiL5rFp3s8tCYbCnU2hpBA4MppQ722t6RtQFssLHhMQrDszFoLKZ-F5HNybvozPded4r8JTDoTtprJLN7EyJQaAYbd3T3VR1F5CdT2sc9L2vadRw-SdY10b1kyOXRHh-dMHQBeVgVzdUIU1aFtQqYDO09MctGILR+yFC9gwDUVTFHTRe2EYQw2EEUAx0UwH1jLDohwzMFSVFVQUIyEShI2EyOWWkKP3RAbAnN9gj8PwZzfVjgwnE4xVOF5ggMrQhN+P8ADFaFIeh+AAEXI3cuwQE4TEnfjbDfTibFMCxR2MY9eVFWDgg5UwzNTX9-mYHJsn4ZhmCcj1lNcoxjA8sUryvKwgl0rQNGIcxrGEHZ-HjZNwnCIA */
@@ -115,9 +138,38 @@ export class SyncTime {
     states: {
       INITIAL: {
         on: {
-          SYNC_TIME: {
-            actions: assign({ clientId: ({ event }) => event.clientId }),
-            target: 'GET_LOW_ACCURACY_TIME_SYNCH'
+          SYNC_TIME: [
+            {
+              guard: ({ event }) => event.lmsAvailable === true,
+              actions: assign({ clientId: ({ event }) => event.clientId }),
+              target: 'ENABLE_LOCAL_TIME_SYNC'
+            },
+            {
+              actions: assign({ clientId: ({ event }) => event.clientId }),
+              target: 'GET_LOW_ACCURACY_TIME_SYNCH'
+            }
+          ]
+        }
+      },
+      ENABLE_LOCAL_TIME_SYNC: {
+        entry: assign({
+          message: () => '',
+          errorMessage: () => ''
+        }),
+        invoke: {
+          id: 'enable-local-time-sync',
+          src: 'enableLocalTimeSync',
+          input: ({ context }) => context,
+          onDone: {
+            target: 'SUCCESS'
+          },
+          onError: {
+            actions: assign({
+              message: ({ event }) => event.error,
+              errorMessage: ({ event }) => coalesceMessage('at ENABLE_LOCAL_TIME_SYNC', event.error),
+              targetAfterError: () => 'ENABLE_LOCAL_TIME_SYNC'
+            }),
+            target: 'ERROR'
           }
         }
       },
@@ -190,6 +242,10 @@ export class SyncTime {
       },
       NEXT_STATE: {
         always: [
+          {
+            guard: 'isEnableLocalTimeSync',
+            target: 'ENABLE_LOCAL_TIME_SYNC'
+          },
           {
             guard: 'isLowAccuracy',
             target: 'GET_LOW_ACCURACY_TIME_SYNCH'
