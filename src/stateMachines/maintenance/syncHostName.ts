@@ -13,6 +13,7 @@ import { Environment } from '../../utils/Environment.js'
 import { devices } from '../../devices.js'
 import { invokeWsmanCall } from '../common.js'
 import { Error as ErrorStateMachine } from './../error.js'
+import { SecretManagerCreatorFactory } from '../../factories/SecretManagerCreatorFactory.js'
 
 export interface HostNameInfo {
   dnsSuffixOS: string
@@ -67,6 +68,13 @@ export class SyncHostName {
     return rsp.Envelope.Body.AMT_GeneralSettings
   }
 
+  saveSecretMetadata = async ({ input }: { input: SyncHostNameContext }): Promise<void> => {
+    const secretMgr = await new SecretManagerCreatorFactory().getSecretManager(new Logger('SecretManagerService'))
+    await secretMgr.writeSecretMetadata?.(`devices/${devices[input.clientId].uuid}`, {
+      hostname: input.hostNameInfo.hostname
+    })
+  }
+
   saveToMPS = async ({ input }: { input: SyncHostNameContext }): Promise<string> => {
     const clientObj = devices[input.clientId]
     const url = `${Environment.Config.mps_server}/api/v1/devices`
@@ -97,6 +105,7 @@ export class SyncHostName {
     actors: {
       getGeneralSettings: fromPromise(this.getGeneralSettings),
       putGeneralSettings: fromPromise(this.putGeneralSettings),
+      saveSecretMetadata: fromPromise(this.saveSecretMetadata),
       saveToMPS: fromPromise(this.saveToMPS),
       error: this.error.machine
     },
@@ -163,13 +172,27 @@ export class SyncHostName {
           id: 'put-host-name-info',
           onDone: {
             actions: assign({ statusMessage: ({ event }) => event.output as string }),
-            target: 'SAVE_TO_MPS'
+            target: 'SAVE_SECRET_METADATA'
           },
           onError: {
             actions: assign({
               errorMessage: ({ event }) => coalesceMessage('at PUT_GENERAL_SETTINGS', event.error)
             }),
             target: 'FAILED'
+          }
+        }
+      },
+      SAVE_SECRET_METADATA: {
+        invoke: {
+          src: 'saveSecretMetadata',
+          input: ({ context }) => context,
+          id: 'save-secret-metadata',
+          onDone: 'SAVE_TO_MPS',
+          onError: {
+            actions: ({ event }) => {
+              logger.warn(`failed to save secret metadata: ${coalesceMessage('at SAVE_SECRET_METADATA', event.error)}`)
+            },
+            target: 'SAVE_TO_MPS'
           }
         }
       },

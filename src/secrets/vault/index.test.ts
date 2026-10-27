@@ -131,6 +131,108 @@ it('should return false if the path does not exist', async () => {
   expect(gotFailSpy).toHaveBeenCalledWith(badPath, { json: { data: secretCert } })
 })
 
+describe('secret metadata', () => {
+  const metadataArgs = (path: string, hostname: string): [string, object] => [
+    path,
+    {
+      prefixUrl: `${Environment.Config.vault_address}/v1/secret/metadata/`,
+      headers: { 'Content-Type': 'application/merge-patch+json' },
+      json: { custom_metadata: { hostname } }
+    }
+  ]
+  let postSpy: MockInstance
+  let patchSpy: MockInstance
+  let warnSpy: MockInstance
+
+  beforeEach(() => {
+    Environment.Config = { ...config, secrets_path: 'secret/data/' }
+    postSpy = vi
+      .spyOn(secretManagerService.gotClient, 'post')
+      .mockImplementation(() => ({ json: vi.fn(async () => await Promise.resolve(secretCert)) }) as any)
+    patchSpy = vi
+      .spyOn(secretManagerService.gotClient, 'patch')
+      .mockImplementation(() => ({ json: vi.fn(async () => await Promise.resolve({})) }) as any)
+    warnSpy = vi.spyOn(secretManagerService.logger, 'warn').mockImplementation(() => undefined as any)
+  })
+
+  afterEach(() => {
+    Environment.Config = config
+  })
+
+  it('should patch custom_metadata after the data write and return the data response', async () => {
+    const result = await secretManagerService.writeSecretWithObject('devices/x', secretCert, { hostname: 'h1' })
+    expect(result).toEqual(secretCert)
+    expect(postSpy).toHaveBeenCalledWith('devices/x', { json: { data: secretCert } })
+    expect(patchSpy).toHaveBeenCalledWith(...metadataArgs('devices/x', 'h1'))
+    expect(postSpy.mock.invocationCallOrder[0]).toBeLessThan(patchSpy.mock.invocationCallOrder[0])
+  })
+
+  it.each([
+    [undefined],
+    [{}],
+    [{ hostname: '' }]
+  ])('should not patch for metadata %j', async (metadata) => {
+    const result = await secretManagerService.writeSecretWithObject('devices/x', secretCert, metadata)
+    expect(result).toEqual(secretCert)
+    expect(patchSpy).not.toHaveBeenCalled()
+  })
+
+  it('should return the data response and warn when the metadata patch fails', async () => {
+    patchSpy.mockImplementation(
+      () => ({ json: vi.fn(async () => await Promise.reject(new Error('metadata boom'))) }) as any
+    )
+    const result = await secretManagerService.writeSecretWithObject('devices/x', secretCert, { hostname: 'h1' })
+    expect(result).toEqual(secretCert)
+    expect(patchSpy).toHaveBeenCalled()
+    expect(warnSpy).toHaveBeenCalled()
+  })
+
+  it('should skip the patch when secrets_path has no /data/ segment', async () => {
+    Environment.Config = { ...config, secrets_path: 'kv/' }
+    const result = await secretManagerService.writeSecretWithObject('devices/x', secretCert, { hostname: 'h1' })
+    expect(result).toEqual(secretCert)
+    expect(postSpy).toHaveBeenCalled()
+    expect(patchSpy).not.toHaveBeenCalled()
+  })
+
+  it('should return null and not patch when the data write fails', async () => {
+    postSpy.mockImplementation(() => ({ json: vi.fn(async () => await Promise.reject(new Error('data boom'))) }) as any)
+    const result = await secretManagerService.writeSecretWithObject('devices/x', secretCert, { hostname: 'h1' })
+    expect(result).toBeNull()
+    expect(patchSpy).not.toHaveBeenCalled()
+  })
+
+  it('should send the metadata patch when called directly', async () => {
+    await secretManagerService.writeSecretMetadata('devices/x', { hostname: 'h1' })
+    expect(patchSpy).toHaveBeenCalledWith(...metadataArgs('devices/x', 'h1'))
+  })
+
+  it('should not patch when called directly with an empty hostname', async () => {
+    await secretManagerService.writeSecretMetadata('devices/x', { hostname: '' })
+    expect(patchSpy).not.toHaveBeenCalled()
+  })
+
+  it('should resolve without patching when secrets_path is undefined', async () => {
+    Environment.Config = { ...config, secrets_path: undefined as any }
+    await expect(secretManagerService.writeSecretMetadata('devices/x', { hostname: 'h1' })).resolves.toBeUndefined()
+    expect(patchSpy).not.toHaveBeenCalled()
+  })
+
+  it('should include a non-Error rejection in the warning', async () => {
+    patchSpy.mockImplementation(() => ({ json: vi.fn(async () => await Promise.reject('boom')) }) as any)
+    await secretManagerService.writeSecretMetadata('devices/x', { hostname: 'h1' })
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('boom'))
+  })
+
+  it('should resolve and warn when called directly and the patch rejects', async () => {
+    patchSpy.mockImplementation(
+      () => ({ json: vi.fn(async () => await Promise.reject(new Error('metadata boom'))) }) as any
+    )
+    await expect(secretManagerService.writeSecretMetadata('devices/x', { hostname: 'h1' })).resolves.toBeUndefined()
+    expect(warnSpy).toHaveBeenCalled()
+  })
+})
+
 it('should get health of vault', async () => {
   const data = {
     initialized: true,

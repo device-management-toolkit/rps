@@ -7,6 +7,7 @@ import {
   type CiraConfigSecrets,
   type DeviceCredentials,
   type ISecretManagerService,
+  type SecretMetadata,
   type TLSCredentials,
   type WifiCredentials
 } from '../../interfaces/ISecretManagerService.js'
@@ -65,7 +66,7 @@ export class VaultService implements ISecretManagerService {
     }
   }
 
-  async writeSecretWithObject(path: string, data: any): Promise<any> {
+  async writeSecretWithObject(path: string, data: any, metadata?: SecretMetadata): Promise<any> {
     try {
       const json = {
         data
@@ -73,11 +74,36 @@ export class VaultService implements ISecretManagerService {
       this.logger.verbose('writing data to vault:')
       const rspJson: any = await this.gotClient.post(path, { json }).json()
       this.logger.debug(`Successfully written data to vault at path: ${path}, result: ${JSON.stringify(rspJson)}`)
+      if (metadata?.hostname) {
+        await this.writeSecretMetadata(path, metadata)
+      }
       return rspJson
     } catch (error) {
       this.logger.error('writeSecretWithObject error \r\n')
       this.logger.error(error)
       return null
+    }
+  }
+
+  async writeSecretMetadata(path: string, metadata: SecretMetadata): Promise<void> {
+    if (!metadata.hostname || !Environment.Config.secrets_path?.includes('/data/')) {
+      this.logger.debug(`skipping secret metadata write for ${path}`)
+      return
+    }
+    try {
+      const basePath = Environment.Config.secrets_path.replace('/data/', '/metadata/')
+      await this.gotClient
+        .patch(path, {
+          prefixUrl: `${Environment.Config.vault_address}/v1/${basePath}`,
+          headers: { 'Content-Type': 'application/merge-patch+json' },
+          json: { custom_metadata: { hostname: metadata.hostname } }
+        })
+        .json()
+      this.logger.debug(`Successfully written secret metadata at path: ${path}`)
+    } catch (error) {
+      this.logger.warn(
+        `failed to write secret metadata at path ${path}: ${error instanceof Error ? error.message : String(error)}`
+      )
     }
   }
 

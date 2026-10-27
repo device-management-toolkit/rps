@@ -519,7 +519,9 @@ export class Activation {
       return false
     }
 
-    await this.configurator.secretsManager.writeSecretWithObject(`devices/${clientObj.uuid}`, data)
+    await this.configurator.secretsManager.writeSecretWithObject(`devices/${clientObj.uuid}`, data, {
+      hostname: clientObj.hostname
+    })
     return true
   }
 
@@ -1126,7 +1128,9 @@ export class Activation {
       TLS_ISSUED_CERTIFICATE: clientObj.tls.issuedCertPEM
     }
 
-    await this.configurator.secretsManager.writeSecretWithObject(`devices/${clientObj.uuid}`, data)
+    await this.configurator.secretsManager.writeSecretWithObject(`devices/${clientObj.uuid}`, data, {
+      hostname: clientObj.hostname
+    })
     this.logger.info(`Stored TLS leaf cert in vault for device ${clientObj.uuid}`)
     return true
   }
