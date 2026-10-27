@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { errorStatus, GcpSecretManagerService, toSecretId } from './index.js'
+import { errorStatus, GcpSecretManagerService, toLabelValue, toSecretId } from './index.js'
 import Logger from '../../Logger.js'
 import { config } from '../../test/helper/Config.js'
 import { Environment } from '../../utils/Environment.js'
@@ -21,6 +21,7 @@ const HTTP_CODES: Record<string, number> = {
   ALREADY_EXISTS: 409,
   PERMISSION_DENIED: 403,
   FAILED_PRECONDITION: 400,
+  INVALID_ARGUMENT: 400,
   UNAVAILABLE: 503
 }
 
@@ -36,11 +37,14 @@ const apiError = (status: string): Error =>
 // Minimal in-memory fake of the Secret Manager REST API and the metadata server, behind a
 // got-like function: secrets hold an ordered list of versions. Like the real service, "latest"
 // is the newest version in any state, so accessing it fails with FAILED_PRECONDITION when that
-// version is destroyed. Version lists come one per page, so paging is always exercised.
+// version is destroyed. Version lists come one per page, so paging is always exercised. Labels
+// follow the real updateMask=labels semantics: a PATCH replaces the whole map, and only with the
+// current etag.
 class FakeApi {
-  secrets = new Map<string, { versions: { name: string; data: Buffer; state: string }[] }>()
+  secrets = new Map<string, { versions: { name: string; data: Buffer; state: string }[]; labels: any; etag: string }>()
   failAdd = 0
-  requests: { method: string; url: string; headers: any; timeout: any }[] = []
+  etagCounter = 0
+  requests: { method: string; url: string; headers: any; timeout: any; body: any }[] = []
 
   http: any = Object.assign(
     (url: string, options: any) => ({ json: async () => await this.handle(options.method, url, options) }),
@@ -48,7 +52,7 @@ class FakeApi {
   )
 
   async handle(method: string, url: string, options: any): Promise<any> {
-    this.requests.push({ method, url, headers: options?.headers, timeout: options?.timeout })
+    this.requests.push({ method, url, headers: options?.headers, timeout: options?.timeout, body: options?.json })
     if (url === METADATA_TOKEN_URL) return await this.token()
     const [resource, query] = url.slice(API_URL.length).split('?')
     const params = new URLSearchParams(query)
@@ -58,6 +62,7 @@ class FakeApi {
     if (verb === 'access') return await this.access(name)
     if (verb === 'destroy') return await this.destroy(name)
     if (name.endsWith('/versions')) return await this.listVersions(name.slice(0, -'/versions'.length), params)
+    if (method === 'PATCH') return await this.patchSecret(name, params, options.json)
     if (method === 'DELETE') return await this.deleteSecret(name)
     return await this.getSecret(name)
   }
@@ -66,11 +71,25 @@ class FakeApi {
     return { access_token: 'token-1', expires_in: 3599, token_type: 'Bearer' }
   }
 
-  async createSecret(parent: string, secretId: string | null, _body: any): Promise<any> {
+  async createSecret(parent: string, secretId: string | null, body: any): Promise<any> {
     const name = `${parent}/${secretId}`
     if (this.secrets.has(name)) throw apiError('ALREADY_EXISTS')
-    this.secrets.set(name, { versions: [] })
+    this.secrets.set(name, { versions: [], labels: body?.labels ?? {}, etag: this.nextEtag() })
     return { name }
+  }
+
+  nextEtag(): string {
+    return `etag-${++this.etagCounter}`
+  }
+
+  async patchSecret(name: string, params: URLSearchParams, body: any): Promise<any> {
+    const secret = this.secrets.get(name)
+    if (secret == null) throw apiError('NOT_FOUND')
+    if (params.get('updateMask') !== 'labels') throw apiError('INVALID_ARGUMENT')
+    if (body?.etag !== secret.etag) throw apiError('FAILED_PRECONDITION')
+    secret.labels = body.labels ?? {}
+    secret.etag = this.nextEtag()
+    return { name, labels: secret.labels, etag: secret.etag }
   }
 
   async addVersion(parent: string, body: any): Promise<any> {
@@ -115,8 +134,9 @@ class FakeApi {
   }
 
   async getSecret(name: string): Promise<any> {
-    if (!this.secrets.has(name)) throw apiError('NOT_FOUND')
-    return { name }
+    const secret = this.secrets.get(name)
+    if (secret == null) throw apiError('NOT_FOUND')
+    return { name, labels: secret.labels, etag: secret.etag }
   }
 }
 
@@ -169,6 +189,23 @@ describe('toSecretId', () => {
 
   it('uses the given prefix', () => {
     expect(toSecretId('profiles/x', 'rps-staging-')).toBe('rps-staging-profiles__x')
+  })
+})
+
+describe('toLabelValue', () => {
+  it('lowercases and replaces characters a label value does not allow', () => {
+    expect(toLabelValue('PC01.corp.example')).toBe('pc01_corp_example')
+    expect(toLabelValue('a b/c')).toBe('a_b_c')
+    expect(toLabelValue('pc-01_x')).toBe('pc-01_x')
+  })
+
+  it('keeps at most 63 characters', () => {
+    expect(toLabelValue('A'.repeat(70))).toBe('a'.repeat(63))
+  })
+
+  it('keeps at most 128 bytes, cutting between characters', () => {
+    expect(toLabelValue('漢'.repeat(63))).toBe('漢'.repeat(42))
+    expect(toLabelValue('𠀀'.repeat(40))).toBe('𠀀'.repeat(32))
   })
 })
 
@@ -448,6 +485,187 @@ describe('GcpSecretManagerService', () => {
     }
     expect(await service.getSecretAtPath('profiles/x')).toBeNull()
   })
+
+  describe('hostname label', () => {
+    const path = `devices/${uuid}`
+    const secretUrl = `${API_URL}projects/test-project/secrets/rps-store-devices__${uuid}`
+    const stored = (): any => fake.secrets.get(`projects/test-project/secrets/rps-store-devices__${uuid}`)
+    const patches = (): any[] => fake.requests.filter((r) => r.method === 'PATCH')
+    const metadataRequests = (): any[] =>
+      fake.requests.filter((r) => r.method === 'PATCH' || (r.method === 'GET' && r.url === secretUrl))
+
+    it('labels a new secret with the sanitized hostname, using the etag from the GET', async () => {
+      expect(await service.writeSecretWithObject(path, creds, { hostname: 'PC01.corp.example' })).toEqual({
+        version: 1
+      })
+      expect(stored().labels).toEqual({ 'managed-by': 'rps', hostname: 'pc01_corp_example' })
+      expect(patches()).toHaveLength(1)
+      expect(patches()[0].url).toBe(`${secretUrl}?updateMask=labels`)
+      expect(patches()[0].body).toEqual({
+        labels: { 'managed-by': 'rps', hostname: 'pc01_corp_example' },
+        etag: 'etag-1'
+      })
+    })
+
+    it('sends no PATCH when the label already has the value', async () => {
+      await service.writeSecretWithObject(path, creds, { hostname: 'PC01.corp.example' })
+      await service.writeSecretWithObject(path, creds, { hostname: 'PC01.corp.example' })
+      expect(patches()).toHaveLength(1)
+    })
+
+    it('keeps labels set by operators', async () => {
+      await service.writeSecretWithObject(path, creds)
+      stored().labels.team = 'ops'
+      await service.writeSecretWithObject(path, creds, { hostname: 'h1' })
+      const expected = { 'managed-by': 'rps', team: 'ops', hostname: 'h1' }
+      expect(patches()[0].body.labels).toEqual(expected)
+      expect(stored().labels).toEqual(expected)
+    })
+
+    it('still returns the version and warns when the label cannot be written', async () => {
+      const warn = vi.spyOn(service.logger, 'warn')
+      vi.spyOn(fake, 'getSecret').mockRejectedValueOnce(apiError('PERMISSION_DENIED'))
+      expect(await service.writeSecretWithObject(path, creds, { hostname: 'h1' })).toEqual({ version: 1 })
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(patches()).toHaveLength(0)
+
+      vi.spyOn(fake, 'patchSecret').mockRejectedValueOnce(apiError('PERMISSION_DENIED'))
+      expect(await service.writeSecretWithObject(path, creds, { hostname: 'h1' })).toEqual({ version: 2 })
+      expect(warn).toHaveBeenCalledTimes(2)
+
+      const getSecret = fake.getSecret.bind(fake)
+      vi.spyOn(fake, 'getSecret').mockImplementationOnce(async (name: string) => ({
+        ...(await getSecret(name)),
+        etag: 'stale'
+      }))
+      expect(await service.writeSecretWithObject(path, creds, { hostname: 'h1' })).toEqual({ version: 3 })
+      expect(warn).toHaveBeenCalledTimes(3)
+      expect(stored().labels.hostname).toBeUndefined()
+    })
+
+    it('resolves when called directly and the label cannot be written', async () => {
+      await service.writeSecretWithObject(path, creds)
+      const warn = vi.spyOn(service.logger, 'warn')
+      vi.spyOn(fake, 'getSecret').mockRejectedValueOnce(apiError('PERMISSION_DENIED'))
+      await expect(service.writeSecretMetadata(path, { hostname: 'h1' })).resolves.toBeUndefined()
+      vi.spyOn(fake, 'patchSecret').mockRejectedValueOnce(apiError('FAILED_PRECONDITION'))
+      await expect(service.writeSecretMetadata(path, { hostname: 'h1' })).resolves.toBeUndefined()
+      expect(warn).toHaveBeenCalledTimes(2)
+    })
+
+    it('skips the label without a usable hostname', async () => {
+      for (const metadata of [
+        undefined,
+        {},
+        { hostname: '' },
+        { hostname: 'localhost' },
+        { hostname: 'LocalHost' }
+      ]) {
+        await service.writeSecretWithObject(path, creds, metadata)
+      }
+      expect(metadataRequests()).toHaveLength(0)
+      for (const hostname of [
+        '',
+        'localhost',
+        'LocalHost'
+      ]) {
+        await expect(service.writeSecretMetadata(path, { hostname })).resolves.toBeUndefined()
+      }
+      expect(metadataRequests()).toHaveLength(0)
+      expect(stored().labels).toEqual({ 'managed-by': 'rps' })
+    })
+
+    it('ignores a hostname that is not a string', async () => {
+      const warn = vi.spyOn(service.logger, 'warn')
+      await service.writeSecretWithObject(path, creds)
+      for (const hostname of [
+        123,
+        {},
+        ['x']
+      ]) {
+        await expect(service.writeSecretMetadata(path, { hostname } as any)).resolves.toBeUndefined()
+      }
+      expect(await service.writeSecretWithObject(path, creds, { hostname: 123 } as any)).toEqual({ version: 2 })
+      expect(metadataRequests()).toHaveLength(0)
+      expect(warn).not.toHaveBeenCalled()
+    })
+
+    it('does not treat a failing label write as a failed write', async () => {
+      const error = vi.spyOn(service.logger, 'error')
+      vi.spyOn(service, 'writeSecretMetadata').mockRejectedValue(new Error('boom'))
+      expect(await service.writeSecretWithObject(path, creds, { hostname: 'h1' })).toEqual({ version: 1 })
+      expect(error).not.toHaveBeenCalledWith(expect.stringContaining('writing secret'))
+    })
+
+    it('sends no PATCH when the secret has no etag', async () => {
+      await service.writeSecretWithObject(path, creds)
+      const warn = vi.spyOn(service.logger, 'warn')
+      vi.spyOn(fake, 'getSecret').mockResolvedValueOnce({ name: 'x', labels: { 'managed-by': 'rps' } })
+      expect(await service.writeSecretWithObject(path, creds, { hostname: 'h1' })).toEqual({ version: 2 })
+      expect(patches()).toHaveLength(0)
+      expect(warn).toHaveBeenCalledTimes(1)
+    })
+
+    it('adds the label to a secret that has no labels', async () => {
+      await service.writeSecretWithObject(path, creds)
+      vi.spyOn(fake, 'getSecret').mockResolvedValueOnce({ name: 'x', etag: stored().etag })
+      await service.writeSecretWithObject(path, creds, { hostname: 'h1' })
+      expect(stored().labels).toEqual({ hostname: 'h1' })
+    })
+
+    it('names the path and the status in the warning', async () => {
+      await service.writeSecretWithObject(path, creds)
+      const warn = vi.spyOn(service.logger, 'warn')
+      vi.spyOn(fake, 'patchSecret').mockRejectedValueOnce(
+        Object.assign(apiError('PERMISSION_DENIED'), { message: 'denied' })
+      )
+      await service.writeSecretMetadata(path, { hostname: 'h1' })
+      expect(warn).toHaveBeenLastCalledWith(expect.stringContaining(path))
+      expect(warn).toHaveBeenLastCalledWith(expect.stringContaining('PERMISSION_DENIED'))
+      vi.spyOn(fake, 'patchSecret').mockRejectedValueOnce(
+        Object.assign(apiError('FAILED_PRECONDITION'), { message: 'conflict' })
+      )
+      await service.writeSecretMetadata(path, { hostname: 'h1' })
+      expect(warn).toHaveBeenLastCalledWith(expect.stringContaining(path))
+      expect(warn).toHaveBeenLastCalledWith(expect.stringContaining('FAILED_PRECONDITION'))
+    })
+
+    it('keeps both writes successful when two writers label the same secret at once', async () => {
+      await service.writeSecretWithObject(path, creds)
+      const warn = vi.spyOn(service.logger, 'warn')
+      // Both writers read the same etag before either patches, so the second PATCH loses.
+      const getSecret = fake.getSecret.bind(fake)
+      let readers = 0
+      let release: () => void = () => {}
+      const bothRead = new Promise<void>((resolve) => (release = resolve))
+      vi.spyOn(fake, 'getSecret').mockImplementation(async (name: string) => {
+        const rsp = await getSecret(name)
+        if (++readers === 2) release()
+        await bothRead
+        return rsp
+      })
+      const results = await Promise.all([
+        service.writeSecretWithObject(path, creds, { hostname: 'h1' }),
+        service.writeSecretWithObject(path, creds, { hostname: 'h2' })
+      ])
+      expect(results.map((r) => r?.version)).toEqual([expect.any(Number), expect.any(Number)])
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(['h1', 'h2']).toContain(stored().labels.hostname)
+      expect(stored().labels['managed-by']).toBe('rps')
+    })
+
+    it('writes no label when the version could not be written', async () => {
+      vi.spyOn(fake, 'addVersion').mockRejectedValue(apiError('PERMISSION_DENIED'))
+      expect(await service.writeSecretWithObject(path, creds, { hostname: 'h1' })).toBeNull()
+      expect(metadataRequests()).toHaveLength(0)
+    })
+
+    it('updates the label of an existing secret when called directly', async () => {
+      await service.writeSecretWithObject(path, creds, { hostname: 'old-host' })
+      await service.writeSecretMetadata(path, { hostname: 'new-host' })
+      expect(stored().labels).toEqual({ 'managed-by': 'rps', hostname: 'new-host' })
+    })
+  })
 })
 
 // Runs the service with the real got client against a local server that serves FakeApi, so the
@@ -499,6 +717,17 @@ describe('GcpSecretManagerService over HTTP', () => {
     expect(await service.deleteSecretAtPath(`devices/${uuid}`)).toBe(true)
     expect(await service.getSecretAtPath(`devices/${uuid}`)).toBeNull()
     expect(await service.health()).toEqual({ initialized: true, sealed: false, provider: 'gcpsm' })
+  })
+
+  it('labels the secret with a PATCH request', async () => {
+    expect(await service.writeSecretWithObject(`devices/${uuid}`, creds, { hostname: 'PC01' })).toEqual({ version: 1 })
+    const patch = fake.requests.filter((r) => r.method === 'PATCH')
+    expect(patch).toHaveLength(1)
+    expect(patch[0].url).toContain('?updateMask=labels')
+    expect(fake.secrets.get(`projects/test-project/secrets/rps-store-devices__${uuid}`)!.labels).toEqual({
+      'managed-by': 'rps',
+      hostname: 'pc01'
+    })
   })
 
   it('maps API error responses to their status', async () => {
