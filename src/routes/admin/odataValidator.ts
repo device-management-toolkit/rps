@@ -4,9 +4,23 @@
  **********************************************************************/
 
 import { query } from 'express-validator'
+import { type RequestHandler } from 'express'
 import { DEFAULT_SKIP, DEFAULT_TOP } from '../../utils/constants.js'
 
+// Express 5 reparses query parameters on every access. Keep one object so
+// express-validator's defaults remain available to subsequent handlers.
+const retainQuery: RequestHandler = (req, _res, next) => {
+  Object.defineProperty(req, 'query', {
+    value: req.query,
+    writable: true,
+    configurable: true,
+    enumerable: true
+  })
+  next()
+}
+
 export const odataValidator = (): any => [
+  retainQuery,
   query('$top')
     .default(DEFAULT_TOP)
     .isInt({ min: 0, max: 9999999999 })

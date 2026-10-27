@@ -6,7 +6,7 @@ import { RPSError } from '../../../utils/RPSError.js'
 import { API_RESPONSE, NOT_FOUND_EXCEPTION, NOT_FOUND_MESSAGE } from '../../../utils/constants.js'
 import { ProxyConfig } from 'models/RCS.Config.js'
 
-export async function getProxyProfile(req: Request, res: Response) {
+export async function getProxyProfile(req: Request<{ name: string }>, res: Response) {
   const { name } = req.params
   const tenantId = req.tenantId || ''
   const log = new Logger('getProxyProfile')

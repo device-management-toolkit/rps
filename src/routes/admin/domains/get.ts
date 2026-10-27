@@ -11,7 +11,7 @@ import { type Request, type Response } from 'express'
 import handleError from '../../../utils/handleError.js'
 import { RPSError } from '../../../utils/RPSError.js'
 
-export async function getDomain(req: Request, res: Response): Promise<void> {
+export async function getDomain(req: Request<{ domainName: string }>, res: Response): Promise<void> {
   const log = new Logger('getDomain')
   const { domainName } = req.params
   try {

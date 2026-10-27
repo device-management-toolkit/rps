@@ -11,7 +11,7 @@ import { type Request, type Response } from 'express'
 import handleError from '../../../utils/handleError.js'
 import { RPSError } from '../../../utils/RPSError.js'
 
-export async function getCiraConfig(req: Request, res: Response): Promise<void> {
+export async function getCiraConfig(req: Request<{ ciraConfigName: string }>, res: Response): Promise<void> {
   const log = new Logger('getCiraConfig')
   const ciraConfigName: string = req.params.ciraConfigName
   try {
