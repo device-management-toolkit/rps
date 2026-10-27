@@ -10,14 +10,16 @@ import { doneFail, doneSuccess } from './doneResponse.js'
 import { devices } from '../../devices.js'
 import got from 'got'
 import { Environment } from '../../utils/Environment.js'
+import { getHostInventory } from '../../utils/hostInventory.js'
+import { type HostInventory } from '../../models/RCS.Config.js'
 
-export interface DeviceInfo {
+export interface DeviceInfo extends HostInventory {
   ver: string
   build: string
   sku: string
   currentMode: string
   features: string
-  ipConfiguration: { ipAddress: string }
+  ipConfiguration?: { ipAddress: string }
 }
 
 export const SyncDeviceInfoEventType = 'SYNC_DEVICE_INFO'
@@ -30,11 +32,26 @@ export interface SyncDeviceInfoEvent {
 
 export interface SyncDeviceInfoContext extends CommonMaintenanceContext {
   deviceInfo: DeviceInfo | null
+  // deviceInfo MPS currently holds for the device; host inventory the client omits is carried forward from it.
+  existingDeviceInfo?: HostInventory | null
 }
 
 const logger = new Logger('syncDeviceInfo')
 
 export class SyncDeviceInfo {
+  // MPS replaces deviceInfo wholesale on PATCH, so read what it holds first to avoid erasing the
+  // host inventory a previous activation or sync stored when this client does not report it.
+  getDeviceFromMPS = async ({ input }: { input: SyncDeviceInfoContext }): Promise<HostInventory | null> => {
+    const clientObj = devices[input.clientId]
+    const url = `${Environment.Config.mps_server}/api/v1/devices/${clientObj.uuid}`
+    const rsp = await got.get(url)
+    if (rsp?.body == null || rsp.body === '') {
+      return null
+    }
+    const existing = typeof rsp.body === 'string' ? JSON.parse(rsp.body) : rsp.body
+    return existing?.deviceInfo ?? null
+  }
+
   saveToMPS = async ({ input }: { input: SyncDeviceInfoContext }): Promise<void> => {
     const clientObj = devices[input.clientId]
     const url = `${Environment.Config.mps_server}/api/v1/devices`
@@ -44,7 +61,8 @@ export class SyncDeviceInfo {
       fwSku: input.deviceInfo?.sku,
       currentMode: input.deviceInfo?.currentMode?.toString(),
       features: input.deviceInfo?.features,
-      ipAddress: input.deviceInfo?.ipConfiguration.ipAddress,
+      ipAddress: input.deviceInfo?.ipConfiguration?.ipAddress,
+      ...getHostInventory(input.deviceInfo, input.existingDeviceInfo),
       lastUpdated: new Date()
     }
     const jsonData = {
@@ -67,6 +85,7 @@ export class SyncDeviceInfo {
       actions: any
     },
     actors: {
+      getDeviceFromMPS: fromPromise(this.getDeviceFromMPS),
       saveToMPS: fromPromise(this.saveToMPS)
     }
   }).createMachine({
@@ -78,7 +97,8 @@ export class SyncDeviceInfo {
       errorMessage: input.errorMessage,
       httpHandler: input.httpHandler,
       parseErrorCount: 0,
-      deviceInfo: input.deviceInfo
+      deviceInfo: input.deviceInfo,
+      existingDeviceInfo: input.existingDeviceInfo
     }),
     initial: 'INITIAL',
     states: {
@@ -89,7 +109,27 @@ export class SyncDeviceInfo {
               clientId: ({ event }) => event.clientId,
               deviceInfo: ({ event }) => event.deviceInfo
             }),
+            target: 'GET_DEVICE_FROM_MPS'
+          }
+        }
+      },
+      GET_DEVICE_FROM_MPS: {
+        entry: assign({
+          errorMessage: () => ''
+        }),
+        invoke: {
+          src: 'getDeviceFromMPS',
+          input: ({ context }) => context,
+          id: 'get-device-from-mps',
+          onDone: {
+            actions: assign({ existingDeviceInfo: ({ event }) => event.output }),
             target: 'SAVE_TO_MPS'
+          },
+          onError: {
+            actions: assign({
+              errorMessage: ({ event }) => coalesceMessage('at GET_DEVICE_FROM_MPS', event.error)
+            }),
+            target: 'FAILED'
           }
         }
       },
