@@ -9,7 +9,8 @@ import {
   type ISecretManagerService,
   type SecretMetadata,
   type TLSCredentials,
-  type WifiCredentials
+  type WifiCredentials,
+  isUsableHostname
 } from '../../interfaces/ISecretManagerService.js'
 import { type ILogger } from '../../interfaces/ILogger.js'
 import { Environment } from '../../utils/Environment.js'
@@ -94,7 +95,7 @@ export class VaultService implements ISecretManagerService {
   }
 
   async writeSecretMetadata(path: string, metadata: SecretMetadata): Promise<void> {
-    if (!metadata.hostname || !Environment.Config.secrets_path?.includes('/data/')) {
+    if (!isUsableHostname(metadata.hostname) || !Environment.Config.secrets_path?.includes('/data/')) {
       this.logger.debug(`skipping secret metadata write for ${path}`)
       return
     }

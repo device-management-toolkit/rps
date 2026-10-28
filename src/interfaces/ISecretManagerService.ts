@@ -40,6 +40,11 @@ export interface SecretMetadata {
   hostname?: string
 }
 
+// localhost carries no information about the device, so it is never stored as metadata
+export function isUsableHostname(hostname: unknown): hostname is string {
+  return typeof hostname === 'string' && hostname !== '' && hostname.toLowerCase() !== 'localhost'
+}
+
 export interface ISecretManagerService {
   getSecretFromKey: (path: string, key: string) => Promise<string | null>
   // null only when the secret is absent (404); transport/server errors throw.

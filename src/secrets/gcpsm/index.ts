@@ -12,7 +12,8 @@ import {
   type ISecretManagerService,
   type SecretMetadata,
   type TLSCredentials,
-  type WifiCredentials
+  type WifiCredentials,
+  isUsableHostname
 } from '../../interfaces/ISecretManagerService.js'
 import { type ILogger } from '../../interfaces/ILogger.js'
 import { Environment } from '../../utils/Environment.js'
@@ -327,11 +328,7 @@ export class GcpSecretManagerService implements ISecretManagerService {
   // the existing labels are read first and merged; the etag makes a concurrent label change
   // fail instead of being overwritten.
   async writeSecretMetadata(path: string, metadata: SecretMetadata): Promise<void> {
-    if (
-      typeof metadata.hostname !== 'string' ||
-      !metadata.hostname ||
-      metadata.hostname.toLowerCase() === 'localhost'
-    ) {
+    if (!isUsableHostname(metadata.hostname)) {
       this.logger.debug(`skipping secret metadata write for ${path}`)
       return
     }

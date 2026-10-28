@@ -221,6 +221,25 @@ describe('secret metadata', () => {
     expect(patchSpy).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ['localhost'],
+    ['LocalHost'],
+    [123],
+    [{}]
+  ])('should not patch when called directly with hostname %j', async (hostname) => {
+    await expect(
+      secretManagerService.writeSecretMetadata('devices/x', { hostname: hostname as any })
+    ).resolves.toBeUndefined()
+    expect(patchSpy).not.toHaveBeenCalled()
+  })
+
+  it('should write the data but not patch for a localhost hostname', async () => {
+    const result = await secretManagerService.writeSecretWithObject('devices/x', secretCert, { hostname: 'localhost' })
+    expect(result).toEqual(secretCert)
+    expect(postSpy).toHaveBeenCalledWith('devices/x', { json: { data: secretCert } })
+    expect(patchSpy).not.toHaveBeenCalled()
+  })
+
   it('should resolve without patching when secrets_path is undefined', async () => {
     Environment.Config = { ...config, secrets_path: undefined as any }
     await expect(secretManagerService.writeSecretMetadata('devices/x', { hostname: 'h1' })).resolves.toBeUndefined()
