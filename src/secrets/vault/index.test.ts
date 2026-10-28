@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { VaultService } from './index.js'
+import { VaultService, kvMetadataPath, kvMetadataPathCandidates } from './index.js'
 import Logger from '../../Logger.js'
 import { type ILogger } from '../../interfaces/ILogger.js'
 import { config } from '../../test/helper/Config.js'
@@ -258,6 +258,228 @@ describe('secret metadata', () => {
     )
     await expect(secretManagerService.writeSecretMetadata('devices/x', { hostname: 'h1' })).resolves.toBeUndefined()
     expect(warnSpy).toHaveBeenCalled()
+  })
+})
+
+describe('kvMetadataPath', () => {
+  it.each([
+    ['secret/data/', 'secret/metadata/'],
+    ['team/data/data/', 'team/data/metadata/'],
+    ['secret/data/rps/', 'secret/metadata/rps/']
+  ])('should map %j to %j', (secretsPath, expected) => {
+    expect(kvMetadataPath(secretsPath)).toBe(expected)
+  })
+
+  it.each([
+    ['kv/'],
+    ['data/'],
+    [''],
+    [undefined]
+  ])('should return null for %j', (secretsPath) => {
+    expect(kvMetadataPath(secretsPath)).toBeNull()
+  })
+})
+
+describe('kvMetadataPathCandidates', () => {
+  it.each([
+    ['secret/data/', ['secret/metadata/']],
+    ['secret/data', ['secret/metadata/']],
+    ['kv/', ['kv/']],
+    [undefined, ['']],
+    ['', ['']]
+  ])('should map %j to %j', (secretsPath, expected) => {
+    expect(kvMetadataPathCandidates(secretsPath)).toEqual(expected)
+  })
+
+  it.each([
+    ['secret/data/rps/data/', ['secret/metadata/rps/data/', 'secret/data/rps/metadata/']],
+    [
+      'a/data/b/data/c/data/',
+      [
+        'a/metadata/b/data/c/data/',
+        'a/data/b/metadata/c/data/',
+        'a/data/b/data/c/metadata/'
+      ]
+    ],
+    ['team/data/data/', ['team/metadata/data/', 'team/data/metadata/']]
+  ])('should return one candidate per data segment of %j', (secretsPath, expected) => {
+    const candidates = kvMetadataPathCandidates(secretsPath)
+    expect(candidates).toHaveLength(expected.length)
+    expect(new Set(candidates)).toEqual(new Set(expected))
+  })
+})
+
+describe('delete with an ambiguous secrets_path', () => {
+  const prefix = (path: string): string => `${Environment.Config.vault_address}/v1/${path}`
+  let deleteSpy: MockInstance
+  let getSpy: MockInstance
+  let errorSpy: MockInstance
+  let deleteOutcomes: Record<string, number>
+  // status of each successive verification read; undefined means the secret is still readable
+  let getOutcomes: (number | undefined)[]
+
+  beforeEach(() => {
+    Environment.Config = { ...config, secrets_path: 'secret/data/rps/data/' }
+    deleteOutcomes = {}
+    getOutcomes = [404]
+    deleteSpy = vi.spyOn(secretManagerService.gotClient, 'delete').mockImplementation(
+      (_path: any, options: any) =>
+        ({
+          json: vi.fn(async () => {
+            const status = deleteOutcomes[options.prefixUrl as string]
+            return status == null ? await Promise.resolve({}) : await Promise.reject(makeHttpError(status))
+          })
+        }) as any
+    )
+    getSpy = vi.spyOn(secretManagerService.gotClient, 'get').mockImplementation(
+      () =>
+        ({
+          json: vi.fn(async () => {
+            const outcome = getOutcomes.length > 1 ? getOutcomes.shift() : getOutcomes[0]
+            return outcome == null
+              ? await Promise.resolve({ data: { data: secretCreds, metadata: { version: 1 } } })
+              : await Promise.reject(makeHttpError(outcome))
+          })
+        }) as any
+    )
+    errorSpy = vi.spyOn(secretManagerService.logger, 'error').mockImplementation(() => undefined as any)
+    vi.spyOn(secretManagerService.logger, 'debug').mockImplementation(() => undefined as any)
+  })
+
+  afterEach(() => {
+    Environment.Config = config
+  })
+
+  it('should send one delete at the last data segment and stop once the secret is gone', async () => {
+    Environment.Config = { ...config, secrets_path: 'team/data/data/' }
+    await expect(secretManagerService.deleteSecretAtPath('devices/x')).resolves.toBe(true)
+    expect(deleteSpy).toHaveBeenCalledTimes(1)
+    expect(deleteSpy).toHaveBeenCalledWith('devices/x', { prefixUrl: prefix('team/data/metadata/') })
+    expect(getSpy).toHaveBeenCalledTimes(1)
+    expect(errorSpy).not.toHaveBeenCalled()
+  })
+
+  it('should try the remaining candidates in order after the last one did not remove the secret', async () => {
+    getOutcomes = [undefined, 404]
+    await expect(secretManagerService.deleteSecretAtPath('devices/x')).resolves.toBe(true)
+    expect(deleteSpy.mock.calls).toEqual([
+      ['devices/x', { prefixUrl: prefix('secret/data/rps/metadata/') }],
+      ['devices/x', { prefixUrl: prefix('secret/metadata/rps/data/') }]
+    ])
+    expect(getSpy).toHaveBeenCalledTimes(2)
+    expect(errorSpy).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    [403],
+    [404],
+    [500]
+  ])('should continue after a candidate answering %i', async (status) => {
+    getOutcomes = [undefined, 404]
+    deleteOutcomes[prefix('secret/data/rps/metadata/')] = status
+    await expect(secretManagerService.deleteSecretAtPath('devices/x')).resolves.toBe(true)
+    expect(deleteSpy).toHaveBeenCalledTimes(2)
+    expect(deleteSpy).toHaveBeenLastCalledWith('devices/x', { prefixUrl: prefix('secret/metadata/rps/data/') })
+    expect(errorSpy).not.toHaveBeenCalled()
+  })
+
+  it('should return false and log one error when the secret is still readable after every candidate', async () => {
+    getOutcomes = [undefined]
+    await expect(secretManagerService.deleteSecretAtPath('devices/x')).resolves.toBe(false)
+    expect(deleteSpy).toHaveBeenCalledTimes(2)
+    expect(getSpy).toHaveBeenCalledTimes(2)
+    expect(errorSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([[503], [403]])('should stop after one delete when the read fails with %i', async (status) => {
+    getOutcomes = [status]
+    await expect(secretManagerService.deleteSecretAtPath('devices/x')).resolves.toBe(false)
+    expect(deleteSpy.mock.calls).toEqual([['devices/x', { prefixUrl: prefix('secret/data/rps/metadata/') }]])
+    expect(getSpy).toHaveBeenCalledTimes(1)
+    expect(errorSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('should send one delete and one read for an unambiguous secrets_path', async () => {
+    Environment.Config = { ...config, secrets_path: 'secret/data/' }
+    await expect(secretManagerService.deleteSecretAtPath('devices/x')).resolves.toBe(true)
+    expect(deleteSpy.mock.calls).toEqual([['devices/x', { prefixUrl: prefix('secret/metadata/') }]])
+    expect(getSpy).toHaveBeenCalledTimes(1)
+    expect(errorSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe('secrets_path with more than one data segment', () => {
+  afterEach(() => {
+    Environment.Config = config
+  })
+
+  it('should warn once with the derived metadata path', () => {
+    Environment.Config = { ...config, secrets_path: 'secret/data/rps/data/' }
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => undefined as any)
+    new VaultService(logger)
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('secret/data/rps/metadata/'))
+  })
+
+  it.each([
+    ['secret/data/'],
+    ['secret/data'],
+    ['kv/']
+  ])('should not warn for secrets_path %j', (secretsPath) => {
+    Environment.Config = { ...config, secrets_path: secretsPath }
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => undefined as any)
+    new VaultService(logger)
+    expect(warnSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe('secret metadata path', () => {
+  let patchSpy: MockInstance
+  let deleteSpy: MockInstance
+
+  beforeEach(() => {
+    vi.spyOn(secretManagerService.gotClient, 'post').mockImplementation(
+      () => ({ json: vi.fn(async () => await Promise.resolve(secretCert)) }) as any
+    )
+    patchSpy = vi
+      .spyOn(secretManagerService.gotClient, 'patch')
+      .mockImplementation(() => ({ json: vi.fn(async () => await Promise.resolve({})) }) as any)
+    deleteSpy = vi
+      .spyOn(secretManagerService.gotClient, 'delete')
+      .mockImplementation(() => ({ json: vi.fn(async () => await Promise.resolve({})) }) as any)
+    vi.spyOn(secretManagerService.gotClient, 'get').mockImplementation(
+      () => ({ json: vi.fn(async () => await Promise.reject(makeHttpError(404))) }) as any
+    )
+    vi.spyOn(secretManagerService.logger, 'warn').mockImplementation(() => undefined as any)
+  })
+
+  afterEach(() => {
+    Environment.Config = config
+  })
+
+  it('should patch and delete under the metadata mapped from the last data segment', async () => {
+    Environment.Config = { ...config, secrets_path: 'team/data/data/' }
+    const prefixUrl = `${Environment.Config.vault_address}/v1/team/data/metadata/`
+    await secretManagerService.writeSecretWithObject('devices/x', secretCert, { hostname: 'h1' })
+    expect(patchSpy).toHaveBeenCalledWith('devices/x', expect.objectContaining({ prefixUrl }))
+    await expect(secretManagerService.deleteSecretAtPath('devices/x')).resolves.toBe(true)
+    expect(deleteSpy).toHaveBeenCalledWith('devices/x', { prefixUrl })
+  })
+
+  it('should delete at secrets_path and not patch for a KV v1 path', async () => {
+    Environment.Config = { ...config, secrets_path: 'kv/' }
+    await secretManagerService.writeSecretWithObject('devices/x', secretCert, { hostname: 'h1' })
+    expect(patchSpy).not.toHaveBeenCalled()
+    await expect(secretManagerService.deleteSecretAtPath('devices/x')).resolves.toBe(true)
+    expect(deleteSpy).toHaveBeenCalledWith('devices/x', { prefixUrl: `${Environment.Config.vault_address}/v1/kv/` })
+  })
+
+  it('should delete under the metadata path for the default KV v2 path', async () => {
+    Environment.Config = { ...config, secrets_path: 'secret/data/' }
+    await secretManagerService.deleteSecretAtPath('devices/x')
+    expect(deleteSpy).toHaveBeenCalledWith('devices/x', {
+      prefixUrl: `${Environment.Config.vault_address}/v1/secret/metadata/`
+    })
   })
 })
 
