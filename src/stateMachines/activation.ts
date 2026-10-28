@@ -22,7 +22,7 @@ import { NodeForge } from '../NodeForge.js'
 import { Configurator } from '../Configurator.js'
 import { Validator } from '../Validator.js'
 import { DbCreatorFactory } from '../factories/DbCreatorFactory.js'
-import { AMTUserName, GATEWAY_TIMEOUT_ERROR, asArray } from '../utils/constants.js'
+import { AMTUserName, GATEWAY_TIMEOUT_ERROR, RPS_MODE_CONSOLE, asArray } from '../utils/constants.js'
 import { CIRAConfiguration } from './ciraConfiguration.js'
 import { TLS } from './tls.js'
 import { TimeSync } from './timeMachine.js'
@@ -554,6 +554,16 @@ export class Activation {
       tenantId: profile?.tenantId,
       dnsSuffix: clientObj.ClientData?.payload.fqdn,
       deviceInfo: this.buildMpsDeviceInfo(clientObj, profile, success)
+    }
+    // Console mode: no Vault, so the resolved per-device password rides on this same upsert.
+    if (Environment.Config.mode === RPS_MODE_CONSOLE) {
+      jsonData.username = AMTUserName
+      if (clientObj.amtPassword) {
+        jsonData.password = clientObj.amtPassword
+      }
+      if (clientObj.mebxPassword) {
+        jsonData.mebxpassword = clientObj.mebxPassword
+      }
     }
     return jsonData
   }
