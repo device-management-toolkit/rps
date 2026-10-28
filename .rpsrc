@@ -6,6 +6,7 @@
   "websocketport": 8080,
   "db_provider": "postgres",
   "mode": "mps",
+  "console_service_token": "",
   "secrets_provider": "vault",
   "connection_string": "postgresql://<USERNAME>:<PASSWORD>@localhost:5432/rpsdb",
   "postgres_ssl_ca": "",

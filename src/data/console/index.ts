@@ -30,6 +30,9 @@ import Logger from '../../Logger.js'
 /** Console resolves the request tenant from this header; absent means the empty tenant. */
 export const TENANT_HEADER = 'x-tenant-id'
 
+/** Authenticates RPS to Console's service-only routes (e.g. profile secrets). See AUTH_SERVICE_TOKEN. */
+export const SERVICE_TOKEN_HEADER = 'x-service-token'
+
 /** Console caps `$top` at 500 (MaxPageSize), which bounds the domain suffix scan below. */
 const CONSOLE_MAX_TOP = 500
 
@@ -80,7 +83,7 @@ class CiraConfigTable extends ConsoleTable<CIRAConfig> implements ICiraConfigTab
   protected readonly objectName = 'CIRA config'
 }
 
-/** `amtPassword`/`mebxPassword` are omitted from the response; ProfileManager reads them from Vault. */
+/** `amtPassword`/`mebxPassword` are omitted from the response; ProfileManager reads them via getSecretsByName. */
 class ProfilesTable extends ConsoleTable<AMTConfiguration> implements IProfilesTable {
   protected readonly path = 'api/v1/admin/profiles'
   protected readonly objectName = 'AMT profile'
@@ -91,6 +94,14 @@ class ProfilesTable extends ConsoleTable<AMTConfiguration> implements IProfilesT
 
   async get8021XConfigForProfile(profileName: string, tenantId = ''): Promise<Ieee8021xConfig | null> {
     return await this.db.ieee8021xProfiles.getByName(profileName, tenantId)
+  }
+
+  /** Service-token-gated route; the only place Console returns amtPassword/mebxPassword. */
+  async getSecretsByName(
+    profileName: string,
+    tenantId = ''
+  ): Promise<{ profileName: string; amtPassword?: string; mebxPassword?: string } | null> {
+    return await this.db.get(`${this.path}/${encodeURIComponent(profileName)}/secrets`, tenantId)
   }
 }
 
@@ -252,6 +263,10 @@ export default class ConsoleDb implements IDB {
     // Only send the tenant header when there is a tenant.
     if (tenantId) {
       headers[TENANT_HEADER] = tenantId
+    }
+    // Harmless on routes that ignore it; required on the service-token-gated ones (e.g. secrets).
+    if (Environment.Config.console_service_token) {
+      headers[SERVICE_TOKEN_HEADER] = Environment.Config.console_service_token
     }
     try {
       return await this.client.get(path, { headers }).json<T>()

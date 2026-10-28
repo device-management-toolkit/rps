@@ -95,6 +95,8 @@ export interface RPSConfig {
   db_provider: string
   /** Deployment shape, set by RPS_MODE: 'mps' (default) or 'console'. No rps_ prefix — rc strips it. */
   mode?: string
+  /** Service-to-service credential for RPS -> Console calls in console mode. See RPS_MODE_CONSOLE. */
+  console_service_token?: string
   connection_string: string
   postgres_ssl_ca?: string
   postgres_ssl_cert?: string
