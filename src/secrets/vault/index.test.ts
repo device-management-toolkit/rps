@@ -10,6 +10,8 @@ import { config } from '../../test/helper/Config.js'
 import { Environment } from '../../utils/Environment.js'
 import { type DeviceCredentials } from '../../interfaces/ISecretManagerService.js'
 import { HTTPError } from 'got'
+import { createServer, type Server } from 'node:http'
+import { type AddressInfo } from 'node:net'
 
 import { vi, type MockInstance } from 'vitest'
 
@@ -137,7 +139,8 @@ describe('secret metadata', () => {
     {
       prefixUrl: `${Environment.Config.vault_address}/v1/secret/metadata/`,
       headers: { 'Content-Type': 'application/merge-patch+json' },
-      json: { custom_metadata: { hostname } }
+      json: { custom_metadata: { hostname } },
+      timeout: { request: 10_000 }
     }
   ]
   let postSpy: MockInstance
@@ -155,9 +158,39 @@ describe('secret metadata', () => {
     warnSpy = vi.spyOn(secretManagerService.logger, 'warn').mockImplementation(() => undefined as any)
   })
 
-  afterEach(() => {
+  let stalledServer: Server | undefined
+
+  afterEach(async () => {
     Environment.Config = config
+    if (stalledServer != null) {
+      stalledServer.closeAllConnections()
+      await new Promise<void>((resolve) => stalledServer?.close(() => resolve()))
+      stalledServer = undefined
+    }
   })
+
+  it('should use a metadata request timeout of 10 seconds by default', () => {
+    expect(secretManagerService.metadataTimeoutMs).toBe(10_000)
+  })
+
+  it('should resolve to the data response and warn when the metadata request never gets an answer', async () => {
+    patchSpy.mockRestore()
+    let onPatch: (method: string | undefined) => void = () => undefined
+    const patchReceived = new Promise<string | undefined>((resolve) => {
+      onPatch = resolve
+    })
+    stalledServer = createServer((req) => {
+      onPatch(req.method)
+    })
+    await new Promise<void>((resolve) => stalledServer?.listen(0, '127.0.0.1', resolve))
+    const { port } = stalledServer.address() as AddressInfo
+    Environment.Config = { ...config, secrets_path: 'secret/data/', vault_address: `http://127.0.0.1:${port}` }
+    secretManagerService.metadataTimeoutMs = 300
+    const result = await secretManagerService.writeSecretWithObject('devices/x', secretCert, { hostname: 'h1' })
+    expect(result).toEqual(secretCert)
+    await expect(patchReceived).resolves.toBe('PATCH')
+    expect(warnSpy).toHaveBeenCalled()
+  }, 5000)
 
   it('should patch custom_metadata after the data write and return the data response', async () => {
     const result = await secretManagerService.writeSecretWithObject('devices/x', secretCert, { hostname: 'h1' })

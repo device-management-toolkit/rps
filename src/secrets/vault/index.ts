@@ -50,6 +50,9 @@ export function kvMetadataPathCandidates(secretsPath: string | undefined): strin
 export class VaultService implements ISecretManagerService {
   gotClient: Got
   logger: ILogger
+  // got has no default timeout: a Vault or proxy that never answers the metadata request would
+  // otherwise stall the caller after the secret is already stored.
+  metadataTimeoutMs = 10_000
   constructor(logger: ILogger) {
     this.logger = logger
     const secretsPath = Environment.Config.secrets_path
@@ -142,7 +145,8 @@ export class VaultService implements ISecretManagerService {
         .patch(path, {
           prefixUrl: `${Environment.Config.vault_address}/v1/${basePath}`,
           headers: { 'Content-Type': 'application/merge-patch+json' },
-          json: { custom_metadata: { hostname: metadata.hostname } }
+          json: { custom_metadata: { hostname: metadata.hostname } },
+          timeout: { request: this.metadataTimeoutMs }
         })
         .json()
       this.logger.debug(`Successfully written secret metadata at path: ${path}`)
