@@ -67,6 +67,7 @@ export class VaultService implements ISecretManagerService {
   }
 
   async writeSecretWithObject(path: string, data: any, metadata?: SecretMetadata): Promise<any> {
+    let result: any
     try {
       const json = {
         data
@@ -74,15 +75,22 @@ export class VaultService implements ISecretManagerService {
       this.logger.verbose('writing data to vault:')
       const rspJson: any = await this.gotClient.post(path, { json }).json()
       this.logger.debug(`Successfully written data to vault at path: ${path}, result: ${JSON.stringify(rspJson)}`)
-      if (metadata?.hostname) {
-        await this.writeSecretMetadata(path, metadata)
-      }
-      return rspJson
+      result = rspJson
     } catch (error) {
       this.logger.error('writeSecretWithObject error \r\n')
       this.logger.error(error)
       return null
     }
+    if (metadata?.hostname) {
+      try {
+        await this.writeSecretMetadata(path, metadata)
+      } catch (error) {
+        this.logger.warn(
+          `writing secret metadata for ${path} failed: ${error instanceof Error ? error.message : String(error)}`
+        )
+      }
+    }
+    return result
   }
 
   async writeSecretMetadata(path: string, metadata: SecretMetadata): Promise<void> {

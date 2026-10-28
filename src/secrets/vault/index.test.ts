@@ -187,6 +187,15 @@ describe('secret metadata', () => {
     expect(warnSpy).toHaveBeenCalled()
   })
 
+  it('should keep a rejecting metadata write out of the data write', async () => {
+    const errorSpy = vi.spyOn(secretManagerService.logger, 'error').mockImplementation(() => undefined as any)
+    vi.spyOn(secretManagerService, 'writeSecretMetadata').mockRejectedValue(new Error('metadata boom'))
+    const result = await secretManagerService.writeSecretWithObject('devices/x', secretCert, { hostname: 'h1' })
+    expect(result).toEqual(secretCert)
+    expect(errorSpy).not.toHaveBeenCalled()
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+  })
+
   it('should skip the patch when secrets_path has no /data/ segment', async () => {
     Environment.Config = { ...config, secrets_path: 'kv/' }
     const result = await secretManagerService.writeSecretWithObject('devices/x', secretCert, { hostname: 'h1' })
