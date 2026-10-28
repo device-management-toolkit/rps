@@ -37,6 +37,10 @@ config.amt_tls_tunnel_persistent = config.amt_tls_tunnel_persistent ?? true
 // MPS devices table must be removed (rpc-go deactivation or the REST API) before it can be
 // re-provisioned. Keeps the MPS devices table free of orphaned records. Off by default.
 config.prevent_orphaned_devices = config.prevent_orphaned_devices ?? false
+// When true, secrets for non-empty tenants live under tenants/<tenant>/ and legacy
+// secrets are moved there at startup (see secrets/tenantMigration.ts). Must match MPS.
+// Off by default.
+config.secrets_tenant_partition = config.secrets_tenant_partition ?? false
 log.silly(`config: ${JSON.stringify(config, null, 2)}`)
 
 const Environment = {

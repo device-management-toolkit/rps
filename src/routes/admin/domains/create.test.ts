@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { Environment } from '../../../utils/Environment.js'
+
 import { createSpyObj } from '../../../test/helper/testUtils.js'
 import { DomainCreate } from './create.js'
 
@@ -44,6 +46,17 @@ describe('Domain - Create', () => {
     await dc.createDomain(req, resSpy)
     expect(insertSpy).toHaveBeenCalledTimes(1)
     expect(secretManagerSpy).toHaveBeenCalledTimes(1)
+    expect(resSpy.status).toHaveBeenCalledWith(201)
+  })
+  it('should write the provisioning cert under the request tenant', async () => {
+    Environment.Config = { ...Environment.Config, secrets_tenant_partition: true } as any
+    req.tenantId = 'tenant-a'
+    req.body.profileName = 'domain1'
+    await dc.createDomain(req, resSpy)
+    expect(secretManagerSpy).toHaveBeenCalledWith('tenants/tenant-a/certs/domain1', {
+      CERT: expect.any(String),
+      CERT_PASSWORD: 'P@ssw0rd'
+    })
     expect(resSpy.status).toHaveBeenCalledWith(201)
   })
   it('should handle error with create with write in vault fails', async () => {

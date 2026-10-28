@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { domainCertSecretPath } from '../../../utils/secretPaths.js'
+
 import { type AMTDomain } from '../../../models/index.js'
 import Logger from '../../../Logger.js'
 import { MqttProvider } from '../../../utils/MqttProvider.js'
@@ -48,7 +50,10 @@ export class DomainCreate {
           CERT_PASSWORD: domainPwd
         }
         // save to secret provider
-        vaultStatus = await req.secretsManager.writeSecretWithObject(`certs/${amtDomain.profileName}`, data)
+        vaultStatus = await req.secretsManager.writeSecretWithObject(
+          domainCertSecretPath(amtDomain.profileName, req.tenantId),
+          data
+        )
         if (vaultStatus == null) {
           const dbResults: any = await req.db.domains.delete(amtDomain.profileName, req.tenantId)
           if (dbResults == null) {

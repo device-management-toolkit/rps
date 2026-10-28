@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { wirelessSecretPath } from '../../../utils/secretPaths.js'
+
 import Logger from '../../../Logger.js'
 import { NOT_FOUND_EXCEPTION, NOT_FOUND_MESSAGE } from '../../../utils/constants.js'
 import { RPSError } from '../../../utils/RPSError.js'
@@ -17,7 +19,7 @@ export async function deleteWirelessProfile(req: Request, res: Response): Promis
     const results: boolean = await req.db.wirelessProfiles.delete(profileName, req.tenantId)
     if (results) {
       if (req.secretsManager) {
-        await req.secretsManager.deleteSecretAtPath(`Wireless/${profileName}`)
+        await req.secretsManager.deleteSecretAtPath(wirelessSecretPath(profileName, req.tenantId))
       }
       MqttProvider.publishEvent('success', ['deleteWirelessProfiles'], `Deleted wireless profile : ${profileName}`)
       log.verbose(`Deleted wireless profile : ${profileName}`)

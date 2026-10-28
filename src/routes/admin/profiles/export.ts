@@ -1,3 +1,4 @@
+import { domainCertSecretPath, profileSecretPath } from '../../../utils/secretPaths.js'
 import { WirelessConfig, Ieee8021xConfig, ProfileWifiConfigs } from 'models/RCS.Config.js'
 import { type ExportWifiConfig, type ExportConfiguration } from '../../../models/index.js'
 import Logger from '../../../Logger.js'
@@ -88,7 +89,7 @@ export async function exportProfile(req: Request, res: Response): Promise<void> 
       if (domainObject && req.secretsManager) {
         try {
           const certCredentials = (await req.secretsManager.getSecretAtPath(
-            `certs/${domainObject.profileName}`
+            domainCertSecretPath(domainObject.profileName, req.tenantId)
           )) as CertCredentials
           if (certCredentials?.CERT) {
             domainObject.provisioningCert = certCredentials.CERT || domainObject.provisioningCert || ''
@@ -106,7 +107,9 @@ export async function exportProfile(req: Request, res: Response): Promise<void> 
       if (req.secretsManager) {
         try {
           return (
-            (await req.secretsManager.getSecretFromKey(`profiles/${profileName}`, secretKey)) || fallbackValue || ''
+            (await req.secretsManager.getSecretFromKey(profileSecretPath(profileName, req.tenantId), secretKey)) ||
+            fallbackValue ||
+            ''
           )
         } catch (error) {
           log.error(`Failed to get ${secretKey}: ${error}`)
@@ -123,7 +126,9 @@ export async function exportProfile(req: Request, res: Response): Promise<void> 
     // Get MPS password - this is typically generated randomly
     if (result.ciraConfigObject && req.secretsManager) {
       try {
-        passwords.mps = (await req.secretsManager.getSecretFromKey(`profiles/${profileName}`, 'MPS_PASSWORD')) || ''
+        passwords.mps =
+          (await req.secretsManager.getSecretFromKey(profileSecretPath(profileName, req.tenantId), 'MPS_PASSWORD')) ||
+          ''
       } catch (error) {
         log.error(`Failed to get MPS password: ${error}`)
       }

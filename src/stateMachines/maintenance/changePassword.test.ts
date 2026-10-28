@@ -6,6 +6,7 @@
 import { isDigestRealmValid, HttpResponseError, coalesceMessage } from '../common.js'
 
 import { type AMT, type Common } from '@device-management-toolkit/wsman-messages'
+import { devices } from '../../devices.js'
 import { SecretManagerCreatorFactory } from '../../factories/SecretManagerCreatorFactory.js'
 import { type DeviceCredentials, type ISecretManagerService } from '../../interfaces/ISecretManagerService.js'
 import { type DoneResponse, StatusFailed, StatusSuccess } from './doneResponse.js'
@@ -192,6 +193,17 @@ describe('ChangePassword State Machine', () => {
     context.updatedPassword = 'testPassword'
     const x = await implementation.saveToSecretProvider({ input: context })
     expect(x).toBeTruthy()
+  })
+  it('should read and write the device secret under the tenant from the client message', async () => {
+    context.updatedPassword = 'testPassword'
+    devices[clientId].ClientData = { tenantId: 'tenant-a' }
+    const x = await implementation.saveToSecretProvider({ input: context })
+    expect(x).toBeTruthy()
+    expect(secretGetterSpy).toHaveBeenCalledWith(`tenants/tenant-a/devices/${devices[clientId].uuid}`)
+    expect(secretWriterSpy).toHaveBeenCalledWith(
+      `tenants/tenant-a/devices/${devices[clientId].uuid}`,
+      expect.anything()
+    )
   })
   it('should create creds and save to Secret Provider', async () => {
     context.updatedPassword = 'testPassword'

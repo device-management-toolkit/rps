@@ -69,6 +69,13 @@ describe('validator', () => {
       expect(amtDevice).toBe(cred)
       expect(getSpy).toHaveBeenCalled()
     })
+    test('should read device credentials from the tenant-scoped path', async () => {
+      const getSpy = vi
+        .spyOn(validator.configurator.secretsManager, 'getSecretAtPath')
+        .mockImplementation(async () => null)
+      await validator.getDeviceCredentials({ ...msg, tenantId: 'tenant-a' })
+      expect(getSpy).toHaveBeenCalledWith(`tenants/tenant-a/devices/${msg.payload.uuid}`)
+    })
     test('should return null when credentials does not exists', async () => {
       const getSpy = vi
         .spyOn(validator.configurator.secretsManager, 'getSecretAtPath')
@@ -101,6 +108,13 @@ describe('validator', () => {
       msg.payload.password = 'Intel123!'
       await validator.verifyDevicePassword(msg.payload, clientId)
       expect(getSpy).toHaveBeenCalled()
+    })
+    test('should verify the password against the tenant-scoped device secret', async () => {
+      const clientId = randomUUID()
+      devices[clientId] = { ClientId: clientId, ClientSocket: null as any, unauthCount: 0 } as any
+      msg.payload.password = 'Intel123!'
+      await validator.verifyDevicePassword(msg.payload, clientId, 'tenant-a')
+      expect(getSpy).toHaveBeenCalledWith(`tenants/tenant-a/devices/${msg.payload.uuid}`)
     })
     test('should throw an exception when device info does not exists', async () => {
       const clientId = randomUUID()

@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { ciraConfigSecretPath } from '../../../utils/secretPaths.js'
+
 import Logger from '../../../Logger.js'
 import { NOT_FOUND_EXCEPTION, NOT_FOUND_MESSAGE } from '../../../utils/constants.js'
 import { RPSError } from '../../../utils/RPSError.js'
@@ -17,7 +19,7 @@ export async function deleteCiraConfig(req: Request, res: Response): Promise<voi
     const result: boolean = await req.db.ciraConfigs.delete(ciraConfigName, req.tenantId)
     if (result) {
       if (req.secretsManager) {
-        await req.secretsManager.deleteSecretAtPath(`CIRAConfigs/${ciraConfigName}`)
+        await req.secretsManager.deleteSecretAtPath(ciraConfigSecretPath(ciraConfigName, req.tenantId))
       }
       MqttProvider.publishEvent('success', ['deleteCiraConfig'], `Deleted CIRA config : ${ciraConfigName}`)
       log.verbose(`Deleted CIRA config profile : ${ciraConfigName}`)

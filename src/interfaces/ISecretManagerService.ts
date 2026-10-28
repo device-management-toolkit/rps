@@ -35,6 +35,8 @@ export interface CertCredentials {
   version?: string
 }
 
+// Paths are built by src/utils/secretPaths.ts. A non-empty tenant places them under
+// `tenants/<tenant>/`; the empty tenant keeps the historical unprefixed paths.
 export interface ISecretManagerService {
   getSecretFromKey: (path: string, key: string) => Promise<string | null>
   // null only when the secret is absent (404); transport/server errors throw.

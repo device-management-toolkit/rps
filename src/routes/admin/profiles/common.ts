@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { profileTlsSecretPath, type TenantId } from '../../../utils/secretPaths.js'
+
 import {
   type AMTConfiguration,
   type AMTKeyUsage,
@@ -48,7 +50,8 @@ export function adjustRedirectionConfiguration(amtConfig: AMTConfiguration): AMT
 
 export async function generateSelfSignedCertificate(
   secretsManager: ISecretManagerService,
-  profileName: string
+  profileName: string,
+  tenantId: TenantId
 ): Promise<any> {
   // generate root certificate
   const cm = new CertManager(new Logger('CertManager'), new NodeForge())
@@ -86,5 +89,5 @@ export async function generateSelfSignedCertificate(
     ISSUED_CERTIFICATE: issuedCert
   }
 
-  return await secretsManager.writeSecretWithObject(`TLS/${profileName}`, certs)
+  return await secretsManager.writeSecretWithObject(profileTlsSecretPath(profileName, tenantId), certs)
 }

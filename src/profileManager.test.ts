@@ -157,6 +157,17 @@ test('retrieve amt password', async () => {
   expect(actual).toEqual(expected)
 })
 
+test('retrieve amt and mebx passwords from the tenant-scoped secret path', async () => {
+  const secretsManager = { getSecretFromKey: vi.fn().mockResolvedValue('fromVault') } as any
+  const profileManager: ProfileManager = new ProfileManager(logger, secretsManager, profileStub)
+
+  const profile = 'profile 1'
+  expect(await profileManager.getAmtPassword(profile, 'tenant-a')).toBe('fromVault')
+  expect(secretsManager.getSecretFromKey).toHaveBeenCalledWith('tenants/tenant-a/profiles/profile 1', 'AMT_PASSWORD')
+  expect(await profileManager.getAmtPassword(profile, '')).toBe('fromVault')
+  expect(secretsManager.getSecretFromKey).toHaveBeenCalledWith('profiles/profile 1', 'AMT_PASSWORD')
+})
+
 test('retrieve amt password auto generated', async () => {
   const profileManager: ProfileManager = new ProfileManager(logger, null as any, profileStub, Environment.Config)
 

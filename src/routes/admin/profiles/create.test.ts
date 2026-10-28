@@ -138,6 +138,27 @@ describe('Profiles - Create', () => {
     await createProfile(req, resSpy)
     expect(resSpy.status).toHaveBeenCalledWith(201)
   })
+  it('should write profile and TLS secrets under the request tenant', async () => {
+    Environment.Config = { ...Environment.Config, secrets_tenant_partition: true } as any
+    req.tenantId = 'tenant-a'
+    req.body = {
+      ...sparseAcmCfg,
+      tlsMode: TlsMode.SERVER_ALLOW_NONTLS,
+      tlsSigningAuthority: TlsSigningAuthority.SELF_SIGNED
+    }
+    await createProfile(req, resSpy)
+    expect(writeSecretSpy).toHaveBeenNthCalledWith(1, 'tenants/tenant-a/profiles/testProfile', {
+      AMT_PASSWORD: 'P@ssw0rd',
+      MEBX_PASSWORD: 'P@ssw0rd'
+    })
+    expect(writeSecretSpy).toHaveBeenNthCalledWith(2, 'tenants/tenant-a/TLS/testProfile', expect.anything())
+    expect(resSpy.status).toHaveBeenCalledWith(201)
+  })
+  it('should keep legacy secret paths when no tenant is set', async () => {
+    req.body = { ...sparseAcmCfg }
+    await createProfile(req, resSpy)
+    expect(writeSecretSpy).toHaveBeenCalledWith('profiles/testProfile', expect.anything())
+  })
   it('should create self signed certificate when selected as signing authority', async () => {
     req.body = {
       ...sparseAcmCfg,

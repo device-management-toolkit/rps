@@ -46,5 +46,6 @@ export const config: RPSConfig = {
   jwt_token_header: '',
   amt_legacy_tls_compatibility: false,
   amt_post_tls_reject: false,
-  amt_tls_tunnel_persistent: true
+  amt_tls_tunnel_persistent: true,
+  secrets_tenant_partition: true
 }

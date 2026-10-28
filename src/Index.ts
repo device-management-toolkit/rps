@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { migrateTenantSecrets } from './secrets/tenantMigration.js'
+
 import express from 'express'
 import cors from 'cors'
 import Logger from './Logger.js'
@@ -114,6 +116,7 @@ export const startItUp = (): void => {
       .then(async (db) => {
         await waitForDB(db)
         await waitForSecretsManager(configurator.secretsManager)
+        await migrateTenantSecrets(db, configurator.secretsManager, new Logger('TenantSecretMigration'))
       })
       .then(() => {
         app.listen(Environment.Config.web_port, () => {

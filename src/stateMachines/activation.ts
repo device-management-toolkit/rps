@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { deviceSecretPath } from '../utils/secretPaths.js'
+
 import { AMT, IPS, CIM } from '@device-management-toolkit/wsman-messages'
 import { assign, createActor, fromPromise, sendTo, setup } from 'xstate'
 import { ClientAction } from '../models/RCS.Config.js'
@@ -499,7 +501,7 @@ export class Activation {
     const clientObj = devices[input.clientId]
     const isACMProfile = input.profile?.activation === ClientAction.ADMINCTLMODE
     const existing = (await this.configurator.secretsManager.getSecretAtPath(
-      `devices/${clientObj.uuid}`
+      deviceSecretPath(clientObj.uuid, input.tenantId)
     )) as DeviceCredentials | null
 
     const data: DeviceCredentials = {
@@ -519,7 +521,7 @@ export class Activation {
       return false
     }
 
-    await this.configurator.secretsManager.writeSecretWithObject(`devices/${clientObj.uuid}`, data)
+    await this.configurator.secretsManager.writeSecretWithObject(deviceSecretPath(clientObj.uuid, input.tenantId), data)
     return true
   }
 
@@ -779,13 +781,13 @@ export class Activation {
 
   private normalizeFingerprint = (fingerprint: string): string => fingerprint.replace(/:/g, '').toLowerCase()
 
-  private getVaultTlsFingerprint = async (clientId: string): Promise<string | null> => {
+  private getVaultTlsFingerprint = async (clientId: string, tenantId: string): Promise<string | null> => {
     const clientObj = devices[clientId]
 
     // Fetch device secret and MPSCerts in parallel — they are independent.
     const [existing, mpsCerts] = await Promise.all([
       this.configurator.secretsManager.getSecretAtPath(
-        `devices/${clientObj.uuid}`
+        deviceSecretPath(clientObj.uuid, tenantId)
       ) as Promise<DeviceCredentials | null>,
       clientObj.tls?.mpsRootCertPEM == null
         ? this.configurator.secretsManager.getSecretAtPath('MPSCerts')
@@ -1041,7 +1043,7 @@ export class Activation {
     this.logger.info(`Validating live AMT TLS certificate for device ${clientObj.uuid}`)
 
     try {
-      const vaultFingerprint = await this.getVaultTlsFingerprint(input.clientId)
+      const vaultFingerprint = await this.getVaultTlsFingerprint(input.clientId, input.tenantId)
       if (vaultFingerprint == null) {
         this.logger.info(`No TLS leaf cert stored in vault for device ${clientObj.uuid}, reprovisioning`)
         return false
@@ -1117,7 +1119,7 @@ export class Activation {
     }
 
     const existing = (await this.configurator.secretsManager.getSecretAtPath(
-      `devices/${clientObj.uuid}`
+      deviceSecretPath(clientObj.uuid, input.tenantId)
     )) as DeviceCredentials | null
 
     const data: DeviceCredentials = {
@@ -1126,7 +1128,7 @@ export class Activation {
       TLS_ISSUED_CERTIFICATE: clientObj.tls.issuedCertPEM
     }
 
-    await this.configurator.secretsManager.writeSecretWithObject(`devices/${clientObj.uuid}`, data)
+    await this.configurator.secretsManager.writeSecretWithObject(deviceSecretPath(clientObj.uuid, input.tenantId), data)
     this.logger.info(`Stored TLS leaf cert in vault for device ${clientObj.uuid}`)
     return true
   }

@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { Environment } from './utils/Environment.js'
+
 import { vi } from 'vitest'
 import { DomainCredentialManager } from './DomainCredentialManager.js'
 import { type ILogger } from './interfaces/ILogger.js'
@@ -48,6 +50,14 @@ describe('Domain Credential Manager Tests', () => {
     const domain: AMTDomain | null = await domainCredentialManager.getProvisioningCert('d2.com', '')
     expect(domain?.provisioningCert).toEqual(expectedProvisioningCert)
     expect(domain?.provisioningCertPassword).toEqual('password')
+  })
+  test('reads the provisioning cert from the tenant-scoped path', async () => {
+    Environment.Config = { ...Environment.Config, secrets_tenant_partition: true } as any
+    Environment.Config = { ...Environment.Config, secrets_tenant_partition: true } as any
+    const getSecretAtPath = vi.fn().mockResolvedValue({ CERT: 'd2.pfx', CERT_PASSWORD: 'password' })
+    const manager = new DomainCredentialManager(logger, new DomainsTable(creator), { getSecretAtPath } as any)
+    await manager.getProvisioningCert('d2.com', 'tenant-a')
+    expect(getSecretAtPath.mock.calls[0][0]).toMatch(/^tenants\/tenant-a\/certs\//)
   })
   test('does domain exist should return domain object', async () => {
     const result = await domainCredentialManager.doesDomainExist('d2.com', '')
