@@ -264,6 +264,9 @@ describe('secret metadata', () => {
 describe('kvMetadataPath', () => {
   it.each([
     ['secret/data/', 'secret/metadata/'],
+    ['secret/data', 'secret/metadata/'],
+    ['/data/', '/metadata/'],
+    ['secret/data//', 'secret/metadata//'],
     ['team/data/data/', 'team/data/metadata/'],
     ['secret/data/rps/', 'secret/metadata/rps/']
   ])('should map %j to %j', (secretsPath, expected) => {
@@ -464,6 +467,16 @@ describe('secret metadata path', () => {
     expect(patchSpy).toHaveBeenCalledWith('devices/x', expect.objectContaining({ prefixUrl }))
     await expect(secretManagerService.deleteSecretAtPath('devices/x')).resolves.toBe(true)
     expect(deleteSpy).toHaveBeenCalledWith('devices/x', { prefixUrl })
+  })
+
+  it('should patch under the metadata path when secrets_path has no trailing slash', async () => {
+    Environment.Config = { ...config, secrets_path: 'secret/data' }
+    const result = await secretManagerService.writeSecretWithObject('devices/x', secretCert, { hostname: 'h1' })
+    expect(result).toEqual(secretCert)
+    expect(patchSpy).toHaveBeenCalledWith(
+      'devices/x',
+      expect.objectContaining({ prefixUrl: `${Environment.Config.vault_address}/v1/secret/metadata/` })
+    )
   })
 
   it('should delete at secrets_path and not patch for a KV v1 path', async () => {

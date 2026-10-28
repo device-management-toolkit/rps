@@ -20,11 +20,16 @@ import got, { HTTPError, type Got } from 'got'
 // segment replaced by "metadata". The mount itself may contain "data" (team/data/data/), so only
 // the last one is replaced. Null for a KV v1 path or any other path without a data segment.
 export function kvMetadataPath(secretsPath: string | undefined): string | null {
-  const index = secretsPath?.lastIndexOf('/data/') ?? -1
-  if (secretsPath == null || index < 0) {
+  if (!secretsPath) {
     return null
   }
-  return `${secretsPath.slice(0, index)}/metadata/${secretsPath.slice(index + '/data/'.length)}`
+  // got adds the slash itself for data requests, so secrets_path works with or without it
+  const normalized = secretsPath.endsWith('/') ? secretsPath : `${secretsPath}/`
+  const index = normalized.lastIndexOf('/data/')
+  if (index < 0) {
+    return null
+  }
+  return `${normalized.slice(0, index)}/metadata/${normalized.slice(index + '/data/'.length)}`
 }
 
 // Metadata paths a permanent delete tries. When secrets_path holds "data" more than once, which
