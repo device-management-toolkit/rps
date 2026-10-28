@@ -9,7 +9,7 @@ import { CertManager } from '../certManager.js'
 import { Configurator } from '../Configurator.js'
 import Logger from '../Logger.js'
 import got from 'got'
-import { UNEXPECTED_PARSE_ERROR } from '../utils/constants.js'
+import { UNEXPECTED_PARSE_ERROR, RPS_MODE_CONSOLE } from '../utils/constants.js'
 import { type CIRAConfig, ClientAction } from '../models/RCS.Config.js'
 import { NodeForge } from '../NodeForge.js'
 import { DbCreatorFactory } from '../factories/DbCreatorFactory.js'
@@ -96,15 +96,20 @@ export class CIRAConfiguration {
   }
 
   saveDeviceToMPS = async ({ input }: { input: CIRAConfigContext }): Promise<any> => {
+    const json: any = {
+      guid: devices[input.clientId].uuid,
+      hostname: devices[input.clientId].hostname,
+      mpsusername: input.ciraConfig?.username,
+      tags: input.profile?.tags ?? [],
+      tenantId: input.ciraConfig?.tenantId
+    }
+    // Console mode only: device.MPSPassword has no Vault fallback, so it has to travel here.
+    if (Environment.Config.mode === RPS_MODE_CONSOLE) {
+      json.mpspassword = input.ciraConfig?.password
+    }
     const data = await got(`${Environment.Config.mps_server}/api/v1/devices`, {
       method: 'POST',
-      json: {
-        guid: devices[input.clientId].uuid,
-        hostname: devices[input.clientId].hostname,
-        mpsusername: input.ciraConfig?.username,
-        tags: input.profile?.tags ?? [],
-        tenantId: input.ciraConfig?.tenantId
-      }
+      json
     })
     return data
   }
