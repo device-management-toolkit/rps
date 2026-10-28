@@ -10,4 +10,9 @@ import { type ITable } from './ITable.js'
 export interface IProfilesTable extends ITable<AMTConfiguration> {
   getCiraConfigForProfile: (ciraConfigName: string, tenantId?: string) => Promise<CIRAConfig | null>
   get8021XConfigForProfile: (profileName: string, tenantId?: string) => Promise<Ieee8021xConfig | null>
+  // Console mode only (RPS_MODE_CONSOLE): service-token-gated secrets read, unused in Postgres mode.
+  getSecretsByName?: (
+    profileName: string,
+    tenantId?: string
+  ) => Promise<{ profileName: string; amtPassword?: string; mebxPassword?: string } | null>
 }

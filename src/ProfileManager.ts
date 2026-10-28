@@ -10,6 +10,8 @@ import { PasswordHelper } from './utils/PasswordHelper.js'
 import { type CIRAConfig } from './models/RCS.Config.js'
 import { type IProfilesTable } from './interfaces/database/IProfilesDb.js'
 import { type ISecretManagerService, type TLSCredentials } from './interfaces/ISecretManagerService.js'
+import { RPS_MODE_CONSOLE } from './utils/constants.js'
+import { Environment } from './utils/Environment.js'
 
 export class ProfileManager implements IProfileManager {
   private readonly amtConfigurations: IProfilesTable
@@ -83,6 +85,10 @@ export class ProfileManager implements IProfileManager {
         } else {
           this.logger.error(`unable to create a random password for ${profile.profileName}`)
         }
+      } else if (Environment.Config.mode === RPS_MODE_CONSOLE && this.amtConfigurations.getSecretsByName) {
+        // Console mode: profile passwords aren't in the normal read, so fetch the secrets route instead of Vault.
+        const secrets = await this.amtConfigurations.getSecretsByName(profileName, tenantId)
+        amtPassword = secrets?.amtPassword ?? null
       } else if (this.secretsManager) {
         amtPassword = await this.secretsManager.getSecretFromKey(`profiles/${profileName}`, 'AMT_PASSWORD')
       } else {
@@ -119,6 +125,9 @@ export class ProfileManager implements IProfileManager {
         } else {
           this.logger.error(`unable to create MEBx random password for ${profile.profileName}`)
         }
+      } else if (Environment.Config.mode === RPS_MODE_CONSOLE && this.amtConfigurations.getSecretsByName) {
+        const secrets = await this.amtConfigurations.getSecretsByName(profileName, tenantId)
+        mebxPassword = secrets?.mebxPassword ?? null
       } else if (this.secretsManager) {
         mebxPassword = await this.secretsManager.getSecretFromKey(`profiles/${profileName}`, 'MEBX_PASSWORD')
       } else {
