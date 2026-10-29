@@ -3,38 +3,47 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import express from 'express'
 import router from './index.js'
+import { request } from '../../test/helper/http.js'
 
-describe('Check index from admin', () => {
-  const routes = [
-    { path: '/', method: 'get' }
-  ]
-  it('should have routes', () => {
-    routes.forEach((route) => {
-      const match = router.stack.find((s) => s.route?.path === route.path && s.route?.methods[route.method])
-      expect(match).toBeTruthy()
+const { childRouter } = vi.hoisted(() => ({
+  childRouter: async () => {
+    const { Router } = await import('express')
+    return { default: Router().get('/', (req, res) => res.json({ mounted: req.baseUrl })) }
+  }
+}))
+
+vi.mock('./domains/index.js', () => childRouter())
+vi.mock('./profiles/index.js', () => childRouter())
+vi.mock('./ciraconfig/index.js', () => childRouter())
+vi.mock('./wireless/index.js', () => childRouter())
+vi.mock('./ieee8021x/index.js', () => childRouter())
+vi.mock('./version/index.js', () => childRouter())
+vi.mock('./health/index.js', () => childRouter())
+vi.mock('./proxy/index.js', () => childRouter())
+
+describe('Admin router', () => {
+  it('serves the admin index', async () => {
+    expect(await request(express().use(router), '/')).toEqual({
+      status: 200,
+      body: { message: 'admin path. use admin/profiles' }
     })
   })
-  const routers = [
-    { path: '/domains', method: 'use' },
-    { path: '/profiles', method: 'use' },
-    { path: '/ciraconfigs', method: 'use' },
-    { path: '/wirelessconfigs', method: 'use' },
-    { path: '/ieee8021xconfigs', method: 'use' },
-    { path: '/version', method: 'use' },
-    { path: '/health', method: 'use' }
-  ]
 
-  it('should have routers', () => {
-    routers.forEach((route) => {
-      const match = router.stack.find((s) => {
-        const isPathMatched = (s.regexp as RegExp).exec(route.path)
-        if (isPathMatched != null) {
-          return isPathMatched.length > 0 && s.path == null
-        }
-        return false
-      })
-      expect(match).toBeTruthy()
+  it.each([
+    'domains',
+    'profiles',
+    'ciraconfigs',
+    'wirelessconfigs',
+    'ieee8021xconfigs',
+    'version',
+    'health',
+    'proxyconfigs'
+  ])('mounts /%s', async (path) => {
+    expect(await request(express().use(router), `/${path}`)).toEqual({
+      status: 200,
+      body: { mounted: `/${path}` }
     })
   })
 })

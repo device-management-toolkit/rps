@@ -10,7 +10,7 @@ import { MqttProvider } from '../../../utils/MqttProvider.js'
 import { type Request, type Response } from 'express'
 import handleError from '../../../utils/handleError.js'
 
-export async function deleteCiraConfig(req: Request, res: Response): Promise<void> {
+export async function deleteCiraConfig(req: Request<{ ciraConfigName: string }>, res: Response): Promise<void> {
   const log = new Logger('deleteCiraConfig')
   const ciraConfigName: string = req.params.ciraConfigName
   try {

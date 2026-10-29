@@ -10,7 +10,7 @@ import { MqttProvider } from '../../../utils/MqttProvider.js'
 import { type Request, type Response } from 'express'
 import handleError from '../../../utils/handleError.js'
 
-export async function deleteIEEE8021xProfile(req: Request, res: Response): Promise<void> {
+export async function deleteIEEE8021xProfile(req: Request<{ profileName: string }>, res: Response): Promise<void> {
   const log = new Logger('deleteIEEE8021xProfile')
   const { profileName } = req.params
   try {
