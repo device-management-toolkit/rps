@@ -12,6 +12,8 @@ import { Environment } from '../../utils/Environment.js'
 import { vi, type MockInstance } from 'vitest'
 import { type MachineImplementationsSimplified, fromPromise } from 'xstate'
 import got from 'got'
+import { SecretManagerCreatorFactory } from '../../factories/SecretManagerCreatorFactory.js'
+import { devices } from '../../devices.js'
 import {
   type SyncHostNameContext,
   type HostNameInfo,
@@ -48,6 +50,7 @@ describe('SyncHostName State Machine', () => {
   let putRsp: any
   let mpsRsp: any
   let context: SyncHostNameContext
+  let writeSecretMetadataSpy: MockInstance
 
   beforeEach(() => {
     vi.resetAllMocks()
@@ -116,6 +119,10 @@ describe('SyncHostName State Machine', () => {
     }
     event = { type: SyncHostNameEventType, clientId, hostNameInfo }
     gotSpy = vi.spyOn(got, 'patch')
+    writeSecretMetadataSpy = vi.fn<any>().mockResolvedValue(undefined)
+    vi.spyOn(SecretManagerCreatorFactory.prototype, 'getSecretManager').mockResolvedValue({
+      writeSecretMetadata: writeSecretMetadataSpy
+    } as any)
   })
 
   const runTheTest = async function (): Promise<void> {
@@ -173,5 +180,31 @@ describe('SyncHostName State Machine', () => {
     mpsRsp.statusMessage = 'Device not found'
     doneResponse.status = StatusFailed
     await runTheTest()
+  })
+  it('should write secret metadata through the machine before saving to MPS', async () => {
+    devices[clientId].uuid = 'test-uuid'
+    await runTheTest()
+    expect(writeSecretMetadataSpy).toHaveBeenCalledWith('devices/test-uuid', { hostname: 'new.host.com' })
+    expect(writeSecretMetadataSpy.mock.invocationCallOrder[0]).toBeLessThan(gotSpy.mock.invocationCallOrder[0])
+  })
+  it('should still save to MPS and succeed when saving secret metadata fails', async () => {
+    const saveToMPS = vi.fn(async () => hostNameInfo.hostname as string)
+    implementationConfig.actors!.saveSecretMetadata = fromPromise(async () => {
+      throw new Error('metadata failed')
+    })
+    implementationConfig.actors!.saveToMPS = fromPromise(saveToMPS)
+    implementationConfig.actors!.putGeneralSettings = fromPromise(async () => putRsp.AMT_GeneralSettings)
+    await runTilDone(implementation.machine.provide(implementationConfig), event, doneResponse, context)
+    expect(saveToMPS).toHaveBeenCalled()
+  })
+  it('should write secret metadata for the device uuid and new hostname', async () => {
+    devices[clientId].uuid = 'test-uuid'
+    await implementation.saveSecretMetadata({ input: context })
+    expect(writeSecretMetadataSpy).toHaveBeenCalledWith('devices/test-uuid', { hostname: 'new.host.com' })
+  })
+  it('should resolve when the secret provider has no writeSecretMetadata', async () => {
+    devices[clientId].uuid = 'test-uuid'
+    vi.spyOn(SecretManagerCreatorFactory.prototype, 'getSecretManager').mockResolvedValue({} as any)
+    await expect(implementation.saveSecretMetadata({ input: context })).resolves.toBeUndefined()
   })
 })

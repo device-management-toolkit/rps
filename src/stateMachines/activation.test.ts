@@ -721,6 +721,21 @@ describe('Activation State Machine', () => {
       expect(insertSpy).toHaveBeenCalled()
       expect(response).toBe(true)
     })
+    it('should pass the client hostname as secret metadata', async () => {
+      const clientObj: any = devices[clientId]
+      clientObj.uuid = 'test-uuid'
+      clientObj.hostname = 'host1'
+      clientObj.amtPassword = 'testPw'
+      clientObj.mebxPassword = 'testPw'
+      vi.spyOn(activation.configurator.secretsManager, 'getSecretAtPath').mockResolvedValueOnce(null)
+      const insertSpy = vi
+        .spyOn(activation.configurator.secretsManager, 'writeSecretWithObject')
+        .mockImplementation(async () => true)
+      await activation.saveDeviceInfoToSecretProvider({ input: context })
+      expect(insertSpy).toHaveBeenCalledWith('devices/test-uuid', expect.objectContaining({ AMT_PASSWORD: 'testPw' }), {
+        hostname: 'host1'
+      })
+    })
     it('should return false if not able to save data', async () => {
       const err = new Error('Unable to save')
       const clientObj: any = devices[clientId]
@@ -756,7 +771,8 @@ describe('Activation State Machine', () => {
         expect.objectContaining({
           AMT_PASSWORD: 'testAMTpw',
           MEBX_PASSWORD: 'testMEBXpw'
-        })
+        }),
+        expect.any(Object)
       )
     })
     it('should save MEBX_PASSWORD as null for CCM profile regardless of action', async () => {
@@ -782,7 +798,8 @@ describe('Activation State Machine', () => {
         expect.objectContaining({
           AMT_PASSWORD: 'testAMTpw',
           MEBX_PASSWORD: null
-        })
+        }),
+        expect.any(Object)
       )
     })
     it('should preserve TLS_ISSUED_CERTIFICATE from vault when not set on client', async () => {
@@ -805,7 +822,8 @@ describe('Activation State Machine', () => {
         expect.objectContaining({
           AMT_PASSWORD: 'testAMTpw',
           TLS_ISSUED_CERTIFICATE: 'existing-cert-pem'
-        })
+        }),
+        expect.any(Object)
       )
     })
     it('should prefer in-memory issuedCertPEM over vault value', async () => {
@@ -823,7 +841,8 @@ describe('Activation State Machine', () => {
         expect.any(String),
         expect.objectContaining({
           TLS_ISSUED_CERTIFICATE: 'fresh-cert'
-        })
+        }),
+        expect.any(Object)
       )
     })
   })
@@ -2960,11 +2979,15 @@ describe('Activation State Machine', () => {
           .mockImplementation(async () => true)
         const result = await activation.saveTlsTunnelCerts({ input: context } as any)
         expect(result).toBe(true)
-        expect(insertSpy).toHaveBeenCalledWith('devices/test-uuid', {
-          AMT_PASSWORD: 'testAMTpw',
-          MEBX_PASSWORD: 'testMEBXpw',
-          TLS_ISSUED_CERTIFICATE: 'issuedCert'
-        })
+        expect(insertSpy).toHaveBeenCalledWith(
+          'devices/test-uuid',
+          {
+            AMT_PASSWORD: 'testAMTpw',
+            MEBX_PASSWORD: 'testMEBXpw',
+            TLS_ISSUED_CERTIFICATE: 'issuedCert'
+          },
+          expect.any(Object)
+        )
       })
 
       it('should save leaf cert to vault for CCM (mebxPassword null)', async () => {
@@ -2980,11 +3003,35 @@ describe('Activation State Machine', () => {
           .mockImplementation(async () => true)
         const result = await activation.saveTlsTunnelCerts({ input: context } as any)
         expect(result).toBe(true)
-        expect(insertSpy).toHaveBeenCalledWith('devices/test-uuid', {
-          AMT_PASSWORD: 'testAMTpw',
-          MEBX_PASSWORD: null,
-          TLS_ISSUED_CERTIFICATE: 'issuedCert'
-        })
+        expect(insertSpy).toHaveBeenCalledWith(
+          'devices/test-uuid',
+          {
+            AMT_PASSWORD: 'testAMTpw',
+            MEBX_PASSWORD: null,
+            TLS_ISSUED_CERTIFICATE: 'issuedCert'
+          },
+          expect.any(Object)
+        )
+      })
+
+      it('should pass the client hostname as secret metadata', async () => {
+        const clientObj = devices[clientId]
+        clientObj.uuid = 'test-uuid'
+        clientObj.hostname = 'host1'
+        clientObj.amtPassword = 'testAMTpw'
+        clientObj.mebxPassword = 'testMEBXpw'
+        clientObj.action = ClientAction.ADMINCTLMODE
+        clientObj.tls = { issuedCertPEM: 'issuedCert' } as any
+
+        const insertSpy = vi
+          .spyOn(activation.configurator.secretsManager, 'writeSecretWithObject')
+          .mockImplementation(async () => true)
+        await activation.saveTlsTunnelCerts({ input: context } as any)
+        expect(insertSpy).toHaveBeenCalledWith(
+          'devices/test-uuid',
+          expect.objectContaining({ TLS_ISSUED_CERTIFICATE: 'issuedCert' }),
+          { hostname: 'host1' }
+        )
       })
 
       it('should throw when issuedCertPEM is missing', async () => {
@@ -3017,11 +3064,15 @@ describe('Activation State Machine', () => {
 
         const result = await activation.saveTlsTunnelCerts({ input: context } as any)
         expect(result).toBe(true)
-        expect(insertSpy).toHaveBeenCalledWith('devices/test-uuid', {
-          AMT_PASSWORD: 'vaultAMTpw',
-          MEBX_PASSWORD: 'testMEBXpw',
-          TLS_ISSUED_CERTIFICATE: 'issuedCert'
-        })
+        expect(insertSpy).toHaveBeenCalledWith(
+          'devices/test-uuid',
+          {
+            AMT_PASSWORD: 'vaultAMTpw',
+            MEBX_PASSWORD: 'testMEBXpw',
+            TLS_ISSUED_CERTIFICATE: 'issuedCert'
+          },
+          expect.any(Object)
+        )
       })
 
       it('should fall back to vault-stored MEBX_PASSWORD when mebxPassword is null for ACM', async () => {
@@ -3041,11 +3092,15 @@ describe('Activation State Machine', () => {
 
         const result = await activation.saveTlsTunnelCerts({ input: context } as any)
         expect(result).toBe(true)
-        expect(insertSpy).toHaveBeenCalledWith('devices/test-uuid', {
-          AMT_PASSWORD: 'testAMTpw',
-          MEBX_PASSWORD: 'vaultMEBXpw',
-          TLS_ISSUED_CERTIFICATE: 'issuedCert'
-        })
+        expect(insertSpy).toHaveBeenCalledWith(
+          'devices/test-uuid',
+          {
+            AMT_PASSWORD: 'testAMTpw',
+            MEBX_PASSWORD: 'vaultMEBXpw',
+            TLS_ISSUED_CERTIFICATE: 'issuedCert'
+          },
+          expect.any(Object)
+        )
       })
 
       it('should save MEBX_PASSWORD for TLS activation (action=CCM, profile=ACM)', async () => {
@@ -3062,11 +3117,15 @@ describe('Activation State Machine', () => {
           .mockImplementation(async () => true)
         const result = await activation.saveTlsTunnelCerts({ input: context } as any)
         expect(result).toBe(true)
-        expect(insertSpy).toHaveBeenCalledWith('devices/test-uuid', {
-          AMT_PASSWORD: 'testAMTpw',
-          MEBX_PASSWORD: 'testMEBXpw',
-          TLS_ISSUED_CERTIFICATE: 'issuedCert'
-        })
+        expect(insertSpy).toHaveBeenCalledWith(
+          'devices/test-uuid',
+          {
+            AMT_PASSWORD: 'testAMTpw',
+            MEBX_PASSWORD: 'testMEBXpw',
+            TLS_ISSUED_CERTIFICATE: 'issuedCert'
+          },
+          expect.any(Object)
+        )
       })
     })
 
