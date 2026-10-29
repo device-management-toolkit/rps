@@ -269,6 +269,56 @@ describe('Features State Machine', () => {
       featuresService.start()
       featuresService.send({ type: 'CONFIGURE_FEATURES', clientId })
     }))
+  describe('redirection listener', () => {
+    // Resolves with ListenerEnabled as sent to AMT, or null when the redirection service is not written
+    async function runAndGetPutListenerEnabled(): Promise<boolean | null> {
+      let listenerEnabled: boolean | null = null
+      machineConfig.actors!.putRedirectionService = fromPromise(async ({ input }) => {
+        listenerEnabled = (input as FeatureContext).AMT_RedirectionService!.ListenerEnabled
+        return await Promise.resolve({ clientId })
+      })
+      const featuresService = createActor(featuresConfiguration.machine.provide(machineConfig), { input: context })
+      const done = new Promise<void>((resolve, reject) => {
+        featuresService.subscribe({
+          next: (state) => {
+            if (state.matches('SUCCESS')) resolve()
+            if (state.matches('FAILED')) reject(new Error('features configuration failed'))
+          },
+          error: reject
+        })
+      })
+      featuresService.start()
+      featuresService.send({ type: 'CONFIGURE_FEATURES', clientId })
+      await done
+      return listenerEnabled
+    }
+
+    beforeEach(() => {
+      amtRedirectionSvcJson.EnabledState = AMTRedirectionServiceEnabledStates.DISABLED
+      amtRedirectionSvcJson.ListenerEnabled = false
+      context.amtConfiguration.solEnabled = false
+      context.amtConfiguration.iderEnabled = false
+      context.amtConfiguration.kvmEnabled = true
+    })
+
+    it('should enable the listener for a KVM-only profile when KVM is disabled on AMT', async () => {
+      kvmRedirectionSvcJson.EnabledState = 3 // Disabled
+      expect(await runAndGetPutListenerEnabled()).toBe(true)
+    })
+
+    it('should enable the listener for a KVM-only profile when KVM is already enabled on AMT', async () => {
+      kvmRedirectionSvcJson.EnabledState = 2 // Enabled
+      expect(await runAndGetPutListenerEnabled()).toBe(true)
+    })
+
+    it('should disable the listener when the profile disables all redirection features', async () => {
+      context.amtConfiguration.kvmEnabled = false
+      kvmRedirectionSvcJson.EnabledState = 2 // Enabled
+      amtRedirectionSvcJson.ListenerEnabled = true
+      expect(await runAndGetPutListenerEnabled()).toBe(false)
+    })
+  })
+
   it('getAmtRedirectionService', async () => {
     await featuresConfiguration.getAmtRedirectionService({ input: context })
     expect(invokeWsmanCallSpy).toHaveBeenCalled()
