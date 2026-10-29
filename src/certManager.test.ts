@@ -337,6 +337,35 @@ describe('certManager tests', () => {
       expect(ski.toLowerCase()).toBe(expected)
     })
 
+    test('refuses to sign when node-forge puts a different field at the key position', () => {
+      // Simulates a node-forge change: move the public key one position later. Replacing position 6
+      // would then overwrite the wrong field, so signing must fail loudly instead.
+      const nodeForge = new NodeForge()
+      const realGetTBSCertificate = nodeForge.getTBSCertificate.bind(nodeForge)
+      vi.spyOn(nodeForge, 'getTBSCertificate').mockImplementation((cert) => {
+        const tbs = realGetTBSCertificate(cert)
+        const fields = tbs.value as any[]
+        ;[fields[5], fields[6]] = [fields[6], fields[5]]
+        return tbs
+      })
+      const certManager = new CertManager(new Logger('CertManager'), nodeForge)
+      const { publicKey } = generateKeyPairSync('ec', { namedCurve: 'secp384r1' })
+      const spki = (publicKey.export({ type: 'spki', format: 'der' }) as Buffer).toString('base64')
+      const rootAttr: CertAttributes = { CN: 'MPSRoot-f95514', O: 'unknown', C: 'unknown' }
+      const rootCert = certManager.createCertificate(rootAttr)
+
+      expect(() =>
+        certManager.amtCertSignWithCAKey(
+          spki,
+          rootCert.key,
+          { CN: 'AMT-testhost', C: 'None', ST: 'None', O: 'None' },
+          rootAttr,
+          { name: 'extKeyUsage', serverAuth: true } as AMTKeyUsage,
+          rootCert.pem
+        )
+      ).toThrow(/Unexpected certificate layout from node-forge/)
+    })
+
     test('still parses an RSA device key directly rather than splicing it', () => {
       const nodeForge = new NodeForge()
       const certManager = new CertManager(new Logger('CertManager'), nodeForge)

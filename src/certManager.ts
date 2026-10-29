@@ -381,7 +381,25 @@ export class CertManager {
   ): void {
     cert.signatureOid = cert.siginfo.algorithmOid = this.nodeForge.rsaSignatureOid(hashAlgorithm)
     const tbs = this.nodeForge.getTBSCertificate(cert)
-    ;(tbs.value as asn1.Asn1[])[CertManager.TBS_SPKI_INDEX] = spki
+    const tbsFields = tbs.value as asn1.Asn1[]
+    // getTBSCertificate is an undocumented node-forge function, and TBS_SPKI_INDEX is an assumption about
+    // the order of the fields it emits. Before overwriting that position, confirm it still holds the
+    // stand-in key that standInForExternalPublicKey put on the certificate. If a node-forge upgrade adds,
+    // removes or reorders a field, we would otherwise overwrite the wrong field (for example the subject)
+    // and still sign the result, and the problem would only surface when AMT rejects the certificate.
+    // Failing here makes such a change visible immediately, with a message that names the cause.
+    const standInSpki = this.nodeForge.publicKeyToAsn1(cert.publicKey)
+    const fieldAtSpkiIndex = tbsFields[CertManager.TBS_SPKI_INDEX]
+    if (
+      fieldAtSpkiIndex == null ||
+      this.nodeForge.asn1ToDer(fieldAtSpkiIndex).getBytes() !== this.nodeForge.asn1ToDer(standInSpki).getBytes()
+    ) {
+      throw new UnsupportedCertificateError(
+        `Unexpected certificate layout from node-forge: the stand-in public key is not at TBSCertificate ` +
+          `position ${CertManager.TBS_SPKI_INDEX}. node-forge may have changed; refusing to sign.`
+      )
+    }
+    tbsFields[CertManager.TBS_SPKI_INDEX] = spki
     cert.tbsCertificate = tbs
     cert.md = digest
     digest.update(this.nodeForge.asn1ToDer(tbs).getBytes())

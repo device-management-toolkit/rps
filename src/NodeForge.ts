@@ -72,6 +72,10 @@ export class NodeForge {
     return (forge.pki as any).getTBSCertificate(cert)
   }
 
+  publicKeyToAsn1(publicKey: forge.pki.PublicKey): forge.asn1.Asn1 {
+    return forge.pki.publicKeyToAsn1(publicKey)
+  }
+
   setRsaPublicKey(n: any, e: any): forge.pki.rsa.PublicKey {
     return forge.pki.setRsaPublicKey(n, e)
   }
