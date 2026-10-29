@@ -1,3 +1,10 @@
+# [2.43.0](https://github.com/device-management-toolkit/rps/compare/v2.42.0...v2.43.0) (2026-10-29)
+
+
+### Features
+
+* **secrets:** optional metadata on secret writes ([#2992](https://github.com/device-management-toolkit/rps/issues/2992)) ([7ecbf43](https://github.com/device-management-toolkit/rps/commit/7ecbf4336a3a697196e821ed4d6f77393b183c4f)), closes [#2945](https://github.com/device-management-toolkit/rps/issues/2945)
+
 # [2.42.0](https://github.com/device-management-toolkit/rps/compare/v2.41.1...v2.42.0) (2026-10-27)
 
 
