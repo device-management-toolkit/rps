@@ -49,8 +49,8 @@ export const domainUpdateValidator = (): any => [
     .withMessage('AMT Domain profile name is required')
     .matches('^[a-zA-Z0-9_-]+$')
     .withMessage('AMT Domain profile name accepts letters, numbers, hyphens (-), and underscores (_)'),
-  check('domainSuffix'),
-  check('provisioningCert'),
+  check('domainSuffix').optional().notEmpty().withMessage('Domain suffix name is required'),
+  check('provisioningCert').custom(provisioningCertValidator(true)),
   check('provisioningCertStorageFormat')
     .isIn(['raw', 'string'])
     .withMessage('Provisioning Cert Storage Format is either "raw" or "string"'),
@@ -59,28 +59,44 @@ export const domainUpdateValidator = (): any => [
     .withMessage('Password should not exceed 64 characters in length')
 ]
 
-function provisioningCertValidator(): CustomValidator {
+function provisioningCertValidator(resolveExistingCredentials = false): CustomValidator {
   return (value, { req }) => {
-    const password = req?.body?.provisioningCertPassword
-    if (password == null || password === '' || value == null || value === '') {
+    if (value == null || value === '') {
       return true
     }
 
-    const pfxobj = passwordChecker(certManager, req)
-    domainSuffixChecker(pfxobj, req?.body?.domainSuffix)
+    const password = req?.body?.provisioningCertPassword
+    const domainSuffix = req?.body?.domainSuffix
+
+    if (!password || password === '') {
+      if (resolveExistingCredentials) {
+        throw new Error('Provisioning Cert Password is required to validate replacement certificate')
+      }
+      return true
+    }
+    if (!domainSuffix) {
+      throw new Error('Domain suffix name is required to validate provisioning certificate')
+    }
+
+    const pfxobj = passwordChecker(certManager, req, password)
+    domainSuffixChecker(pfxobj, domainSuffix)
     expirationChecker(pfxobj)
-    rootCertChecker(pfxobj)
+    const orderedChain = chainIntegrityChecker(pfxobj)
+    rootCertChecker(orderedChain)
     keySizeChecker(pfxobj)
     privateKeyChecker(pfxobj)
-    chainIntegrityChecker(pfxobj)
     amtOidChecker(pfxobj)
     return true
   }
 }
 
-export function passwordChecker(certManager: CertManager, req: any): CertsAndKeys {
+export function passwordChecker(
+  certManager: CertManager,
+  req: any,
+  password: string = req.body.provisioningCertPassword
+): CertsAndKeys {
   try {
-    const pfxobj = certManager.convertPfxToObject(req.body.provisioningCert, req.body.provisioningCertPassword)
+    const pfxobj = certManager.convertPfxToObject(req.body.provisioningCert, password)
     return pfxobj
   } catch (error) {
     if (error instanceof UnsupportedCertificateError) {
@@ -137,10 +153,25 @@ export function expirationChecker(pfxobj: CertsAndKeys): void {
   }
 }
 
-export function rootCertChecker(pfxobj: CertsAndKeys): void {
-  const hasRoot = pfxobj.certs.some((cert) => cert.subject.hash === cert.issuer.hash)
-  if (!hasRoot) {
-    throw new Error('Provisioning certificate does not contain a root certificate')
+export function rootCertChecker(chain: pki.Certificate[]): void {
+  const root = chain[chain.length - 1]
+  if (!root || root.subject.hash !== root.issuer.hash) {
+    throw new Error('Provisioning certificate does not contain a self-issued root certificate')
+  }
+
+  let signatureValid: boolean
+  try {
+    signatureValid = root.verify(root)
+  } catch (error) {
+    throw new Error('Provisioning certificate root signature verification failed', { cause: error })
+  }
+  if (!signatureValid) {
+    throw new Error('Provisioning certificate root signature is invalid')
+  }
+
+  const basicConstraints = root.getExtension('basicConstraints') as { cA?: boolean } | null
+  if (basicConstraints?.cA !== true) {
+    throw new Error('Provisioning certificate root must have basicConstraints with cA set to true')
   }
 }
 
@@ -166,9 +197,11 @@ export function privateKeyChecker(pfxobj: CertsAndKeys): void {
   }
 }
 
-export function chainIntegrityChecker(pfxobj: CertsAndKeys): void {
+export function chainIntegrityChecker(pfxobj: CertsAndKeys): pki.Certificate[] {
   const { certs } = pfxobj
-  if (certs.length <= 1) return // single cert (self-signed root): nothing to chain-verify
+  if (certs.length === 0) {
+    throw new Error('No certificates found in the provisioning certificate')
+  }
 
   // Build ordered chain: leaf → intermediates → root, following issuer links
   const chain: pki.Certificate[] = []
@@ -185,14 +218,24 @@ export function chainIntegrityChecker(pfxobj: CertsAndKeys): void {
     current = pool.splice(nextIdx, 1)[0]
   }
 
-  // Cryptographically verify each cert was signed by the next one up
+  if (pool.length > 0) {
+    throw new Error('Provisioning certificate contains certificates not in the leaf-to-root chain')
+  }
+
   const root = chain[chain.length - 1]
+  if (!root || root.subject.hash !== root.issuer.hash) {
+    throw new Error('Provisioning certificate does not contain a self-issued root certificate')
+  }
+
+  if (chain.length === 1) return chain
+
   const caStore = pkiRuntime.createCaStore([root])
   try {
     pkiRuntime.verifyCertificateChain(caStore, chain)
   } catch (e) {
     throw new Error(`Certificate chain signature verification failed: ${(e as Error).message}`, { cause: e })
   }
+  return chain
 }
 
 export function amtOidChecker(pfxobj: CertsAndKeys): void {
