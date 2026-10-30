@@ -44,6 +44,11 @@ import { NetworkConfiguration } from './networkConfiguration.js'
 import { error } from 'console'
 import { TLSTunnelManager } from '../TLSTunnelManager.js'
 import { ensurePemCertificate } from '../utils/certHelpers.js'
+import {
+  getAMTCertificatePolicy,
+  type ProvisioningSignatureParameters,
+  resolveProvisioningSignature
+} from '../utils/amtCertificatePolicy.js'
 import crypto from 'node:crypto'
 
 export interface ActivationContext extends CommonContext {
@@ -192,17 +197,44 @@ export class Activation {
     })
   }
 
+  /**
+   * The digest of the provisioning certificate when the device's firmware cannot accept it, else null.
+   * Hardened firmware refuses a chain that is not SHA-384, so this is checked before anything is sent.
+   */
+  rejectedProvisioningCertDigest(clientId: string, certDigest: string | null | undefined): string | null {
+    const payload = devices[clientId]?.ClientData?.payload
+    const policy = getAMTCertificatePolicy(payload?.weakAlgorithmsRemoved, payload?.ver)
+    const digest = certDigest?.toLowerCase()
+    return policy.requiresSha384ProvisioningCert && digest !== 'sha384' ? digest ?? 'unknown' : null
+  }
+
   createSignedString(clientId: string, hashAlgorithm: string): boolean {
     const clientObj = devices[clientId]
+    const amtVersion = clientObj.ClientData?.payload?.ver
+    const weakAlgorithmsRemoved = clientObj.ClientData?.payload?.weakAlgorithmsRemoved
+    const policy = getAMTCertificatePolicy(weakAlgorithmsRemoved, amtVersion)
+    const signingHashAlgorithm = hashAlgorithm?.toLowerCase()
+    clientObj.signature = undefined
+
+    this.logger.debug(
+      `AMT certificate policy: version=${amtVersion ?? 'unknown'} weakAlgorithmsRemoved=${weakAlgorithmsRemoved ?? 'not reported'} requiresSha384ProvisioningCert=${policy.requiresSha384ProvisioningCert} signingHashAlgorithm=${signingHashAlgorithm ?? 'unknown'}`
+    )
+
+    if (policy.requiresSha384ProvisioningCert && signingHashAlgorithm !== 'sha384') {
+      this.logger.error(
+        `AMT ${amtVersion} requires a SHA384 provisioning certificate; received ${signingHashAlgorithm ?? 'unknown'}`
+      )
+      return false
+    }
+
     clientObj.nonce = PasswordHelper.generateNonce()
     const arr: Buffer[] = [clientObj.ClientData.payload.fwNonce, clientObj.nonce]
     try {
       if (clientObj.certObj != null) {
-        // firmware does not support sha384 yet, always use sha256
         clientObj.signature = this.signatureHelper.signString(
           Buffer.concat(arr),
           clientObj.certObj.privateKey,
-          'sha256'
+          hashAlgorithm
         )
         return true
       } else {
@@ -317,18 +349,35 @@ export class Activation {
     return password
   }
 
+  private logProvisioningSignature(
+    operation: string,
+    certDigest: string | null | undefined,
+    signature: ProvisioningSignatureParameters
+  ): void {
+    this.logger.info(
+      `Provisioning signature (${operation}): certificateDigest=${certDigest ?? 'unknown'} ` +
+        `nonceDigest=${signature.hashAlgorithm} SigningAlgorithm=${signature.signingAlgorithm}`
+    )
+  }
+
   sendAdminSetup = async ({ input }: { input: ActivationContext }): Promise<any> => {
     const ips: IPS.Messages = input.ips
     const { clientId, certChainPfx } = input
     const password = await this.getPassword(input)
-    this.createSignedString(clientId, certChainPfx.hashAlgorithm)
+    const { hashAlgorithm, signingAlgorithm } = resolveProvisioningSignature(
+      certChainPfx.hashAlgorithm,
+      devices[clientId]?.ClientData?.payload?.weakAlgorithmsRemoved,
+      devices[clientId]?.ClientData?.payload?.ver
+    )
+    this.createSignedString(clientId, hashAlgorithm)
     const clientObj = devices[clientId]
     if (clientObj.nonce != null && clientObj.signature != null) {
+      this.logProvisioningSignature('AdminSetup', certChainPfx.hashAlgorithm, { hashAlgorithm, signingAlgorithm })
       input.xmlMessage = ips.HostBasedSetupService.AdminSetup(
         2,
         password,
         clientObj.nonce.toString('base64'),
-        2,
+        signingAlgorithm,
         clientObj.signature
       )
       // One-shot: ACM activation drops the session on success; don't retry (state machine re-checks status).
@@ -340,12 +389,21 @@ export class Activation {
   sendUpgradeClientToAdmin = async ({ input }: { input: ActivationContext }): Promise<any> => {
     const ips: IPS.Messages = input.ips
     const { clientId, certChainPfx } = input
-    this.createSignedString(clientId, certChainPfx.hashAlgorithm)
+    const { hashAlgorithm, signingAlgorithm } = resolveProvisioningSignature(
+      certChainPfx.hashAlgorithm,
+      devices[clientId]?.ClientData?.payload?.weakAlgorithmsRemoved,
+      devices[clientId]?.ClientData?.payload?.ver
+    )
+    this.createSignedString(clientId, hashAlgorithm)
     const clientObj = devices[clientId]
     if (clientObj.nonce != null && clientObj.signature != null) {
+      this.logProvisioningSignature('UpgradeClientToAdmin', certChainPfx.hashAlgorithm, {
+        hashAlgorithm,
+        signingAlgorithm
+      })
       input.xmlMessage = ips.HostBasedSetupService.UpgradeClientToAdmin(
         clientObj.nonce.toString('base64'),
-        2,
+        signingAlgorithm,
         clientObj.signature
       )
       // One-shot: CCM->ACM upgrade drops the session on success; don't retry (state machine re-checks status).
@@ -1352,6 +1410,9 @@ export class Activation {
         context.message.Envelope.Body?.UpgradeClientToAdmin_OUTPUT?.ReturnValue === 0,
       isCertExtracted: ({ context }) => context.certChainPfx != null,
       isValidCert: ({ context }) => devices[context.clientId].certObj != null,
+      isProvisioningCertDigestRejected: ({ context }) =>
+        devices[context.clientId].certObj != null &&
+        this.rejectedProvisioningCertDigest(context.clientId, context.certChainPfx?.hashAlgorithm) != null,
       isDigestRealmInvalid: ({ context }) =>
         !this.validator.isDigestRealmValid(devices[context.clientId].ClientData.payload.digestRealm),
       maxCertLength: ({ context }) => {
@@ -1617,6 +1678,20 @@ export class Activation {
       COMPARE_DEVICE_HASHES: {
         entry: 'Compare Domain Cert Hashes',
         always: [
+          {
+            // Reject before any request is sent to the device, and name the digest.
+            guard: 'isProvisioningCertDigestRejected',
+            actions: assign(({ context }) => {
+              const digest = this.rejectedProvisioningCertDigest(context.clientId, context.certChainPfx?.hashAlgorithm)
+              return {
+                errorMessage:
+                  `Device ${devices[context.clientId]?.uuid ?? context.clientId} activation failed. ` +
+                  `Firmware that has removed weak algorithms requires a SHA-384 provisioning certificate, ` +
+                  `but the provisioning certificate is signed with ${digest}`
+              }
+            }),
+            target: 'FAILED'
+          },
           {
             guard: 'isValidCert',
             actions: ({ context }) => {

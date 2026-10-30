@@ -16,6 +16,19 @@ const logger = new Logger('TLSTunnelManager')
 
 let sessionCounter = 0
 
+/**
+ * Whether a certificate subject is the Intel DICE SubCA that AMT 22 and later present at the top of
+ * their TLS chain. DICE chains do not terminate at an Intel ODCA root.
+ */
+export function isIntelDiceSubCASubject(subject: string): boolean {
+  const attributes = new Set(subject.split(/\n|,\s*/).map((attribute) => attribute.trim()))
+  return (
+    attributes.has('O=Intel Corporation') &&
+    attributes.has('organizationIdentifier=PEN:343') &&
+    [...attributes].some((attribute) => attribute.startsWith('CN=Intel DICE SubCA CAID:'))
+  )
+}
+
 interface TLSTunnelOptions {
   allowPostCcmTransitionSelfSigned?: boolean
 }
@@ -534,6 +547,16 @@ export class TLSTunnelManager {
       } catch {
         // Try the next root.
       }
+    }
+
+    // Intel DICE chains are not validated yet: warn and accept them. Every other chain, including
+    // those of older devices, must still terminate at an ODCA root.
+    if (isIntelDiceSubCASubject(topCert.subject)) {
+      logger.warn(
+        `SECURITY WARNING: Intel DICE certificate chain is not validated and is accepted without verification ` +
+          `(top subject=${topCert.subject.replace(/\n/g, ' ')}, top fp256=${topCert.fingerprint256})`
+      )
+      return { ok: true, reason: 'Intel DICE chain accepted without validation' }
     }
 
     return {
