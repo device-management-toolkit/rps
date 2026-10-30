@@ -96,6 +96,8 @@ export interface RPSConfig {
   gcpsm_location?: string
   gcpsm_secret_prefix?: string
   db_provider: string
+  /** Deployment shape, set by RPS_MODE: 'mps' (default) or 'console'. No rps_ prefix — rc strips it. */
+  mode?: string
   connection_string: string
   postgres_ssl_ca?: string
   postgres_ssl_cert?: string

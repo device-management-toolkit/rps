@@ -6,6 +6,7 @@
 import { type RPSConfig } from '../models/index.js'
 import rc from 'rc'
 import { parseValue } from './parseEnvValue.js'
+import { RPS_MODE_MPS, RPS_MODE_CONSOLE } from './constants.js'
 import Logger from '../Logger.js'
 
 const log = new Logger('Environment')
@@ -19,6 +20,13 @@ process.env = Object.keys(process.env).reduce((destination, key) => {
 
 // build config object
 const config: RPSConfig = rc('rps')
+// Deployment shape, RPS_MODE. mps keeps every existing deployment unchanged.
+config.mode = config.mode ?? RPS_MODE_MPS
+// DbCreatorFactory keys off db_provider; console mode has no database of its own, so point
+// it at the Console API provider instead of whatever db_provider the deployment also sets.
+if (config.mode === RPS_MODE_CONSOLE) {
+  config.db_provider = RPS_MODE_CONSOLE
+}
 config.delay_activation_sync = config.delay_timer * 1000
 config.delay_setup_and_config_sync = 5000
 config.delay_tls_put_data_sync = 5000

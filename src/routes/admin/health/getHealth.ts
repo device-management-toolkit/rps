@@ -9,6 +9,7 @@ import {
   API_RESPONSE,
   API_UNEXPECTED_EXCEPTION,
   POSTGRES_RESPONSE_CODES,
+  RPS_MODE_CONSOLE,
   VAULT_RESPONSE_CODES
 } from '../../../utils/constants.js'
 import { MqttProvider } from '../../../utils/MqttProvider.js'
@@ -22,7 +23,11 @@ export async function getHealthCheck(req: Request, res: Response): Promise<void>
   try {
     const status: HealthCheck = {
       db: {
-        name: Environment.Config.db_provider.toUpperCase(),
+        // In console mode there is no database; the configuration source is Console's API.
+        name:
+          Environment.Config.mode === RPS_MODE_CONSOLE
+            ? RPS_MODE_CONSOLE.toUpperCase()
+            : Environment.Config.db_provider.toUpperCase(),
         status: 'OK'
       },
       secretStore: {

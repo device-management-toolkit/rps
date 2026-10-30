@@ -7,6 +7,12 @@ import { type apiResponse } from '../models/RCS.Config.js'
 export const ProtocolVersion = '4.0.0'
 export const AMTUserName = 'admin'
 
+// Deployment shape, see RPSConfig.mode (set by RPS_MODE)
+export const RPS_MODE_MPS = 'mps'
+export const RPS_MODE_CONSOLE = 'console'
+export const CONSOLE_READ_ONLY = (object: string): string =>
+  `${object} is owned by Console and cannot be changed through RPS in console mode`
+
 export function asArray<T>(value: T | T[] | null | undefined): T[] {
   return Array.isArray(value) ? value : value == null ? [] : [value]
 }
