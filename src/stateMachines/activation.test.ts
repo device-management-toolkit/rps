@@ -414,6 +414,44 @@ describe('Activation State Machine', () => {
       const result = activation.createSignedString(clientId, null as any)
       expect(result).toBeFalsy()
     })
+    it('should use the provisioning certificate hash algorithm', () => {
+      const clientObj: any = devices[clientId]
+      clientObj.ClientData.payload.fwNonce = PasswordHelper.generateNonce()
+      clientObj.nonce = PasswordHelper.generateNonce()
+
+      const result = activation.createSignedString(clientId, 'sha384')
+
+      expect(result).toBeTruthy()
+      expect(signStringSpy).toHaveBeenCalledWith(expect.any(Buffer), clientObj.certObj.privateKey, 'sha384')
+    })
+    it('should reject a SHA256 provisioning certificate on hardened firmware', () => {
+      const clientObj: any = devices[clientId]
+      clientObj.ClientData.payload.ver = '22.0.0'
+      clientObj.ClientData.payload.weakAlgorithmsRemoved = true
+      clientObj.ClientData.payload.fwNonce = PasswordHelper.generateNonce()
+
+      const result = activation.createSignedString(clientId, 'sha256')
+
+      expect(result).toBe(false)
+      expect(clientObj.signature).toBeUndefined()
+      expect(signStringSpy).not.toHaveBeenCalled()
+    })
+    it('should accept a SHA384 provisioning certificate on hardened firmware', () => {
+      const clientObj: any = devices[clientId]
+      clientObj.ClientData.payload.weakAlgorithmsRemoved = true
+      clientObj.ClientData.payload.fwNonce = PasswordHelper.generateNonce()
+
+      expect(activation.createSignedString(clientId, 'sha384')).toBe(true)
+      expect(signStringSpy).toHaveBeenCalledWith(expect.any(Buffer), clientObj.certObj.privateKey, 'sha384')
+    })
+    it('should accept both SHA256 and SHA384 provisioning certificates on unhardened firmware', () => {
+      const clientObj: any = devices[clientId]
+      clientObj.ClientData.payload.weakAlgorithmsRemoved = false
+      clientObj.ClientData.payload.fwNonce = PasswordHelper.generateNonce()
+
+      expect(activation.createSignedString(clientId, 'sha256')).toBe(true)
+      expect(activation.createSignedString(clientId, 'sha384')).toBe(true)
+    })
     it('should throw error message when certificate is invalid', () => {
       signStringSpy = vi.spyOn(activation.signatureHelper, 'signString').mockImplementation(() => {
         throw new Error('Unable to create Digital Signature')
@@ -477,8 +515,10 @@ describe('Activation State Machine', () => {
           ], privateKey:
             null }, fingerprint: { sha256: '82f2ed575db4abe462499cf550dbff9584980d70a0272894639c3653b9ad932c', sha384: 'bb00173b0fb55bc1b24fff5a32a02d210d2bbe16dc6ba4f8300729c1d545313a66930bcd1bcf9ed5a76e82ce602ef04a', sha1: '47d7b7db23f3e300189f54802482b1bd18b945ef' }, hashAlgorithm: 'sha256' }
       devices[clientId].nonce = PasswordHelper.generateNonce()
+      const adminSetupSpy = vi.spyOn(context.ips.HostBasedSetupService, 'AdminSetup')
       await activation.sendAdminSetup({ input: context })
       expect(createSignedStringSpy).toHaveBeenCalled()
+      expect(adminSetupSpy.mock.calls[0][3]).toBe(2)
       // AdminSetup is one-shot: AMT drops the session on success without replying.
       expect(invokeWsmanCallSpy).toHaveBeenCalledWith(context, 0, undefined, true)
     })
@@ -502,15 +542,46 @@ describe('Activation State Machine', () => {
           return true
         })
       devices[clientId].nonce = PasswordHelper.generateNonce()
+      devices[clientId].ClientData.payload.ver = '22.0.0'
+      devices[clientId].ClientData.payload.weakAlgorithmsRemoved = true
       context.certChainPfx = { provisioningCertificateObj: { certChain: [
             'leaf',
             'inter1',
             'root'
           ], privateKey:
-            null }, fingerprint: { sha256: '82f2ed575db4abe462499cf550dbff9584980d70a0272894639c3653b9ad932c', sha384: 'bb00173b0fb55bc1b24fff5a32a02d210d2bbe16dc6ba4f8300729c1d545313a66930bcd1bcf9ed5a76e82ce602ef04a', sha1: '47d7b7db23f3e300189f54802482b1bd18b945ef' }, hashAlgorithm: 'sha256' }
+            null }, fingerprint: { sha256: '82f2ed575db4abe462499cf550dbff9584980d70a0272894639c3653b9ad932c', sha384: 'bb00173b0fb55bc1b24fff5a32a02d210d2bbe16dc6ba4f8300729c1d545313a66930bcd1bcf9ed5a76e82ce602ef04a', sha1: '47d7b7db23f3e300189f54802482b1bd18b945ef' }, hashAlgorithm: 'sha384' }
+      const upgradeSpy = vi.spyOn(context.ips.HostBasedSetupService, 'UpgradeClientToAdmin')
       await activation.sendUpgradeClientToAdmin({ input: context })
       expect(createSignedStringSpy).toHaveBeenCalled()
+      expect(upgradeSpy.mock.calls[0][1]).toBe(3)
       expect(invokeWsmanCallSpy).toHaveBeenCalledWith(context, 0, undefined, true)
+    })
+    it('should sign the nonce with sha256 / SigningAlgorithm 2 on unhardened firmware given a sha384 certificate', async () => {
+      // AMT 20.0.5 accepts a SHA-384 certificate chain but refuses a SHA-384 nonce signature
+      // (UpgradeClientToAdmin ReturnValue 3), so the nonce stays SHA-256 / label 2 unless hardened.
+      const createSignedStringSpy = vi
+        .spyOn(activation, 'createSignedString')
+        .mockImplementation((clientId: string): boolean => {
+          devices[clientId].signature = 'abcdefgh'
+          return true
+        })
+      devices[clientId].nonce = PasswordHelper.generateNonce()
+      devices[clientId].ClientData.payload.ver = '20.0.5'
+      devices[clientId].ClientData.payload.weakAlgorithmsRemoved = undefined
+      context.certChainPfx = { provisioningCertificateObj: { certChain: [
+            'leaf',
+            'inter1',
+            'root'
+          ], privateKey:
+            null }, fingerprint: { sha256: '82f2ed575db4abe462499cf550dbff9584980d70a0272894639c3653b9ad932c', sha384: 'bb00173b0fb55bc1b24fff5a32a02d210d2bbe16dc6ba4f8300729c1d545313a66930bcd1bcf9ed5a76e82ce602ef04a', sha1: '47d7b7db23f3e300189f54802482b1bd18b945ef' }, hashAlgorithm: 'sha384' }
+      const upgradeSpy = vi.spyOn(context.ips.HostBasedSetupService, 'UpgradeClientToAdmin')
+      const infoSpy = vi.spyOn(activation.logger, 'info')
+      await activation.sendUpgradeClientToAdmin({ input: context })
+      expect(createSignedStringSpy).toHaveBeenCalledWith(clientId, 'sha256')
+      expect(upgradeSpy.mock.calls[0][1]).toBe(2)
+      expect(infoSpy).toHaveBeenCalledWith(
+        'Provisioning signature (UpgradeClientToAdmin): certificateDigest=sha384 nonceDigest=sha256 SigningAlgorithm=2'
+      )
     })
     it('should send WSMan to change AMT password', async () => {
       await activation.changeAMTPassword({ input: context })
@@ -2637,6 +2708,37 @@ describe('Activation State Machine', () => {
         service.send({ type: 'ACTIVATION', clientId, tenantId: '', friendlyName: null as any })
         vi.runAllTicks()
       }))
+
+    describe('provisioning certificate digest check', () => {
+      it.each([
+        // Hardened firmware refuses anything but a SHA-384 chain, so it is rejected before the device is contacted.
+        { payload: { ver: '22.0.0', weakAlgorithmsRemoved: true }, digest: 'sha256', expected: 'sha256' },
+        { payload: { ver: '22.0.0' }, digest: 'SHA256', expected: 'sha256' },
+        { payload: { ver: '22.0.0', weakAlgorithmsRemoved: true }, digest: undefined, expected: 'unknown' },
+        { payload: { ver: '22.0.0', weakAlgorithmsRemoved: true }, digest: 'sha384', expected: null },
+        // Other firmware accepts either digest.
+        { payload: { ver: '21.0.6' }, digest: 'sha256', expected: null },
+        { payload: { ver: '22.0.0', weakAlgorithmsRemoved: false }, digest: 'sha256', expected: null }
+      ])('reports $expected for a $digest certificate given $payload', ({ payload, digest, expected }) => {
+        devices[clientId].ClientData = { payload } as any
+        expect(activation.rejectedProvisioningCertDigest(clientId, digest)).toBe(expected)
+      })
+
+      it('fails COMPARE_DEVICE_HASHES before any request is sent', () => {
+        const compare = (activation.machine.config.states as any).COMPARE_DEVICE_HASHES
+        expect(compare.always[0].guard).toBe('isProvisioningCertDigestRejected')
+        expect(compare.always[0].target).toBe('FAILED')
+
+        devices[clientId].ClientData = { payload: { ver: '22.0.0', weakAlgorithmsRemoved: true } } as any
+        devices[clientId].certObj = {} as any
+        const guard = (activation.machine as any).implementations.guards.isProvisioningCertDigestRejected
+        expect(guard({ context: { clientId, certChainPfx: { hashAlgorithm: 'sha256' } } })).toBe(true)
+        expect(guard({ context: { clientId, certChainPfx: { hashAlgorithm: 'sha384' } } })).toBe(false)
+        // An untrusted certificate keeps its own error message.
+        devices[clientId].certObj = null as any
+        expect(guard({ context: { clientId, certChainPfx: { hashAlgorithm: 'sha256' } } })).toBe(false)
+      })
+    })
 
     it('should verify FEATURES_CONFIGURATION transitions route correctly', () => {
       const states = activation.machine.config.states as any

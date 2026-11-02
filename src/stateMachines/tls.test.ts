@@ -31,6 +31,38 @@ const { TLS } = await import('./tls.js')
 
 Environment.Config = config
 
+// AMT returns the public half of the firmware-held key pair as a bare base64
+// SubjectPublicKeyInfo. RPS must sign the TLS leaf over exactly this key, so
+// tests have to supply a real one rather than an empty object.
+const TEST_KEY_PAIR_HANDLE = 'Intel(r) AMT Key: Handle: 0'
+const TEST_DER_KEY = forge.pki
+  .publicKeyToPem(forge.pki.rsa.generateKeyPair(2048).publicKey)
+  .replace(/-----(BEGIN|END) PUBLIC KEY-----/g, '')
+  .replace(/\s/g, '')
+
+const testKeyPairPullResponse = {
+  Envelope: {
+    Body: {
+      PullResponse: {
+        Items: {
+          AMT_PublicPrivateKeyPair: { InstanceID: TEST_KEY_PAIR_HANDLE, DERKey: TEST_DER_KEY }
+        }
+      }
+    }
+  }
+}
+
+const generateKeyPairSuccess = {
+  Envelope: {
+    Body: {
+      GenerateKeyPair_OUTPUT: {
+        ReturnValue: 0,
+        KeyPair: { ReferenceParameters: { SelectorSet: { Selector: { _: TEST_KEY_PAIR_HANDLE } } } }
+      }
+    }
+  }
+}
+
 describe('TLS State Machine', () => {
   let tls: TLSType
   let config
@@ -73,12 +105,14 @@ describe('TLS State Machine', () => {
             await Promise.resolve({ Envelope: { Body: { PullResponse: { Items: { AMT_TLSSettingData: {} } } } } })
         ),
         addTrustedRootCertificate: fromPromise(async ({ input }) => await Promise.resolve({})),
-        generateKeyPair: fromPromise(async ({ input }) => await Promise.resolve({})),
-        enumeratePublicPrivateKeyPair: fromPromise(async ({ input }) => await Promise.resolve({})),
-        pullPublicPrivateKeyPair: fromPromise(
-          async ({ input }) =>
-            await Promise.resolve({ Envelope: { Body: { PullResponse: { Items: { AMT_PublicPrivateKeyPair: {} } } } } })
-        ),
+        generateKeyPair: fromPromise(async ({ input }) => await Promise.resolve(generateKeyPairSuccess)),
+        enumeratePublicPrivateKeyPair: fromPromise(async ({ input }: { input: TLSContext }) => {
+          // Mirror the real actor: it records the handle GenerateKeyPair returned.
+          input.keyPairHandle =
+            input.message?.Envelope?.Body?.GenerateKeyPair_OUTPUT?.KeyPair?.ReferenceParameters?.SelectorSet?.Selector?._
+          return await Promise.resolve({})
+        }),
+        pullPublicPrivateKeyPair: fromPromise(async ({ input }) => await Promise.resolve(testKeyPairPullResponse)),
         addCertificate: fromPromise(async ({ input }) => await Promise.resolve({})),
         enumerateTLSCredentialContext: fromPromise(
           async ({ input }) =>
@@ -313,10 +347,59 @@ describe('TLS State Machine', () => {
         response: ''
       }
     }
-    context.message = { Envelope: { Body: { PullResponse: { Items: { AMT_PublicPrivateKeyPair: {} } } } } }
+    context.keyPairHandle = TEST_KEY_PAIR_HANDLE
+    context.message = testKeyPairPullResponse
     await tls.addCertificate({ input: { context, event } })
     expect(invokeWsmanCallSpy).toHaveBeenCalled()
   })
+
+  it.each([
+    // [payload, root key size, expected to warn]
+    { payload: { ver: '22.0.0', weakAlgorithmsRemoved: true }, rootBits: 1024, warns: true },
+    { payload: { ver: '21.0.6' }, rootBits: 1024, warns: true },
+    { payload: { ver: '21.0.6' }, rootBits: 2048, warns: false }
+  ])(
+    'should warn=$warns when an MPS root of $rootBits bits signs for $payload',
+    async ({ payload, rootBits, warns }) => {
+      const event: TLSEvent = { type: 'CONFIGURE_TLS', clientId: clientId as string, output: { response: '' } }
+      devices[clientId].ClientData = { payload }
+      devices[clientId].tls = { rootCertKey: forge.pki.rsa.generateKeyPair(rootBits).privateKey } as any
+      context.keyPairHandle = TEST_KEY_PAIR_HANDLE
+      context.message = testKeyPairPullResponse
+      const warnSpy = vi.spyOn(tls.logger, 'warn')
+
+      await tls.addCertificate({ input: { context, event } })
+
+      const rootWarnings = warnSpy.mock.calls.filter((call) => String(call[0]).startsWith('MPS root key is'))
+      expect(rootWarnings.length).toBe(warns ? 1 : 0)
+    }
+  )
+
+  it.each([
+    // Hardened firmware needs a SHA-384 leaf and a 3072-bit RPS root; the rest keep SHA-256 / 2048.
+    { payload: { ver: '22.0.0', weakAlgorithmsRemoved: true }, hash: 'sha384', size: 3072 },
+    { payload: { ver: '22.0.0' }, hash: 'sha384', size: 3072 },
+    { payload: { ver: '21.0.6' }, hash: 'sha256', size: 2048 },
+    { payload: { ver: '22.0.0', weakAlgorithmsRemoved: false }, hash: 'sha256', size: 2048 }
+  ])(
+    'should sign the TLS certificate with $hash and a $size-bit root given $payload',
+    async ({ payload, hash, size }) => {
+      const event: TLSEvent = { type: 'CONFIGURE_TLS', clientId: clientId as string, output: { response: '' } }
+      devices[clientId].ClientData = { payload }
+      context.keyPairHandle = TEST_KEY_PAIR_HANDLE
+      context.message = testKeyPairPullResponse
+      const signSpy = vi.spyOn(tls.certManager, 'amtCertSignWithCAKey')
+      const createCertificateSpy = vi.spyOn(tls.certManager, 'createCertificate')
+
+      await tls.addCertificate({ input: { context, event } })
+
+      // The digest and size must reach both the leaf and the root RPS mints.
+      expect(signSpy.mock.calls[0][6]).toBe(hash)
+      expect(signSpy.mock.calls[0][7]).toBe(size)
+      expect(createCertificateSpy.mock.calls[0][6]).toBe(hash)
+      expect(createCertificateSpy.mock.calls[0][7]).toBe(size)
+    }
+  )
 
   it.each([
     // The SDK allows exactly two key pairs: KeyAlgorithm 0 / RSA-2048 and

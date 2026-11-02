@@ -4,7 +4,7 @@
  **********************************************************************/
 
 import { AMT } from '@device-management-toolkit/wsman-messages'
-import { getAMTCertificatePolicy } from './amtCertificatePolicy.js'
+import { getAMTCertificatePolicy, resolveProvisioningSignature } from './amtCertificatePolicy.js'
 
 const RSA_2048 = { KeyAlgorithm: 0, KeyLength: 2048 }
 const ECC_384 = { KeyAlgorithm: 1, KeyLength: 384 }
@@ -106,4 +106,80 @@ describe('shared policy constants', () => {
       expect(requestBody(second)).not.toContain('h:h:')
     }
   )
+})
+
+describe('certificate policy tuples', () => {
+  it('uses SHA-384, an RSA-3072 root and an ECC-384 device key on hardened firmware', () => {
+    // Intel's hardening list removes SHA-256 leaves and RSA-2K/ECC-256 leaf keys together, so both
+    // halves have to be supplied. The RSA-3072 root is RPS's own key and is unrelated to the device
+    // key, which the firmware only offers as RSA-2048 or ECC-384.
+    expect(getAMTCertificatePolicy(true)).toEqual({
+      hashAlgorithm: 'sha384',
+      rsaKeySize: 3072,
+      deviceKeyPair: { KeyAlgorithm: 1, KeyLength: 384 },
+      requiresSha384ProvisioningCert: true
+    })
+  })
+
+  it('keeps SHA-256 and RSA-2048 on firmware that has not reported the hardening', () => {
+    expect(getAMTCertificatePolicy(false)).toEqual({
+      hashAlgorithm: 'sha256',
+      rsaKeySize: 2048,
+      deviceKeyPair: { KeyAlgorithm: 0, KeyLength: 2048 },
+      requiresSha384ProvisioningCert: false
+    })
+  })
+})
+
+describe('resolveProvisioningSignature', () => {
+  const SHA384_3 = { hashAlgorithm: 'sha384', signingAlgorithm: 3 }
+  const SHA256_2 = { hashAlgorithm: 'sha256', signingAlgorithm: 2 }
+
+  it.each([
+    // Hardened, reported or inferred from AMT 22 or later: SHA-384 nonce, label 3.
+    { cert: 'sha384', weak: true, version: '22.0.0', expected: SHA384_3 },
+    { cert: 'SHA384', weak: true, version: '21.0.6', expected: SHA384_3 },
+    { cert: 'sha384', weak: undefined, version: '22.0.0', expected: SHA384_3 },
+    // A SHA-256 certificate never reaches a SHA-384 label; createSignedString rejects it first.
+    { cert: 'sha256', weak: true, version: '22.0.0', expected: SHA256_2 },
+    // Not hardened: the certificate may be SHA-384, the nonce is still SHA-256 / 2.
+    // AMT 20.0.5 accepted a SHA-384 chain and refused SigningAlgorithm 3.
+    { cert: 'sha384', weak: false, version: '22.0.0', expected: SHA256_2 },
+    { cert: 'sha384', weak: false, version: '20.0.5', expected: SHA256_2 },
+    { cert: 'sha384', weak: undefined, version: '20.0.5', expected: SHA256_2 },
+    { cert: 'sha384', weak: undefined, version: '21.0.6', expected: SHA256_2 },
+    { cert: 'sha384', weak: undefined, version: undefined, expected: SHA256_2 },
+    { cert: 'sha256', weak: false, version: '20.0.5', expected: SHA256_2 },
+    { cert: undefined, weak: true, version: '22.0.0', expected: SHA256_2 },
+    { cert: null, weak: true, version: '22.0.0', expected: SHA256_2 }
+  ])('$cert certificate, weakAlgorithmsRemoved=$weak, version=$version', ({ cert, weak, version, expected }) => {
+    expect(resolveProvisioningSignature(cert, weak, version)).toEqual(expected)
+  })
+
+  it('never labels the signature with a digest it was not made with', () => {
+    // The firmware recomputes the digest named by SigningAlgorithm, so the two halves have to be
+    // resolved together rather than derived independently.
+    for (const weak of [
+      true,
+      false,
+      undefined
+    ]) {
+      for (const version of [
+        '12.0.95',
+        '20.0.5',
+        '21.0.6',
+        '22.0.0',
+        undefined
+      ]) {
+        for (const cert of [
+          'sha256',
+          'sha384',
+          undefined
+        ]) {
+          const { hashAlgorithm, signingAlgorithm } = resolveProvisioningSignature(cert, weak, version)
+          expect(signingAlgorithm).toBe(hashAlgorithm === 'sha384' ? 3 : 2)
+        }
+      }
+    }
+  })
 })
