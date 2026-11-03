@@ -6,6 +6,11 @@ reconfiguration runs. Times below describe work observed in those traces;
 they are not measured savings for unimplemented changes. RPC command-start
 and completion timestamps are unavailable.
 
+**Implementation status:** C, E, and F are now implemented for controlled testing
+on this branch; the final section describes their conservative scope. The
+observed times in the table remain measurements of the previous build, not
+measurements of the combined implementation.
+
 ## Prioritized findings
 
 | Priority | Candidate | Observed evidence | Potential benefit and conditions |
@@ -86,3 +91,62 @@ reuse change the later sequence, and measured savings require matched runs.
 After adding the routing characterization: **1,082 tests across 98 files**,
 lint, formatting, TypeScript `--noEmit`, and `git diff --check` passed. Production
 source and the running optimized container remain at candidate A behavior.
+
+
+## Combined C/E/F implementation
+
+The combined change retains candidate A and adds:
+
+- A complete TLS probe snapshot tied to a TLS session, valid for less than
+  30 seconds. Credential-context validation consumes it only within that session.
+  Incomplete enumerations, resets, reconnections, expiration, and new attempts
+  invalidate it. Public-certificate discovery and fingerprint validation remain.
+- A distinct reuse approval for existing same-mode activation, rather than
+  copying an existing leaf into the newly-issued-certificate runtime field.
+  Approval requires both local and remote TLS enabled, requested remote TLS
+  settings matching, DMT-generated hostname matching, a live/Vault fingerprint
+  match, signature verification against the freshly fetched requested MPS CA,
+  CA/leaf validity beyond a 30-day renewal window, and server-auth EKU. Custom
+  profile certificates, Microsoft CA, mutual TLS, Wi-Fi, and wired 802.1X profiles
+  conservatively retain the release provisioning path. Upgrades and first-time
+  activation do not receive identity reuse approval.
+- Removal of the rollover wait only when the policy-approved existing identity
+  is still in the validated session, with no reset/reconfiguration pending.
+  The old tunnel still closes and a fresh tunnel is initialized using the
+  existing strict trust handling. The one-use wait decision is cleared when the
+  activated port-switch state exits. Actual mutation/upgrade/rollover waits remain.
+- A final live revalidation after cleanup/network/features, immediately before
+  skipping deferred TLS provisioning. It reads settings, credentials, and public
+  certificates (six nominal calls) and checks the identity against the original
+  approved fingerprint and current policy. Failure, changed identity/settings,
+  stale/incomplete snapshots, or dependency errors retain TLS provisioning.
+  CIRA routing remains intact with and without a CIRA profile.
+
+This final revalidation is intentional: cleanup/network work can reconnect or
+mutate state. It replaces the observed 17-request TLS stage with six verification
+reads on the eligible reconfiguration path. Together with C, the expected nominal
+count on the tested unchanged profile is 49 requests, compared with 62 in the
+candidate-A build and 64 in September. This is a prediction, not a hardware count.
+Fresh activation may benefit from C but retains initial TLS provisioning and waits.
+
+Added sibling activation regressions exercise real SDK reads and cryptographic
+validation using generated synthetic CA/leaf certificates. They cover cache
+invalidation, partial enumeration, certificate mismatch/expiry/renewal, hostname,
+TLS settings, signing authority/root changes, unsupported profiles, upgrade/fresh
+activation, final verification/fallback, the full probe-to-tunnel decision path,
+wait retention, and CIRA routing. The existing analysis-only characterization
+continues to reproduce deferred TLS when no policy-approved reuse exists.
+
+The runtime build is intended for the user's controlled before/after hardware
+comparison. No hardware duration gain for C/E/F has yet been measured, and these
+conditions do not claim full coverage of every firmware/profile combination.
+
+Retained certificate trust uses a separate `validatedCertPEM` runtime field.
+Both initial reconnect and common transport reconnect treat it as managed
+identity, so the post-CCM temporary self-signed fallback is disabled after
+reuse approval. Newly issued certificates retain their original separate field
+and take precedence. Common and activation regressions verify this behavior.
+
+Combined implementation checks: **1,118 tests across 98 files**, lint,
+formatting, TypeScript `--noEmit`, compilation, and `git diff --check` passed.
+Hardware validation for the combined change remains pending.

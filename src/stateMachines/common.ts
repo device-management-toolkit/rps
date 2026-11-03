@@ -4,6 +4,7 @@
  **********************************************************************/
 
 import ClientResponseMsg from '../utils/ClientResponseMsg.js'
+import { getTlsTrustMaterial } from './tlsReuse.js'
 import { Environment } from '../utils/Environment.js'
 import { devices } from '../devices.js'
 import {
@@ -130,16 +131,16 @@ const invokeWsmanCallViaTLSTunnel = async <T>(context: any, message: string): Pr
     //     digest auth via the admin password is the trust boundary. Skip verification.
     //   - After RPS has generated/uploaded a TLS cert: issuedCertPEM pins the exact
     //     cert. If an MPS root CA was used instead, mpsRootCertPEM wins.
-    const hasIssuedCert = clientObj.tls?.issuedCertPEM != null && clientObj.tls.issuedCertPEM !== ''
-    const caCert: string | undefined = clientObj.tls?.mpsRootCertPEM ?? clientObj.tls?.issuedCertPEM
+    const { hasManagedIdentity, caCert } = getTlsTrustMaterial(clientObj.tls)
     const hasTrustAnchor = caCert != null && caCert !== ''
 
     // Phase A (post-CCM transition): CCM complete but issued cert not yet installed on AMT.
     // If no trust anchor is available, skip verification as before.
     // If MPS root trust anchor exists, enforce verification and allow temporary
     // self-signed fallback for AMT's brief post-CCM transition period.
-    const inPostCcmTransitionNoAnchor = clientObj.activationStatus === true && !hasIssuedCert && !hasTrustAnchor
-    const inPostCcmTransitionSelfSignedPhase = clientObj.activationStatus === true && !hasIssuedCert && hasTrustAnchor
+    const inPostCcmTransitionNoAnchor = clientObj.activationStatus === true && !hasManagedIdentity && !hasTrustAnchor
+    const inPostCcmTransitionSelfSignedPhase =
+      clientObj.activationStatus === true && !hasManagedIdentity && hasTrustAnchor
     const skipVerify = context.skipTlsVerification === true || inPostCcmTransitionNoAnchor
     const rejectUnauthorized = skipVerify ? false : Environment.Config.amt_post_tls_reject === true
 

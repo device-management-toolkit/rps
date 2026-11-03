@@ -200,7 +200,7 @@ describe('Issue 2935 further TLS reuse characterization', () => {
     const validate = vi.fn(async () => true)
     const machine = activation.machine.provide({
       actors: {
-        validateDeviceTlsCert: fromPromise(validate),
+        validateActivatedTlsIdentity: fromPromise(async () => ({ valid: await validate(), reuseApproved: false })),
         featuresConfiguration: fromPromise(async () => ({}))
       }
     })
