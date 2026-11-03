@@ -193,3 +193,40 @@ describe('Issue 2935 release activated routing characterization', () => {
     expect(requests).toHaveLength(1)
   })
 })
+
+describe('Issue 2935 further TLS reuse characterization', () => {
+  it('requests deferred TLS provisioning after a successful matching-certificate route', async () => {
+    const activation = new Activation()
+    const validate = vi.fn(async () => true)
+    const machine = activation.machine.provide({
+      actors: {
+        validateDeviceTlsCert: fromPromise(validate),
+        featuresConfiguration: fromPromise(async () => ({}))
+      }
+    })
+    const context = {
+      clientId,
+      amt: new AMT.Messages(),
+      isActivated: true,
+      profile: { activation: ClientAction.ADMINCTLMODE },
+      tlsNeedsProvisioning: true
+    }
+    devices[clientId].ClientData.payload.tlsEnforced = true
+    devices[clientId].tls = {} as any
+    const validated = await runSegment(machine, 'VALIDATE_ACTIVATED_DEVICE_TLS_CERT', context, [
+      'SIGNAL_ACTIVATED_PORT_SWITCH',
+      'ROUTE_ACTIVATED_NON_TLS'
+    ])
+    expect(validate).toHaveBeenCalledOnce()
+    expect(validated.value).toBe('SIGNAL_ACTIVATED_PORT_SWITCH')
+    expect(validated.context.tlsNeedsProvisioning).toBe(false)
+    expect(devices[clientId].status.TLSConfiguration).toBe('Already configured')
+    const deferred = await runSegment(machine, 'FEATURES_CONFIGURATION', validated.context, [
+      'FETCH_POST_PROVISIONING_ROOT_KEY',
+      'CIRA',
+      'PROVISIONED'
+    ])
+    expect(deferred.value).toBe('FETCH_POST_PROVISIONING_ROOT_KEY')
+    expect(exchange).not.toHaveBeenCalled()
+  })
+})
