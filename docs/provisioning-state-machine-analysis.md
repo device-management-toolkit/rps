@@ -2,18 +2,15 @@
 
 This report describes the changes for
 [issue #2935](https://github.com/device-management-toolkit/rps/issues/2935) on
-`analysis/provisioning-state-machine`, reviewed November 3, 2026. The comparison
-source baseline is **v2.40.2 (`583d61f`)**. Hardware comparisons used the local
-five-second TLS timer override; the release default is 15 seconds. Cleanup
-optimization was introduced in
-`9179ab1`, combined TLS reuse in `418f752`, and TLS result reporting in `b75d37f`.
+`analysis/provisioning-state-machine`, reviewed November 3, 2026. The source
+baseline is **v2.40.2 (`583d61f`)**. The tested optimized image is **`f2ead6d`**,
+including the clock-synchronization correction in `9f9245b`. Both builds used
+the **15-second default TLS timer**.
 
-We removed unnecessary reads and TLS enrollment work during eligible
-reconfiguration. A historical AMT 21 ACM run improved from **64 to 49 requests**
-and **95.534 to 68.770 seconds**. Review subsequently restored the two AMT
-clock-synchronization requests that must remain when enrollment is skipped.
-The corrected route is expected to use **51 requests** and has not yet been
-measured on hardware. Broader hardware validation remains outstanding.
+We removed unnecessary reads and retained a verified existing TLS identity
+where eligible. The tested AMT 21 profile completed first-time activation and
+reconfiguration on both builds. Broader hardware and recovery coverage remains
+outstanding.
 
 ## Implemented changes
 
@@ -22,7 +19,7 @@ measured on hardware. Broader hardware validation remains outstanding.
 | **Skip unused cleanup reads** | Cleanup read TLS settings, then discarded the result on the TLS-enforced route. | Evaluate the existing guard before Enumerate/Pull, saving two requests. | TLS-enforced activation and reconfiguration |
 | **Reuse a fresh credential check** | TLS probing and certificate validation read the same credential contexts twice. | Reuse a complete, current probe snapshot, saving two requests when eligible. | TLS validation within the same attempt/session |
 | **Retain a verified TLS identity** | Deferred enrollment could regenerate keys and certificates despite an earlier live/Vault match. | Recheck identity and policy after configuration; skip enrollment only when reuse is approved. | Eligible reconfiguration in the same control mode |
-| **Skip the unchanged-certificate wait** | Existing TLS reconfiguration waited for the configured rollover timer: 15 seconds by default, locally overridden to five seconds for the measured runs. | Skip the configured wait for an approved unchanged identity, then establish a fresh tunnel. | Eligible TLS reconfiguration |
+| **Skip the unchanged-certificate wait** | Existing TLS reconfiguration waited for the configured rollover timer, which defaults to 15 seconds. | Skip the configured wait for an approved unchanged identity, then establish a fresh tunnel. | Eligible TLS reconfiguration |
 | **Report reused TLS success** | Skipping the TLS child omitted its structured success result. | Record TLS `Success` with `Already configured` on the reuse route. | Successful identity reuse |
 | **Preserve AMT clock synchronization** | The first reuse implementation also skipped the TLS child's time synchronization. | Read AMT time and synchronize it before reporting reuse success; fail if either operation fails. | Successful identity reuse |
 
@@ -82,70 +79,68 @@ prove complete hardware provisioning. Synthetic certificates in
 [TlsReuseCertificates.ts](../src/test/helper/TlsReuseCertificates.ts) support
 cryptographic regression coverage.
 
-## Historical measured results
+## Measured results
 
-| Scenario | Baseline source (`583d61f`), local timer | Cleanup only (`9179ab1`), local timer | Combined (`418f752`), local timer |
-|---|---|---|---|
-| AMT 21 first-time activation | About 153.9 s; 74 requests | About 152.1 s; 72 requests | Not yet tested |
-| AMT 21 ACM reconfiguration | 95.534 s; 64 requests | 93.238 s; 62 requests | 68.770 s; 49 requests |
+One run per flow and build was captured on November 3 using AMT **21.0.2**,
+end-to-end TLS, the same device and profile name, identical dependency lockfiles,
+and the **15-second TLS timer**. The first-time runs both reported initial
+pre-provisioning mode (`currentMode=0`); the reconfiguration runs both reported
+ACM (`currentMode=2`). RPS environment settings and credentials were carried
+forward when switching images.
 
-`delay_tls_timer` defaults to **15 seconds** in the release and current source.
-The user configured **five seconds locally** for these hardware comparisons.
-Baseline traces show five-second waits; cleanup and combined traces record the
-five-second configuration, with the combined eligible reuse route skipping its
-wait. This optimization does not change the timer default. No before/after
-measurement using the 15-second default has been collected.
+| Flow | Baseline time | Optimized time | Baseline requests | Optimized requests | Time reduction |
+|---|---|---|---|---|---|
+| First-time activation | 194.141 s | 190.035 s | 74 | 70 | 4.106 s (2.12%) |
+| ACM reconfiguration | 105.470 s | 70.508 s | 64 | 51 | 34.961 s (33.15%) |
 
-With the local timer setting, combined reconfiguration was **26.764 seconds
-(28.02%)** shorter than the baseline-source run. On that eligible route, the
-request reduction is:
+Durations run from RPS receipt of the activation request to its final
+provisioning-status log, not from RPC command start. Counts are transport
+request-log blocks, excluding extra actor XML logs.
+
+### What the traces confirm
+
+First-time activation removed only the duplicate TLS credential Enumerate/Pull
+pair and unused cleanup TLS-settings Enumerate/Pull pair: **four fewer reads**.
+Both builds retained CCM setup, ACM upgrade, one key generation and certificate
+installation, three commits, and both clock-synchronization requests. Activation
+to ACM, TLS, wired network, and CIRA all reported success.
+
+Reconfiguration reused the verified identity, skipped its configured rollover
+wait, performed final live verification, and retained `GetLowAccuracyTimeSynch`
+and `SetHighAccuracyTimeSynch`. No new key or leaf certificate was created, and
+no TLS commit was issued. TLS reported **Success / Already configured**; wired
+network, CIRA, and activation status also reported success.
+
+The measured reconfiguration count matches the intended route:
 
 **64 − 2 cleanup reads − 2 duplicate credential reads − 17 enrollment requests
-+ 6 final verification reads = 49 requests.**
++ 6 final verification reads + 2 retained clock-synchronization requests = 51.**
 
-The removed enrollment stage included `GetLowAccuracyTimeSynch` and
-`SetHighAccuracyTimeSynch`. Review restored those calls on the reuse route;
-the current nominal prediction is **49 + 2 = 51 requests**, or 13 fewer than
-the baseline on this profile. The historical durations and 28.02% figure do
-not measure the correction; its duration must be retested rather than estimated.
+These successful runs exercise the reporting and clock fixes on hardware for
+this profile. They do not establish typical performance: each result has one
+sample, full profile/configuration and fresh-state snapshots were not independently
+captured, and CIRA connectivity through MPS was not separately verified. Wireless,
+802.1X, proxy, alternate transports, and fault/partial-provisioning scenarios still
+need their own profiles and tests.
 
-The trace confirms fresh credential reuse, the skipped unchanged-identity wait,
-final live validation, and no key generation, certificate installation, or TLS
-commit. Activation, wired network, and CIRA reported success. Digest challenges
-and a tolerated cleanup HTTP 400/reset remained. MPS connectivity was not
-independently confirmed.
+Earlier exploratory runs used a local five-second override and a build that
+omitted clock synchronization on reuse. Their 49-request result is superseded
+by this corrected, 51-request measurement; do not combine the two timer settings
+or treat the older timing as a result for the current implementation.
 
-These are single-run observations, measured from RPS receipt to final status.
-RPC command-start timing and equivalent initial device/profile state were not
-independently established. The results do not establish typical performance or
-an independent duration saving for each change or the total gain at the
-15-second default. Do not extrapolate the measured duration by simply adding
-the timer difference. Request counts are transport
-log blocks; activation counts exclude three duplicate actor XML logs for
-`AddNextCertInChain`.
+### Redacted request sequences
 
-The tested image was `rps-2935-all:418f752a`, before the TLS result reporting
-and retained-clock-synchronization fixes. Those fixes have automated coverage
-and still need hardware validation.
-Supporting local artifacts are `/tmp/rps-2935-request-count-audit.json` and
-`/tmp/rps-2935-reconfiguration-all-comparison.json`. Raw silly-level traces
-remain private. The redacted ordered action/resource sequences are embedded
-below so reviewers do not need access to temporary files. They omit payloads,
-selectors, and credentials and do not establish initial-state equivalence.
-
-### Redacted historical request sequences
-
-The columns are independent ordered runs, not aligned state-for-state. Each cell
-contains only an action and resource; sequence position identifies its order
-within that run. Activation duplicate actor logs are excluded using the request
-count audit. The combined column is the historical pre-clock-fix build, not the
-current code. The evidence establishes logged request order/count, not selector
-equivalence, payload equivalence, or actual MPS connectivity.
+The four columns below are independent ordered runs, not aligned state-for-state.
+Each cell contains only action/resource names. The tables establish request order
+and count, not selector or payload equivalence. Raw traces remain private.
+Redacted summaries and the comparison are also saved locally under
+`/tmp/rps-2935-matched-runs/`; reviewers can use the embedded tables without
+access to those temporary files.
 
 <details>
-<summary>Ordered calls: activation before/cleanup-only and reconfiguration before/combined</summary>
+<summary>Ordered calls: baseline/optimized first-time activation and reconfiguration</summary>
 
-| # | Activation baseline (74) | Activation cleanup-only (72) | Reconfiguration baseline (64) | Historical combined reconfiguration (49) |
+| # | Baseline activation (74) | Optimized activation (70) | Baseline reconfiguration (64) | Optimized reconfiguration (51) |
 |---|---|---|---|---|
 | 1 | `Get AMT_GeneralSettings` | `Get AMT_GeneralSettings` | `Get AMT_GeneralSettings` | `Get AMT_GeneralSettings` |
 | 2 | `Get AMT_GeneralSettings` | `Get AMT_GeneralSettings` | `Get AMT_GeneralSettings` | `Get AMT_GeneralSettings` |
@@ -173,52 +168,52 @@ equivalence, payload equivalence, or actual MPS connectivity.
 | 24 | `Pull AMT_TLSSettingData` | `Pull AMT_TLSSettingData` | `Pull AMT_ManagementPresenceRemoteSAP` | `Get AMT_EnvironmentDetectionSettingData` |
 | 25 | `Enumerate AMT_TLSCredentialContext` | `Enumerate AMT_TLSCredentialContext` | `Delete AMT_ManagementPresenceRemoteSAP` | `Put AMT_EnvironmentDetectionSettingData` |
 | 26 | `Pull AMT_TLSCredentialContext` | `Pull AMT_TLSCredentialContext` | `Enumerate AMT_TLSSettingData` | `Enumerate AMT_EthernetPortSettings` |
-| 27 | `Enumerate AMT_TLSCredentialContext` | `Enumerate AMT_TLSCredentialContext` | `Pull AMT_TLSSettingData` | `Pull AMT_EthernetPortSettings` |
-| 28 | `Pull AMT_TLSCredentialContext` | `Pull AMT_TLSCredentialContext` | `Get AMT_EnvironmentDetectionSettingData` | `Get AMT_RedirectionService` |
-| 29 | `Enumerate AMT_PublicKeyCertificate` | `Enumerate AMT_PublicKeyCertificate` | `Put AMT_EnvironmentDetectionSettingData` | `Get IPS_OptInService` |
-| 30 | `Pull AMT_PublicKeyCertificate` | `Pull AMT_PublicKeyCertificate` | `Enumerate AMT_EthernetPortSettings` | `Get CIM_KVMRedirectionSAP` |
-| 31 | `Get IPS_HostBasedSetupService` | `Get IPS_HostBasedSetupService` | `Pull AMT_EthernetPortSettings` | `Enumerate AMT_TLSSettingData` |
+| 27 | `Enumerate AMT_TLSCredentialContext` | `Enumerate AMT_PublicKeyCertificate` | `Pull AMT_TLSSettingData` | `Pull AMT_EthernetPortSettings` |
+| 28 | `Pull AMT_TLSCredentialContext` | `Pull AMT_PublicKeyCertificate` | `Get AMT_EnvironmentDetectionSettingData` | `Get AMT_RedirectionService` |
+| 29 | `Enumerate AMT_PublicKeyCertificate` | `Get IPS_HostBasedSetupService` | `Put AMT_EnvironmentDetectionSettingData` | `Get IPS_OptInService` |
+| 30 | `Pull AMT_PublicKeyCertificate` | `AddNextCertInChain IPS_HostBasedSetupService` | `Enumerate AMT_EthernetPortSettings` | `Get CIM_KVMRedirectionSAP` |
+| 31 | `Get IPS_HostBasedSetupService` | `AddNextCertInChain IPS_HostBasedSetupService` | `Pull AMT_EthernetPortSettings` | `Enumerate AMT_TLSSettingData` |
 | 32 | `AddNextCertInChain IPS_HostBasedSetupService` | `AddNextCertInChain IPS_HostBasedSetupService` | `Get AMT_RedirectionService` | `Pull AMT_TLSSettingData` |
-| 33 | `AddNextCertInChain IPS_HostBasedSetupService` | `AddNextCertInChain IPS_HostBasedSetupService` | `Get IPS_OptInService` | `Enumerate AMT_TLSCredentialContext` |
-| 34 | `AddNextCertInChain IPS_HostBasedSetupService` | `AddNextCertInChain IPS_HostBasedSetupService` | `Get CIM_KVMRedirectionSAP` | `Pull AMT_TLSCredentialContext` |
-| 35 | `UpgradeClientToAdmin IPS_HostBasedSetupService` | `UpgradeClientToAdmin IPS_HostBasedSetupService` | `Enumerate AMT_PublicKeyCertificate` | `Enumerate AMT_PublicKeyCertificate` |
-| 36 | `CommitChanges AMT_SetupAndConfigurationService` | `CommitChanges AMT_SetupAndConfigurationService` | `Pull AMT_PublicKeyCertificate` | `Pull AMT_PublicKeyCertificate` |
-| 37 | `SetMEBxPassword AMT_SetupAndConfigurationService` | `SetMEBxPassword AMT_SetupAndConfigurationService` | `AddTrustedRootCertificate AMT_PublicKeyManagementService` | `AddTrustedRootCertificate AMT_PublicKeyManagementService` |
-| 38 | `Enumerate AMT_EthernetPortSettings` | `Enumerate AMT_EthernetPortSettings` | `GenerateKeyPair AMT_PublicKeyManagementService` | `AddMpServer AMT_RemoteAccessService` |
-| 39 | `Pull AMT_EthernetPortSettings` | `Pull AMT_EthernetPortSettings` | `Enumerate AMT_PublicPrivateKeyPair` | `Enumerate AMT_ManagementPresenceRemoteSAP` |
-| 40 | `Get IPS_IEEE8021xSettings` | `Get IPS_IEEE8021xSettings` | `Pull AMT_PublicPrivateKeyPair` | `Pull AMT_ManagementPresenceRemoteSAP` |
-| 41 | `Enumerate CIM_WiFiEndpointSettings` | `Enumerate CIM_WiFiEndpointSettings` | `AddCertificate AMT_PublicKeyManagementService` | `AddRemoteAccessPolicyRule AMT_RemoteAccessService` |
-| 42 | `Pull CIM_WiFiEndpointSettings` | `Pull CIM_WiFiEndpointSettings` | `Enumerate AMT_TLSCredentialContext` | `AddRemoteAccessPolicyRule AMT_RemoteAccessService` |
-| 43 | `Enumerate IPS_HTTPProxyAccessPoint` | `Enumerate IPS_HTTPProxyAccessPoint` | `Pull AMT_TLSCredentialContext` | `Enumerate AMT_RemoteAccessPolicyAppliesToMPS` |
-| 44 | `Pull IPS_HTTPProxyAccessPoint` | `Pull IPS_HTTPProxyAccessPoint` | `Put AMT_TLSCredentialContext` | `Pull AMT_RemoteAccessPolicyAppliesToMPS` |
-| 45 | `Delete AMT_RemoteAccessPolicyRule` | `Delete AMT_RemoteAccessPolicyRule` | `GetLowAccuracyTimeSynch AMT_TimeSynchronizationService` | `Put AMT_RemoteAccessPolicyAppliesToMPS` |
-| 46 | `Delete AMT_RemoteAccessPolicyRule` | `Delete AMT_RemoteAccessPolicyRule` | `SetHighAccuracyTimeSynch AMT_TimeSynchronizationService` | `Put AMT_RemoteAccessPolicyAppliesToMPS` |
-| 47 | `Delete AMT_RemoteAccessPolicyRule` | `Delete AMT_RemoteAccessPolicyRule` | `Enumerate AMT_TLSSettingData` | `RequestStateChange AMT_UserInitiatedConnectionService` |
-| 48 | `Enumerate AMT_ManagementPresenceRemoteSAP` | `Enumerate AMT_ManagementPresenceRemoteSAP` | `Pull AMT_TLSSettingData` | `Get AMT_EnvironmentDetectionSettingData` |
-| 49 | `Pull AMT_ManagementPresenceRemoteSAP` | `Pull AMT_ManagementPresenceRemoteSAP` | `Put AMT_TLSSettingData` | `Put AMT_EnvironmentDetectionSettingData` |
-| 50 | `Enumerate AMT_TLSSettingData` | `Get AMT_EnvironmentDetectionSettingData` | `Put AMT_TLSSettingData` | — |
-| 51 | `Pull AMT_TLSSettingData` | `Enumerate AMT_EthernetPortSettings` | `CommitChanges AMT_SetupAndConfigurationService` | — |
-| 52 | `Get AMT_EnvironmentDetectionSettingData` | `Pull AMT_EthernetPortSettings` | `AddTrustedRootCertificate AMT_PublicKeyManagementService` | — |
-| 53 | `Enumerate AMT_EthernetPortSettings` | `Get AMT_RedirectionService` | `AddMpServer AMT_RemoteAccessService` | — |
-| 54 | `Pull AMT_EthernetPortSettings` | `Get IPS_OptInService` | `Enumerate AMT_ManagementPresenceRemoteSAP` | — |
-| 55 | `Get AMT_RedirectionService` | `Get CIM_KVMRedirectionSAP` | `Pull AMT_ManagementPresenceRemoteSAP` | — |
-| 56 | `Get IPS_OptInService` | `RequestStateChange AMT_RedirectionService` | `AddRemoteAccessPolicyRule AMT_RemoteAccessService` | — |
-| 57 | `Get CIM_KVMRedirectionSAP` | `RequestStateChange CIM_KVMRedirectionSAP` | `AddRemoteAccessPolicyRule AMT_RemoteAccessService` | — |
-| 58 | `RequestStateChange AMT_RedirectionService` | `Put AMT_RedirectionService` | `Enumerate AMT_RemoteAccessPolicyAppliesToMPS` | — |
-| 59 | `RequestStateChange CIM_KVMRedirectionSAP` | `Put IPS_OptInService` | `Pull AMT_RemoteAccessPolicyAppliesToMPS` | — |
-| 60 | `Put AMT_RedirectionService` | `AddTrustedRootCertificate AMT_PublicKeyManagementService` | `Put AMT_RemoteAccessPolicyAppliesToMPS` | — |
-| 61 | `Put IPS_OptInService` | `AddMpServer AMT_RemoteAccessService` | `Put AMT_RemoteAccessPolicyAppliesToMPS` | — |
-| 62 | `AddTrustedRootCertificate AMT_PublicKeyManagementService` | `Enumerate AMT_ManagementPresenceRemoteSAP` | `RequestStateChange AMT_UserInitiatedConnectionService` | — |
-| 63 | `AddMpServer AMT_RemoteAccessService` | `Pull AMT_ManagementPresenceRemoteSAP` | `Get AMT_EnvironmentDetectionSettingData` | — |
-| 64 | `Enumerate AMT_ManagementPresenceRemoteSAP` | `AddRemoteAccessPolicyRule AMT_RemoteAccessService` | `Put AMT_EnvironmentDetectionSettingData` | — |
-| 65 | `Pull AMT_ManagementPresenceRemoteSAP` | `AddRemoteAccessPolicyRule AMT_RemoteAccessService` | — | — |
-| 66 | `AddRemoteAccessPolicyRule AMT_RemoteAccessService` | `Enumerate AMT_RemoteAccessPolicyAppliesToMPS` | — | — |
-| 67 | `AddRemoteAccessPolicyRule AMT_RemoteAccessService` | `Pull AMT_RemoteAccessPolicyAppliesToMPS` | — | — |
-| 68 | `Enumerate AMT_RemoteAccessPolicyAppliesToMPS` | `Put AMT_RemoteAccessPolicyAppliesToMPS` | — | — |
-| 69 | `Pull AMT_RemoteAccessPolicyAppliesToMPS` | `Put AMT_RemoteAccessPolicyAppliesToMPS` | — | — |
-| 70 | `Put AMT_RemoteAccessPolicyAppliesToMPS` | `RequestStateChange AMT_UserInitiatedConnectionService` | — | — |
-| 71 | `Put AMT_RemoteAccessPolicyAppliesToMPS` | `Get AMT_EnvironmentDetectionSettingData` | — | — |
-| 72 | `RequestStateChange AMT_UserInitiatedConnectionService` | `Put AMT_EnvironmentDetectionSettingData` | — | — |
+| 33 | `AddNextCertInChain IPS_HostBasedSetupService` | `UpgradeClientToAdmin IPS_HostBasedSetupService` | `Get IPS_OptInService` | `Enumerate AMT_TLSCredentialContext` |
+| 34 | `AddNextCertInChain IPS_HostBasedSetupService` | `CommitChanges AMT_SetupAndConfigurationService` | `Get CIM_KVMRedirectionSAP` | `Pull AMT_TLSCredentialContext` |
+| 35 | `UpgradeClientToAdmin IPS_HostBasedSetupService` | `SetMEBxPassword AMT_SetupAndConfigurationService` | `Enumerate AMT_PublicKeyCertificate` | `Enumerate AMT_PublicKeyCertificate` |
+| 36 | `CommitChanges AMT_SetupAndConfigurationService` | `Enumerate AMT_EthernetPortSettings` | `Pull AMT_PublicKeyCertificate` | `Pull AMT_PublicKeyCertificate` |
+| 37 | `SetMEBxPassword AMT_SetupAndConfigurationService` | `Pull AMT_EthernetPortSettings` | `AddTrustedRootCertificate AMT_PublicKeyManagementService` | `GetLowAccuracyTimeSynch AMT_TimeSynchronizationService` |
+| 38 | `Enumerate AMT_EthernetPortSettings` | `Get IPS_IEEE8021xSettings` | `GenerateKeyPair AMT_PublicKeyManagementService` | `SetHighAccuracyTimeSynch AMT_TimeSynchronizationService` |
+| 39 | `Pull AMT_EthernetPortSettings` | `Enumerate CIM_WiFiEndpointSettings` | `Enumerate AMT_PublicPrivateKeyPair` | `AddTrustedRootCertificate AMT_PublicKeyManagementService` |
+| 40 | `Get IPS_IEEE8021xSettings` | `Pull CIM_WiFiEndpointSettings` | `Pull AMT_PublicPrivateKeyPair` | `AddMpServer AMT_RemoteAccessService` |
+| 41 | `Enumerate CIM_WiFiEndpointSettings` | `Enumerate IPS_HTTPProxyAccessPoint` | `AddCertificate AMT_PublicKeyManagementService` | `Enumerate AMT_ManagementPresenceRemoteSAP` |
+| 42 | `Pull CIM_WiFiEndpointSettings` | `Pull IPS_HTTPProxyAccessPoint` | `Enumerate AMT_TLSCredentialContext` | `Pull AMT_ManagementPresenceRemoteSAP` |
+| 43 | `Enumerate IPS_HTTPProxyAccessPoint` | `Delete AMT_RemoteAccessPolicyRule` | `Pull AMT_TLSCredentialContext` | `AddRemoteAccessPolicyRule AMT_RemoteAccessService` |
+| 44 | `Pull IPS_HTTPProxyAccessPoint` | `Delete AMT_RemoteAccessPolicyRule` | `Put AMT_TLSCredentialContext` | `AddRemoteAccessPolicyRule AMT_RemoteAccessService` |
+| 45 | `Delete AMT_RemoteAccessPolicyRule` | `Delete AMT_RemoteAccessPolicyRule` | `GetLowAccuracyTimeSynch AMT_TimeSynchronizationService` | `Enumerate AMT_RemoteAccessPolicyAppliesToMPS` |
+| 46 | `Delete AMT_RemoteAccessPolicyRule` | `Enumerate AMT_ManagementPresenceRemoteSAP` | `SetHighAccuracyTimeSynch AMT_TimeSynchronizationService` | `Pull AMT_RemoteAccessPolicyAppliesToMPS` |
+| 47 | `Delete AMT_RemoteAccessPolicyRule` | `Pull AMT_ManagementPresenceRemoteSAP` | `Enumerate AMT_TLSSettingData` | `Put AMT_RemoteAccessPolicyAppliesToMPS` |
+| 48 | `Enumerate AMT_ManagementPresenceRemoteSAP` | `Get AMT_EnvironmentDetectionSettingData` | `Pull AMT_TLSSettingData` | `Put AMT_RemoteAccessPolicyAppliesToMPS` |
+| 49 | `Pull AMT_ManagementPresenceRemoteSAP` | `Enumerate AMT_EthernetPortSettings` | `Put AMT_TLSSettingData` | `RequestStateChange AMT_UserInitiatedConnectionService` |
+| 50 | `Enumerate AMT_TLSSettingData` | `Pull AMT_EthernetPortSettings` | `Put AMT_TLSSettingData` | `Get AMT_EnvironmentDetectionSettingData` |
+| 51 | `Pull AMT_TLSSettingData` | `Get AMT_RedirectionService` | `CommitChanges AMT_SetupAndConfigurationService` | `Put AMT_EnvironmentDetectionSettingData` |
+| 52 | `Get AMT_EnvironmentDetectionSettingData` | `Get IPS_OptInService` | `AddTrustedRootCertificate AMT_PublicKeyManagementService` | — |
+| 53 | `Enumerate AMT_EthernetPortSettings` | `Get CIM_KVMRedirectionSAP` | `AddMpServer AMT_RemoteAccessService` | — |
+| 54 | `Pull AMT_EthernetPortSettings` | `RequestStateChange AMT_RedirectionService` | `Enumerate AMT_ManagementPresenceRemoteSAP` | — |
+| 55 | `Get AMT_RedirectionService` | `RequestStateChange CIM_KVMRedirectionSAP` | `Pull AMT_ManagementPresenceRemoteSAP` | — |
+| 56 | `Get IPS_OptInService` | `Put AMT_RedirectionService` | `AddRemoteAccessPolicyRule AMT_RemoteAccessService` | — |
+| 57 | `Get CIM_KVMRedirectionSAP` | `Put IPS_OptInService` | `AddRemoteAccessPolicyRule AMT_RemoteAccessService` | — |
+| 58 | `RequestStateChange AMT_RedirectionService` | `AddTrustedRootCertificate AMT_PublicKeyManagementService` | `Enumerate AMT_RemoteAccessPolicyAppliesToMPS` | — |
+| 59 | `RequestStateChange CIM_KVMRedirectionSAP` | `AddMpServer AMT_RemoteAccessService` | `Pull AMT_RemoteAccessPolicyAppliesToMPS` | — |
+| 60 | `Put AMT_RedirectionService` | `Enumerate AMT_ManagementPresenceRemoteSAP` | `Put AMT_RemoteAccessPolicyAppliesToMPS` | — |
+| 61 | `Put IPS_OptInService` | `Pull AMT_ManagementPresenceRemoteSAP` | `Put AMT_RemoteAccessPolicyAppliesToMPS` | — |
+| 62 | `AddTrustedRootCertificate AMT_PublicKeyManagementService` | `AddRemoteAccessPolicyRule AMT_RemoteAccessService` | `RequestStateChange AMT_UserInitiatedConnectionService` | — |
+| 63 | `AddMpServer AMT_RemoteAccessService` | `AddRemoteAccessPolicyRule AMT_RemoteAccessService` | `Get AMT_EnvironmentDetectionSettingData` | — |
+| 64 | `Enumerate AMT_ManagementPresenceRemoteSAP` | `Enumerate AMT_RemoteAccessPolicyAppliesToMPS` | `Put AMT_EnvironmentDetectionSettingData` | — |
+| 65 | `Pull AMT_ManagementPresenceRemoteSAP` | `Pull AMT_RemoteAccessPolicyAppliesToMPS` | — | — |
+| 66 | `AddRemoteAccessPolicyRule AMT_RemoteAccessService` | `Put AMT_RemoteAccessPolicyAppliesToMPS` | — | — |
+| 67 | `AddRemoteAccessPolicyRule AMT_RemoteAccessService` | `Put AMT_RemoteAccessPolicyAppliesToMPS` | — | — |
+| 68 | `Enumerate AMT_RemoteAccessPolicyAppliesToMPS` | `RequestStateChange AMT_UserInitiatedConnectionService` | — | — |
+| 69 | `Pull AMT_RemoteAccessPolicyAppliesToMPS` | `Get AMT_EnvironmentDetectionSettingData` | — | — |
+| 70 | `Put AMT_RemoteAccessPolicyAppliesToMPS` | `Put AMT_EnvironmentDetectionSettingData` | — | — |
+| 71 | `Put AMT_RemoteAccessPolicyAppliesToMPS` | — | — | — |
+| 72 | `RequestStateChange AMT_UserInitiatedConnectionService` | — | — | — |
 | 73 | `Get AMT_EnvironmentDetectionSettingData` | — | — | — |
 | 74 | `Put AMT_EnvironmentDetectionSettingData` | — | — | — |
 
@@ -238,8 +233,7 @@ retention of both the local five-second timer and the 15-second default.
 
 | Remaining validation | Purpose |
 |---|---|
-| Combined first-time activation | Confirm required certificate enrollment, activation/upgrade, and rollover behavior |
-| Repeated comparable reconfiguration | Measure the corrected clock-synchronization route and TLS reporting, establish typical performance, and run matched comparisons with the 15-second default |
+| Repeated matched activation and reconfiguration | Establish typical performance and capture equivalent full initial-state/profile snapshots |
 | Alternate profiles and devices | Cover wired 802.1X, Wi-Fi, proxy, no-CIRA and alternate interfaces, legacy tunnel/non-TLS, and control-mode upgrades |
 | Changed or missing TLS identity/settings | Confirm enrollment and verification fallback on hardware |
 | Faults and partial provisioning | Check digest recovery, resets/timeouts, reconnects, dependency failures, and interrupted attempts |
@@ -256,8 +250,8 @@ hardware paths and recovery behavior are validated.
 User-facing documentation assessment: these changes add no API, profile field,
 or required user action, so no usage-guide change is needed. When ready to ship,
 a release note should describe eligible TLS identity reuse and preserved clock
-synchronization. Until matched tests are complete, it should not promise a
-particular percentage gain. Keep the generated release changelog unchanged here.
+synchronization. Single-run results should not be presented as a guaranteed
+percentage gain. Keep the generated release changelog unchanged here.
 
 ## Future ideas — not implemented
 
