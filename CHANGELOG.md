@@ -1,3 +1,10 @@
+## [2.43.1](https://github.com/device-management-toolkit/rps/compare/v2.43.0...v2.43.1) (2026-11-03)
+
+
+### Bug Fixes
+
+* **activation:** enable redirection listener for KVM-only profiles ([#2994](https://github.com/device-management-toolkit/rps/issues/2994)) ([c65c2ae](https://github.com/device-management-toolkit/rps/commit/c65c2ae533319c55347d0354b58f295a6c1c58f6))
+
 # [2.43.0](https://github.com/device-management-toolkit/rps/compare/v2.42.0...v2.43.0) (2026-10-29)
 
 
