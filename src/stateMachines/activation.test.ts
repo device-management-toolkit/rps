@@ -3421,6 +3421,7 @@ describe('TLS reconfiguration reuse optimizations', () => {
       const snapshot = await waitFor(actor, (state) => state.status === 'done', { timeout: 1000 })
       expect(snapshot.value).toBe(cira ? 'CIRA' : 'PROVISIONED')
       expect(devices[syntheticId].status.TLSConfiguration).toBe('Already configured')
+      expect(devices[syntheticId].status.Components?.TLS).toEqual({ Result: 'Success', Details: 'Already configured' })
     } finally {
       actor.stop()
     }

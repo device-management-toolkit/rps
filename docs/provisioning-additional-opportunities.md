@@ -150,3 +150,30 @@ and take precedence. Common and activation regressions verify this behavior.
 Combined implementation checks: **1,118 tests across 98 files**, lint,
 formatting, TypeScript `--noEmit`, compilation, and `git diff --check` passed.
 Hardware validation for the combined change remains pending.
+
+
+## First combined hardware reconfiguration run
+
+The AMT 21 TLS-enforced ACM reconfiguration with `418f752a` took **68.770 seconds**
+from the RPS activation request to final status, versus **95.534 seconds** on
+September and **93.238 seconds** with candidate A alone. The observed reduction
+from September is **26.764 seconds (28.02%)**, in a single matched-intent run.
+Initial device/profile equivalence was not independently established; repeat
+runs are needed to establish typical performance.
+
+Transport request-log counts fell from **64 to 49**. The trace confirms the
+same-session credential cache, skipped unchanged-identity wait, final live
+revalidation, and no key generation/certificate installation/TLS commit.
+Activation, wired network, and CIRA report success. CIRA connectivity through MPS
+is not independently checked. The final certificate recheck succeeds, but this
+build omitted the structured TLS result because the TLS child was skipped.
+That reporting regression is corrected by recording TLS success in the reused
+TLS route, with sibling routing/result regressions. The correction does not
+change firmware operations. The tested image remains `418f752a` until rebuilt.
+
+A redacted comparison is saved at
+`/tmp/rps-2935-reconfiguration-all-comparison.json`. RPC command-start timing and
+hardware testing of combined first-time activation/failure profiles remain
+pending. Bootstrap verification warnings, digest 401, and a tolerated cleanup
+HTTP 400/reset are still present; skipping required recovery is not part of the
+measured optimization.

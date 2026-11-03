@@ -2821,6 +2821,7 @@ export class Activation {
       ROUTE_REUSED_TLS: {
         entry: ({ context }) => {
           devices[context.clientId].status.TLSConfiguration = 'Already configured'
+          recordComponentResult(context.clientId, 'TLS', { Result: 'Success', Details: 'Already configured' })
           this.logger.info('Reusing verified existing TLS identity after configuration')
         },
         always: [
