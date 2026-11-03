@@ -17,15 +17,12 @@ measured on hardware. Broader hardware validation remains outstanding.
 
 ## Implemented changes
 
-The letters below are the identifiers used in earlier analysis. Descriptive
-names explain each change; the letters do not indicate execution order.
-
 | Change | Before | After | Scope |
 |---|---|---|---|
-| **A — Skip unused cleanup reads** | Cleanup read TLS settings, then discarded the result on the TLS-enforced route. | Evaluate the existing guard before Enumerate/Pull, saving two requests. | TLS-enforced activation and reconfiguration |
-| **C — Reuse a fresh credential check** | TLS probing and certificate validation read the same credential contexts twice. | Reuse a complete, current probe snapshot, saving two requests when eligible. | TLS validation within the same attempt/session |
-| **E — Retain a verified TLS identity** | Deferred enrollment could regenerate keys and certificates despite an earlier live/Vault match. | Recheck identity and policy after configuration; skip enrollment only when reuse is approved. | Eligible reconfiguration in the same control mode |
-| **F — Skip the unchanged-certificate wait** | Existing TLS reconfiguration waited for the configured rollover timer: 15 seconds by default, locally overridden to five seconds for the measured runs. | Skip the configured wait for an approved unchanged identity, then establish a fresh tunnel. | Eligible TLS reconfiguration |
+| **Skip unused cleanup reads** | Cleanup read TLS settings, then discarded the result on the TLS-enforced route. | Evaluate the existing guard before Enumerate/Pull, saving two requests. | TLS-enforced activation and reconfiguration |
+| **Reuse a fresh credential check** | TLS probing and certificate validation read the same credential contexts twice. | Reuse a complete, current probe snapshot, saving two requests when eligible. | TLS validation within the same attempt/session |
+| **Retain a verified TLS identity** | Deferred enrollment could regenerate keys and certificates despite an earlier live/Vault match. | Recheck identity and policy after configuration; skip enrollment only when reuse is approved. | Eligible reconfiguration in the same control mode |
+| **Skip the unchanged-certificate wait** | Existing TLS reconfiguration waited for the configured rollover timer: 15 seconds by default, locally overridden to five seconds for the measured runs. | Skip the configured wait for an approved unchanged identity, then establish a fresh tunnel. | Eligible TLS reconfiguration |
 | **Report reused TLS success** | Skipping the TLS child omitted its structured success result. | Record TLS `Success` with `Already configured` on the reuse route. | Successful identity reuse |
 | **Preserve AMT clock synchronization** | The first reuse implementation also skipped the TLS child's time synchronization. | Read AMT time and synchronize it before reporting reuse success; fail if either operation fails. | Successful identity reuse |
 
@@ -264,22 +261,22 @@ particular percentage gain. Keep the generated release changelog unchanged here.
 
 ## Future ideas — not implemented
 
-| ID and idea | Potential saving | Work required |
+| Proposed change | Potential saving | Work required |
 |---|---|---|
-| **B — Choose non-TLS reconfiguration earlier** | Two or four probe reads on selected legacy/local routes | Keep the earlier LMS transport-selection probe; validate explicit tunnel flags, digest recovery, upgrades, and later TLS requirements on legacy hardware |
-| **D — Update only changed features** | Potentially one unchanged KVM setter | Prove firmware `RequestStateChange` semantics, listener coupling, opt-in, and selective enable/disable behavior; unchanged measured reconfiguration already emitted no setters |
-| **G — Skip initial enrollment certificate reads** | Two reads during actual TLS enrollment | Preserve initial Enumerate's HTTP 401 recovery and Pull's bounded parse retries; root-add currently sends rejected calls to failure |
-| **H — Reuse a verified CIRA trusted root** | One root-add request on eligible reconfiguration | Hand off complete fresh inventory with attempt/session/age information; compare the exact newly loaded CIRA root and its trusted flag; retain evidence across only operations proven not to invalidate it |
+| **Choose non-TLS reconfiguration earlier** | Two or four probe reads on selected legacy/local routes | Keep the earlier LMS transport-selection probe; validate explicit tunnel flags, digest recovery, upgrades, and later TLS requirements on legacy hardware |
+| **Update only changed features** | Potentially one unchanged KVM setter | Prove firmware `RequestStateChange` semantics, listener coupling, opt-in, and selective enable/disable behavior; unchanged measured reconfiguration already emitted no setters |
+| **Skip initial enrollment certificate reads** | Two reads during actual TLS enrollment | Preserve initial Enumerate's HTTP 401 recovery and Pull's bounded parse retries; root-add currently sends rejected calls to failure |
+| **Reuse a verified CIRA trusted root** | One root-add request on eligible reconfiguration | Hand off complete fresh inventory with attempt/session/age information; compare the exact newly loaded CIRA root and its trusted flag; retain evidence across only operations proven not to invalidate it |
 
-For G, routing directly to certificate-mode selection loses the current
-recovery behavior. Write retries cannot simply copy read retries: an ambiguous
+Skipping the initial enrollment certificate reads loses the current
+authentication recovery behavior when routing directly to certificate-mode selection. Write retries cannot simply copy read retries: an ambiguous
 failure after a certificate-store write may require discovery before replay.
 Enterprise Assistant, partial enrollment, reconnect, and rollover need coverage.
 The observed six-second initial-read interval includes recovery/tunnel overhead
 and is not a removable-time estimate.
 
-For H, final TLS verification currently returns a boolean and does not pass its
-complete inventory to CIRA. Use evidence captured after cleanup; compare
+Reusing the CIRA trusted root requires an explicit evidence handoff: final TLS
+verification currently returns a boolean and does not pass its complete inventory to CIRA. Use evidence captured after cleanup; compare
 normalized DER bytes or SHA-256 fingerprints against the root from CIRA's newly
 loaded configuration and require `TrustedRootCertficate` to indicate trust.
 Missing, malformed, incomplete, expired, changed-session, reset, or mismatched
@@ -290,9 +287,10 @@ activation remains outside this proposed shortcut until persistence through
 its mutations is proven. Extra discovery reads solely to skip one write would
 erase the request benefit.
 
-Validate the combined implementation first, then consider H and G separately.
-B and D require their qualifying devices/profiles. These potential savings are
-predictions, not additional measured gains.
+Validate the combined implementation first, then investigate trusted-root reuse
+and enrollment-read removal separately. Earlier non-TLS routing and selective
+feature updates require qualifying devices/profiles. These potential savings
+are predictions, not additional measured gains.
 
 ## Reference: flow and baseline inventory
 
