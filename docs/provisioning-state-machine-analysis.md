@@ -3,7 +3,9 @@
 This report describes the changes for
 [issue #2935](https://github.com/device-management-toolkit/rps/issues/2935) on
 `analysis/provisioning-state-machine`, reviewed November 3, 2026. The comparison
-baseline is **v2.40.2 (`583d61f`)**. Cleanup optimization was introduced in
+source baseline is **v2.40.2 (`583d61f`)**. Hardware comparisons used the local
+five-second TLS timer override; the release default is 15 seconds. Cleanup
+optimization was introduced in
 `9179ab1`, combined TLS reuse in `418f752`, and TLS result reporting in `b75d37f`.
 
 We removed unnecessary reads and TLS enrollment work during eligible
@@ -20,7 +22,7 @@ names explain each change; the letters do not indicate execution order.
 | **A — Skip unused cleanup reads** | Cleanup read TLS settings, then discarded the result on the TLS-enforced route. | Evaluate the existing guard before Enumerate/Pull, saving two requests. | TLS-enforced activation and reconfiguration |
 | **C — Reuse a fresh credential check** | TLS probing and certificate validation read the same credential contexts twice. | Reuse a complete, current probe snapshot, saving two requests when eligible. | TLS validation within the same attempt/session |
 | **E — Retain a verified TLS identity** | Deferred enrollment could regenerate keys and certificates despite an earlier live/Vault match. | Recheck identity and policy after configuration; skip enrollment only when reuse is approved. | Eligible reconfiguration in the same control mode |
-| **F — Skip the unchanged-certificate wait** | Existing TLS reconfiguration waited five seconds for certificate rollover. | Skip that wait for an approved unchanged identity, then establish a fresh tunnel. | Eligible TLS reconfiguration |
+| **F — Skip the unchanged-certificate wait** | Existing TLS reconfiguration waited for the configured rollover timer: 15 seconds by default, locally overridden to five seconds for the measured runs. | Skip the configured wait for an approved unchanged identity, then establish a fresh tunnel. | Eligible TLS reconfiguration |
 | **Report reused TLS success** | Skipping the TLS child omitted its structured success result. | Record TLS `Success` with `Already configured` on the reuse route. | Successful identity reuse |
 
 ### Conditions for safe reuse
@@ -49,7 +51,7 @@ certificates. Changed identity/settings, incomplete or stale evidence, failed
 checks, and dependency errors fall back to TLS provisioning. Success records
 the TLS result and continues to CIRA when configured, otherwise completion.
 
-The five-second wait is skipped only within the validated session with no reset
+The configured wait is skipped only within the validated session with no reset
 or reconfiguration pending. The decision is cleared when the port-switch state
 exits. Actual enrollment, commit, upgrade, and recovery waits remain. Retained
 certificates use `validatedCertPEM`, separate from newly issued `issuedCertPEM`;
@@ -76,13 +78,21 @@ cryptographic regression coverage.
 
 ## Measured results
 
-| Scenario | Baseline (`583d61f`) | Cleanup only (`9179ab1`) | Combined (`418f752`) |
+| Scenario | Baseline source (`583d61f`), local timer | Cleanup only (`9179ab1`), local timer | Combined (`418f752`), local timer |
 |---|---|---|---|
 | AMT 21 first-time activation | About 153.9 s; 74 requests | About 152.1 s; 72 requests | Not yet tested |
 | AMT 21 ACM reconfiguration | 95.534 s; 64 requests | 93.238 s; 62 requests | 68.770 s; 49 requests |
 
-The combined reconfiguration was **26.764 seconds (28.02%)** shorter than the
-baseline. On that eligible route, the request reduction is:
+`delay_tls_timer` defaults to **15 seconds** in the release and current source.
+The user configured **five seconds locally** for these hardware comparisons.
+Baseline traces show five-second waits; cleanup and combined traces record the
+five-second configuration, with the combined eligible reuse route skipping its
+wait. This optimization does not change the timer default. No before/after
+measurement using the 15-second default has been collected.
+
+With the local timer setting, combined reconfiguration was **26.764 seconds
+(28.02%)** shorter than the baseline-source run. On that eligible route, the
+request reduction is:
 
 **64 − 2 cleanup reads − 2 duplicate credential reads − 17 enrollment requests
 + 6 final verification reads = 49 requests.**
@@ -96,7 +106,9 @@ independently confirmed.
 These are single-run observations, measured from RPS receipt to final status.
 RPC command-start timing and equivalent initial device/profile state were not
 independently established. The results do not establish typical performance or
-an independent duration saving for each change. Request counts are transport
+an independent duration saving for each change or the total gain at the
+15-second default. Do not extrapolate the measured duration by simply adding
+the timer difference. Request counts are transport
 log blocks; activation counts exclude three duplicate actor XML logs for
 `AddNextCertInChain`.
 
@@ -118,7 +130,7 @@ TLS results, and retained cleanup failures.
 | Remaining validation | Purpose |
 |---|---|
 | Combined first-time activation | Confirm required certificate enrollment, activation/upgrade, and rollover behavior |
-| Repeated comparable reconfiguration | Establish typical performance and validate the TLS result reporting fix |
+| Repeated comparable reconfiguration | Establish typical performance, validate the TLS result reporting fix, and run matched comparisons with the 15-second default |
 | Alternate profiles and devices | Cover wired 802.1X, Wi-Fi, proxy, no-CIRA and alternate interfaces, legacy tunnel/non-TLS, and control-mode upgrades |
 | Changed or missing TLS identity/settings | Confirm enrollment and verification fallback on hardware |
 | Faults and partial provisioning | Check digest recovery, resets/timeouts, reconnects, dependency failures, and interrupted attempts |
