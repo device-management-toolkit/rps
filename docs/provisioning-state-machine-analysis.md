@@ -146,3 +146,43 @@ Baseline checks completed successfully on November 3, 2026:
 - `npm run ci-prettify`: passed.
 
 These establish the unoptimized release's automated-test baseline. They are not tests of proposed optimizations and do not establish hardware performance or complete profile coverage. Hardware results remain pending independently of these checks.
+
+## Executable release characterization
+
+`src/test/provisioningAnalysis.test.ts` adds 12 segmented scenarios using the
+release's real XState transitions, actor implementations, routing guards, and
+WS-Man SDK message builders. Only external WS-Man responses are scripted. The
+MPS deletion actor is stubbed to exercise both convergence paths without
+claiming coverage of deletion or its transport. Each scenario starts at a
+specified internal state; downstream activation/password/certificate operations
+are replaced by terminal states. These are release characterizations, not
+end-to-end provisioning tests or tests of an implemented optimization.
+
+| Scenario | Observed nominal SDK requests and outcome |
+|---|---|
+| TLS-enforced cleanup, with and without MPS entries | `Enumerate TLSSettingData → Pull TLSSettingData → Get EnvironmentDetectionSettingData → Put EnvironmentDetectionSettingData`; success. Enabled TLS settings do not trigger disable/certificate cleanup. Both MPS branches converge on the same discarded reads. |
+| TLS-enforced cleanup: TLS enumerate, TLS pull, or environment get fails | Failure after one, two, or three requests respectively. The first two failure opportunities would disappear under candidate A; environment failure handling must remain. |
+| Cleanup without TLS enforcement, TLS enabled | Both TLS reads remain and reach `DISABLE_TLS_SETTING_DATA`. The downstream disable/commit sequence is outside this segment. |
+| Non-TLS ACM-to-ACM reconfiguration, TLS disabled | Two TLS-setting requests; password-change route, `tlsNeedsProvisioning=false`. |
+| Non-TLS ACM-to-ACM reconfiguration, TLS enabled with credentials | Four requests: TLS-setting and credential-context Enumerate/Pull; same password-change route and flag. |
+| Non-TLS CCM-to-ACM reconfiguration, TLS enabled with credentials | Same four probe requests; host-based setup route, `tlsNeedsProvisioning=false`. Upgrade execution is outside this segment. |
+| Explicit tunnel or TLS-enforced route, TLS enabled with credentials | Four probe requests; live-certificate validation route retained. Certificate validation itself is outside this segment. |
+| Non-TLS probe fails | One failed request; actor catches error and the routing guard still selects password change with `tlsNeedsProvisioning=false`. |
+
+The executable evidence supports A's two discarded reads and B's conditional
+two/four discarded reads on the tested routes. No before/after comparison has
+been executed: production source remains unchanged. Timing, retry transport,
+digest authentication, certificate correctness, full first-time activation,
+LMS override selection, and successful network/802.1X/Wi-Fi/proxy/CIRA completion
+remain outside these segmented simulations. Candidate C and D remain conditional.
+
+The next implementation should preserve this characterization separately from
+new sibling optimization tests. In particular, candidate A must retain MPS and
+environment failures while intentionally eliminating failures from skipped TLS
+reads. Candidate B must leave the earlier LMS transport-selection probe intact
+and preserve the tunnel/TLS-enforced certificate-validation branches.
+
+After adding these characterization scenarios, the full automated checks passed:
+`npm test -- --coverage.reportsDirectory=/tmp/rps-2935-characterization-coverage`
+reported **1,074 tests across 98 files**; lint, formatting, and TypeScript
+`--noEmit` also passed. This does not satisfy the hardware validation gate.
