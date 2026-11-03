@@ -1,0 +1,9 @@
+services:
+  rps:
+    image: rps-activation-diagnostics:local
+    build:
+      context: ${RPS_DIAGNOSTICS_SOURCE:?Set RPS_DIAGNOSTICS_SOURCE to the diagnostics worktree}
+      dockerfile: Dockerfile
+    environment:
+      RPS_DIAGNOSTICS_ENABLED: 'true'
+      RPS_DIAGNOSTICS_RETENTION_DAYS: '7'

@@ -12,6 +12,7 @@ import wirelessconfigs from './wireless/index.js'
 import health from './health/index.js'
 import ieee8021x from './ieee8021x/index.js'
 import proxyconfigs from './proxy/index.js'
+import activationAttempts from './activationAttempts/index.js'
 
 const adminRouter: Router = Router()
 
@@ -23,6 +24,7 @@ adminRouter.use('/version', version)
 adminRouter.use('/health', health)
 adminRouter.use('/ieee8021xconfigs', ieee8021x)
 adminRouter.use('/proxyconfigs', proxyconfigs)
+adminRouter.use('/activation-attempts', activationAttempts)
 adminRouter.get('/', (req: Request, res: Response) => {
   res.status(200).json({ message: 'admin path. use admin/profiles' })
 })

@@ -5,6 +5,7 @@
 
 import { AMT, IPS, CIM } from '@device-management-toolkit/wsman-messages'
 import { assign, createActor, fromPromise, sendTo, setup } from 'xstate'
+import { diagnosticsClock, diagnosticsFor } from '../diagnostics/index.js'
 import { ClientAction } from '../models/RCS.Config.js'
 import { HttpHandler } from '../HttpHandler.js'
 import Logger from '../Logger.js'
@@ -620,7 +621,7 @@ export class Activation {
         `Post-commit TLS rollover: closing current TLS tunnel (session=${clientObj.tlsTunnelSessionId ?? 'none'}) and marking for fresh tunnel creation on next WSMAN call`
       )
 
-      clientObj.tlsTunnelManager?.close()
+      clientObj.tlsTunnelManager?.close('post_commit_reconfiguration')
       clientObj.tlsTunnelManager = undefined
       clientObj.tlsTunnelSessionId = undefined
       clientObj.tlsTunnelNeedsReset = true
@@ -1138,13 +1139,18 @@ export class Activation {
       )
 
       // The existing tunnel may be pre-rollover; close it so post-rollover steps create a fresh channel.
-      clientObj.tlsTunnelManager?.close()
+      clientObj.tlsTunnelManager?.close('tls_rollover')
       clientObj.tlsTunnelManager = undefined
       clientObj.tlsTunnelSessionId = undefined
       clientObj.tlsTunnelNeedsReset = true
       clientObj.tlsResponseBuffer = undefined
 
+      const completeWait = diagnosticsFor(input.clientId)?.measure('wait', {
+        reason: 'tls_rollover',
+        configuredMs: delaySeconds * 1000
+      })
       await new Promise((resolve) => setTimeout(resolve, delaySeconds * 1000))
+      completeWait?.()
 
       if (clientObj.connectionParams != null) {
         clientObj.connectionParams.port = 16993
@@ -2795,7 +2801,10 @@ export class Activation {
     }
   })
 
-  service = createActor(this.machine, { input: {} as ActivationContext })
+  service = createActor(this.machine, {
+    input: {} as ActivationContext,
+    clock: diagnosticsClock(() => this.service?.getSnapshot().context.clientId)
+  })
 
   constructor() {
     this.nodeForge = new NodeForge()

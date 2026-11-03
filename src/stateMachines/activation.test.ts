@@ -19,6 +19,8 @@ import ClientResponseMsg from '../utils/ClientResponseMsg.js'
 import { type MachineImplementationsSimplified, createActor, fromPromise } from 'xstate'
 import { AMTUserName, GATEWAY_TIMEOUT_ERROR } from '../utils/constants.js'
 import got from 'got'
+import * as diagnostics from '../diagnostics/index.js'
+import { ActivationDiagnostics } from '../diagnostics/ActivationDiagnostics.js'
 
 import { vi, type MockInstance } from 'vitest'
 import { HttpResponseError, coalesceMessage, isDigestRealmValid } from './common.js'
@@ -79,6 +81,50 @@ const { TLSTunnelManager } = await import('../TLSTunnelManager.js')
 vi.mock('got')
 const clientId = randomUUID()
 Environment.Config = config
+describe('activation rollover diagnostics', () => {
+  it('records the TLS rollover wait without sending a port switch', async () => {
+    vi.useFakeTimers()
+    const originalDelay = Environment.Config.delay_tls_timer
+    Environment.Config.delay_tls_timer = 1
+    const attempt = new ActivationDiagnostics({
+      tenantId: '',
+      deviceId: randomUUID(),
+      amtVersion: '21.0',
+      startingMode: 0,
+      profileName: 'acm',
+      tlsEnforced: true,
+      settings: { delayTlsSeconds: 1 }
+    })
+    const lookup = vi.spyOn(diagnostics, 'diagnosticsFor').mockReturnValue(attempt)
+    const close = vi.fn()
+    const send = vi.fn()
+    const testClientId = 'rollover-diagnostics'
+    devices[testClientId] = {
+      uuid: attempt.metadata.deviceId,
+      tlsEnforced: true,
+      tlsTunnelActivation: false,
+      connectionParams: { port: 16993 },
+      tlsTunnelManager: { close },
+      ClientSocket: { send }
+    } as any
+    try {
+      const activation = new Activation()
+      const pending = activation.signalPortSwitch({ input: { clientId: testClientId } as ActivationContextType })
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(await pending).toBe(true)
+      expect(send).not.toHaveBeenCalled()
+      expect(close).toHaveBeenCalledWith('tls_rollover')
+      expect(attempt.snapshot()).toMatchObject({ events: [
+          { type: 'wait', reason: 'tls_rollover', configuredMs: 1000, outcome: 'success' }
+        ] })
+    } finally {
+      lookup.mockRestore()
+      delete devices[testClientId]
+      Environment.Config.delay_tls_timer = originalDelay
+      vi.useRealTimers()
+    }
+  })
+})
 describe('Activation State Machine', () => {
   let activation: ActivationType
   let context: ActivationContextType
