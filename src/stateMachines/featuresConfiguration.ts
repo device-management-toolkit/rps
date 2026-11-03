@@ -137,7 +137,10 @@ export class FeaturesConfiguration {
           isRedirectionChanged = true
         }
 
-        if ((solEnabled || iderEnabled) && !amtRedirectionService.ListenerEnabled) {
+        // The redirection port carries KVM too, so it must follow the profile's KVM setting,
+        // not the KVM state read from AMT before this update.
+        const kvmTarget = context.amtConfiguration?.kvmEnabled ?? false
+        if ((solEnabled || iderEnabled || kvmTarget) !== amtRedirectionService.ListenerEnabled) {
           isRedirectionChanged = true
         }
 
@@ -158,7 +161,7 @@ export class FeaturesConfiguration {
             enabledState = AMTRedirectionServiceEnabledStates.ONLY_SOL
           }
           amtRedirectionService.EnabledState = enabledState
-          amtRedirectionService.ListenerEnabled = solEnabled || iderEnabled || kvmEnabled
+          amtRedirectionService.ListenerEnabled = solEnabled || iderEnabled || kvmTarget
         }
 
         const userConsent =
