@@ -26,7 +26,7 @@ const { Activation } = await import('../stateMachines/activation.js')
 
 // These segmented release characterizations retain real transitions and SDK builders.
 // External WS-Man responses are scripted; no transport, device, or timing is measured.
-const clientId = 'issue-2935-simulation'
+const clientId = 'provisioning-routing-simulation'
 const enumeration = { Envelope: { Body: { EnumerateResponse: { EnumerationContext: 'simulation' } } } }
 const pull = (items: any): any => ({ Envelope: { Body: { PullResponse: { Items: items } } } })
 let requests: string[]
@@ -75,7 +75,7 @@ async function runSegment(machine: any, initial: string, context: any, terminals
   }
 }
 
-describe('Issue 2935 release cleanup characterization', () => {
+describe('Baseline TLS cleanup behavior', () => {
   it.each([false, true])('discards TLS reads but retains environment cleanup (MPS entries=%s)', async (hasMps) => {
     const cleanup = new Unconfiguration()
     const deleteMps = vi.fn(async () => ({}))
@@ -142,7 +142,7 @@ describe('Issue 2935 release cleanup characterization', () => {
   })
 })
 
-describe('Issue 2935 release activated routing characterization', () => {
+describe('Activated device routing based on TLS state', () => {
   it.each([
     { enabled: false, enforced: false, tunnel: false, mode: 2, target: 'CHANGE_AMT_PASSWORD', count: 2 },
     { enabled: true, enforced: false, tunnel: false, mode: 2, target: 'CHANGE_AMT_PASSWORD', count: 4 },
@@ -194,7 +194,7 @@ describe('Issue 2935 release activated routing characterization', () => {
   })
 })
 
-describe('Issue 2935 further TLS reuse characterization', () => {
+describe('Deferred TLS enrollment when certificate reuse is not approved', () => {
   it('requests deferred TLS provisioning after a successful matching-certificate route', async () => {
     const activation = new Activation()
     const validate = vi.fn(async () => true)
