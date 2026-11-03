@@ -1442,6 +1442,8 @@ export class Activation {
       validateDeviceTlsCert: fromPromise(this.validateDeviceTlsCert.bind(this)),
       validateActivatedTlsIdentity: fromPromise(this.validateActivatedTlsIdentity),
       verifyReusableTlsIdentity: fromPromise(this.verifyReusableTlsIdentity),
+      getReusedTlsTime: fromPromise(this.tls.timeSync.getLowAccuracyTimeSync),
+      setReusedTlsTime: fromPromise(this.tls.timeSync.setHighAccuracyTimeSync),
       fetchMPSRootKey: fromPromise(this.fetchMPSRootKey.bind(this)),
       saveTlsTunnelCerts: fromPromise(this.saveTlsTunnelCerts.bind(this)),
       signalPortSwitch: fromPromise(this.signalPortSwitch.bind(this)),
@@ -2811,11 +2813,54 @@ export class Activation {
           onDone: [
             {
               guard: ({ event }) => event.output === true,
-              target: 'ROUTE_REUSED_TLS'
+              target: 'GET_REUSED_TLS_TIME'
             },
             { target: 'FETCH_POST_PROVISIONING_ROOT_KEY' }
           ],
           onError: { target: 'FETCH_POST_PROVISIONING_ROOT_KEY' }
+        }
+      },
+      GET_REUSED_TLS_TIME: {
+        invoke: {
+          src: 'getReusedTlsTime',
+          input: ({ context }) => context,
+          onDone: [
+            {
+              guard: ({ event }) =>
+                event.output?.Envelope?.Body?.GetLowAccuracyTimeSynch_OUTPUT?.ReturnValue === 0 &&
+                Number.isFinite(event.output?.Envelope?.Body?.GetLowAccuracyTimeSynch_OUTPUT?.Ta0),
+              actions: assign({ message: ({ event }) => event.output }),
+              target: 'SET_REUSED_TLS_TIME'
+            },
+            {
+              actions: assign({ errorMessage: () => 'Failed to read AMT time before TLS reuse' }),
+              target: 'FAILED'
+            }
+          ],
+          onError: {
+            actions: assign({ errorMessage: () => 'Failed to read AMT time before TLS reuse' }),
+            target: 'FAILED'
+          }
+        }
+      },
+      SET_REUSED_TLS_TIME: {
+        invoke: {
+          src: 'setReusedTlsTime',
+          input: ({ context }) => context,
+          onDone: [
+            {
+              guard: ({ event }) => event.output?.Envelope?.Body?.SetHighAccuracyTimeSynch_OUTPUT?.ReturnValue === 0,
+              target: 'ROUTE_REUSED_TLS'
+            },
+            {
+              actions: assign({ errorMessage: () => 'Failed to synchronize AMT time before TLS reuse' }),
+              target: 'FAILED'
+            }
+          ],
+          onError: {
+            actions: assign({ errorMessage: () => 'Failed to synchronize AMT time before TLS reuse' }),
+            target: 'FAILED'
+          }
         }
       },
       ROUTE_REUSED_TLS: {

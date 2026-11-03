@@ -3325,7 +3325,8 @@ describe('TLS reconfiguration reuse optimizations', () => {
     'not-approved',
     'fresh-activation',
     'reset',
-    'reconfiguring'
+    'reconfiguring',
+    'session'
   ])('retains rollover wait for %s', async (condition) => {
     vi.useFakeTimers()
     input.tlsIdentityReuseApproved = true
@@ -3448,7 +3449,7 @@ describe('TLS reconfiguration reuse optimizations', () => {
         context: input,
         states: {
           ...machine.config.states,
-          ROUTE_REUSED_TLS: { type: 'final' },
+          GET_REUSED_TLS_TIME: { type: 'final' },
           FETCH_POST_PROVISIONING_ROOT_KEY: { type: 'final' }
         }
       },
@@ -3458,10 +3459,100 @@ describe('TLS reconfiguration reuse optimizations', () => {
     try {
       actor.start()
       const snapshot = await waitFor(actor, (s) => s.status === 'done', { timeout: 1000 })
-      expect(snapshot.value).toBe(verified === true ? 'ROUTE_REUSED_TLS' : 'FETCH_POST_PROVISIONING_ROOT_KEY')
+      expect(snapshot.value).toBe(verified === true ? 'GET_REUSED_TLS_TIME' : 'FETCH_POST_PROVISIONING_ROOT_KEY')
     } finally {
       actor.stop()
     }
+  })
+
+  it.each([true, false])('synchronizes a drifted clock before completing TLS reuse (CIRA=%s)', async (cira) => {
+    const { createMachine, waitFor } = await import('xstate')
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-03T10:00:00Z'))
+    if (cira) input.profile.ciraConfigName = 'test-cira'
+    responses.push(
+      { Envelope: { Body: { GetLowAccuracyTimeSynch_OUTPUT: { ReturnValue: 0, Ta0: 42 } } } },
+      { Envelope: { Body: { SetHighAccuracyTimeSynch_OUTPUT: { ReturnValue: 0 } } } }
+    )
+    const machine = activation.machine.provide({
+      actors: { verifyReusableTlsIdentity: fromPromise(async () => true) }
+    })
+    const segment = createMachine(
+      {
+        ...machine.config,
+        initial: 'VERIFY_REUSABLE_TLS_IDENTITY',
+        context: input,
+        states: { ...machine.config.states, CIRA: { type: 'final' }, PROVISIONED: { type: 'final' } }
+      },
+      machine.implementations
+    )
+    const actor = createActor(segment)
+    try {
+      actor.start()
+      const snapshot = await waitFor(actor, (state) => state.status === 'done')
+      expect(snapshot.value).toBe(cira ? 'CIRA' : 'PROVISIONED')
+      expect(requests).toHaveLength(2)
+      expect(requests[0]).toContain('GetLowAccuracyTimeSynch')
+      expect(requests[1]).toContain('SetHighAccuracyTimeSynch')
+      expect(requests[1]).toContain('<h:Ta0>42</h:Ta0>')
+      expect(requests[1]).toContain(`<h:Tm1>${Math.round(Date.now() / 1000)}</h:Tm1>`)
+      expect(requests.join('')).not.toContain('GenerateKeyPair')
+      expect(devices[syntheticId].status.Components?.TLS?.Result).toBe('Success')
+    } finally {
+      actor.stop()
+    }
+  })
+
+  it.each([
+    'read-rejected',
+    'read-error',
+    'read-malformed',
+    'write-rejected',
+    'write-error'
+  ])('does not report TLS reuse success when time sync fails (%s)', async (failure) => {
+    const { createMachine, waitFor } = await import('xstate')
+    const read = { Envelope: { Body: { GetLowAccuracyTimeSynch_OUTPUT: { ReturnValue: 0, Ta0: 42 } } } }
+    const write = { Envelope: { Body: { SetHighAccuracyTimeSynch_OUTPUT: { ReturnValue: 0 } } } }
+    if (failure === 'read-error') read.Envelope.Body.GetLowAccuracyTimeSynch_OUTPUT.ReturnValue = 1
+    if (failure === 'read-malformed') (read.Envelope.Body.GetLowAccuracyTimeSynch_OUTPUT as any).Ta0 = undefined
+    if (failure === 'write-error') write.Envelope.Body.SetHighAccuracyTimeSynch_OUTPUT.ReturnValue = 1
+    responses.push(failure === 'read-rejected' ? new Error('read failed') : read)
+    if (!failure.startsWith('read')) responses.push(failure === 'write-rejected' ? new Error('write failed') : write)
+    const machine = activation.machine
+    const segment = createMachine(
+      {
+        ...machine.config,
+        initial: 'GET_REUSED_TLS_TIME',
+        context: input,
+        states: { ...machine.config.states, FAILED: { type: 'final' }, ROUTE_REUSED_TLS: { type: 'final' } }
+      },
+      machine.implementations
+    )
+    const actor = createActor(segment)
+    try {
+      actor.start()
+      const snapshot = await waitFor(actor, (state) => state.status === 'done')
+      expect(snapshot.value).toBe('FAILED')
+      expect(snapshot.context.errorMessage).toContain('AMT time before TLS reuse')
+      expect(devices[syntheticId].status.Components?.TLS).toBeUndefined()
+      expect(requests).toHaveLength(failure.startsWith('read') ? 1 : 2)
+    } finally {
+      actor.stop()
+    }
+  })
+
+  it.each([5, 15])('retains the configured %s-second rollover wait without reuse approval', async (seconds) => {
+    vi.useFakeTimers()
+    Environment.Config.delay_tls_timer = seconds
+    let completed = false
+    const pending = activation.signalPortSwitch({ input }).then(() => {
+      completed = true
+    })
+    await vi.advanceTimersByTimeAsync(seconds * 1000 - 1)
+    expect(completed).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    await pending
+    expect(completed).toBe(true)
   })
 
   it.each([
