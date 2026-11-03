@@ -59,6 +59,11 @@ function script(responses: any[]): void {
 
 async function runSegment(machine: any, initial: string, context: any, terminals: string[]): Promise<any> {
   const states = { ...machine.config.states }
+  // Pin cleanup characterization to the September transition graph after candidate A is implemented.
+  // The release had no pre-read transition in this state; retain its baseline sequence here.
+  if (states.ENUMERATE_TLS_SETTING_DATA != null) {
+    states.ENUMERATE_TLS_SETTING_DATA = { ...states.ENUMERATE_TLS_SETTING_DATA, always: undefined }
+  }
   for (const terminal of terminals) states[terminal] = { type: 'final' }
   const segment = createMachine({ ...machine.config, initial, context, states }, machine.implementations)
   const actor = createActor(segment)

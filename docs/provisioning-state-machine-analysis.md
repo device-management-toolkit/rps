@@ -4,6 +4,11 @@ This analysis addresses [Optimize the RPS Provisioning State Machine](https://gi
 
 Only the release source is used to establish behavior. The local TLS-preservation patch, diagnostics implementation, existing activation cheat sheet, and captured diagnostics-build logs are excluded from the baseline. No provisioning behavior has been changed by this analysis. Predicted request savings below are derived from source transitions, not hardware measurements.
 
+**Current implementation status:** Candidate A is now implemented for hardware
+comparison; see the final section. The source-derived analysis and original
+verification below describe the unoptimized September baseline. Candidate B,
+C, and D remain proposals. Hardware measurements are pending.
+
 ## Findings
 
 Two guard-placement changes have strong source evidence: TLS-enforced cleanup reads TLS settings it never uses, and non-TLS reconfiguration probes TLS state before a routing guard that ignores the result. Start with those separately scoped changes. Evaluate certificate-context reuse and selective feature updates afterward. Do not remove cleanup wholesale based only on the device reporting pre-provisioning mode.
@@ -186,3 +191,43 @@ After adding these characterization scenarios, the full automated checks passed:
 `npm test -- --coverage.reportsDirectory=/tmp/rps-2935-characterization-coverage`
 reported **1,074 tests across 98 files**; lint, formatting, and TypeScript
 `--noEmit` also passed. This does not satisfy the hardware validation gate.
+
+## Candidate A implementation for hardware comparison
+
+The current branch now implements candidate A: an immediate TLS-enforcement
+transition in `ENUMERATE_TLS_SETTING_DATA` bypasses its actor and the following
+Pull actor. Both MPS convergence paths retain their original targets. The
+existing later TLS guard remains as a defensive check. No activation/certificate
+validation, transport selection, or timer has been changed. Candidate B is still
+unimplemented.
+
+The original characterization scenarios explicitly remove this new transition
+from their simulated machine configuration to retain the September baseline.
+Seven sibling regression scenarios test the optimized production transition,
+including both MPS paths, non-TLS routing, and retained MPS/environment failures.
+The baseline reconstruction is limited to this two-line change and must be
+reviewed if future production transitions change.
+
+Hardware comparison:
+
+1. Build the before server from `v2.40.2` (commit
+   `583d61f0cd4ad080cac1baacdff5b1606d9079d3`). Record the actual deployed commit.
+2. Build the after server from this branch's candidate A commit. Keep RPC,
+   profile, dependency versions, network, and timers identical.
+3. Use equivalent initial device states for each first-time activation run.
+   A second invocation on the already activated device measures reconfiguration.
+4. Ensure `tlsEnforced === true` when cleanup runs: AMT 19+ TLS activation or
+   supported legacy activation using RPC `--tls-tunnel` and an established TLS
+   tunnel. Version alone is not the optimization guard.
+5. Capture isolated silly-level logs privately. Compare activation start to
+   successful provisioning, cleanup duration, retry/connection counts, all
+   applicable component results, and CIRA connectivity.
+6. Expect the TLSSettingData Enumerate/Pull pair within cleanup to disappear.
+   Other TLS-setting reads elsewhere in activation may still be required.
+   Non-TLS cleanup should show no change from this optimization.
+
+No hardware reset or provisioning was performed as part of this implementation.
+No duration reduction has yet been measured.
+
+Candidate A checks passed: **1,081 tests across 98 files**, lint, formatting,
+TypeScript `--noEmit`, and `git diff --check`.
