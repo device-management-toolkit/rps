@@ -35,6 +35,16 @@ export interface CertCredentials {
   version?: string
 }
 
+// hostname is reported by the client (rpc): informational only, never use it for access decisions
+export interface SecretMetadata {
+  hostname?: string
+}
+
+// localhost carries no information about the device, so it is never stored as metadata
+export function isUsableHostname(hostname: unknown): hostname is string {
+  return typeof hostname === 'string' && hostname !== '' && hostname.toLowerCase() !== 'localhost'
+}
+
 export interface ISecretManagerService {
   getSecretFromKey: (path: string, key: string) => Promise<string | null>
   // null only when the secret is absent (404); transport/server errors throw.
@@ -43,8 +53,11 @@ export interface ISecretManagerService {
   ) => Promise<DeviceCredentials | WifiCredentials | TLSCredentials | CertCredentials | CiraConfigSecrets | null>
   writeSecretWithObject: (
     path: string,
-    data: DeviceCredentials | WifiCredentials | TLSCredentials | CertCredentials | CiraConfigSecrets
+    data: DeviceCredentials | WifiCredentials | TLSCredentials | CertCredentials | CiraConfigSecrets,
+    metadata?: SecretMetadata
   ) => Promise<any>
+  // never throws
+  writeSecretMetadata?: (path: string, metadata: SecretMetadata) => Promise<void>
   deleteSecretAtPath: (path: string) => Promise<boolean>
   health: () => Promise<any>
 }

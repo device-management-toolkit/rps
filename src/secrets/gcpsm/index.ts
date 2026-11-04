@@ -10,8 +10,10 @@ import {
   type CiraConfigSecrets,
   type DeviceCredentials,
   type ISecretManagerService,
+  type SecretMetadata,
   type TLSCredentials,
-  type WifiCredentials
+  type WifiCredentials,
+  isUsableHostname
 } from '../../interfaces/ISecretManagerService.js'
 import { type ILogger } from '../../interfaces/ILogger.js'
 import { Environment } from '../../utils/Environment.js'
@@ -112,6 +114,16 @@ export function toSecretId(path: string, prefix: string = DEFAULT_SECRET_ID_PREF
   return id
 }
 
+// Secret Manager label values hold at most 63 characters and 128 bytes of lowercase letters,
+// digits, "_" and "-". The cap is applied to code points, so no surrogate pair is split.
+export function toLabelValue(hostname: string): string {
+  const chars = Array.from(hostname.toLowerCase(), (c) => (/[\p{Ll}\p{Lo}\p{N}_-]/u.test(c) ? c : '_')).slice(0, 63)
+  while (Buffer.byteLength(chars.join(''), 'utf8') > 128) {
+    chars.pop()
+  }
+  return chars.join('')
+}
+
 // Endpoints and per-attempt timeouts. Only tests override the defaults.
 export interface GcpsmEndpoints {
   apiUrl: string
@@ -202,7 +214,7 @@ export class GcpSecretManagerService implements ISecretManagerService {
 
   // Calls the Secret Manager REST API. resource is relative to apiUrl and may carry a custom
   // method (":access") or a query string.
-  async call(method: 'GET' | 'POST' | 'DELETE', resource: string, json?: object): Promise<any> {
+  async call(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', resource: string, json?: object): Promise<any> {
     return await this.http(`${this.apiUrl}/${resource}`, {
       method,
       json,
@@ -275,9 +287,10 @@ export class GcpSecretManagerService implements ISecretManagerService {
   // Adds a new version, then destroys the older ones. Transient errors are retried with backoff;
   // permanent ones (PERMISSION_DENIED, an invalid path, ...) fail at once. Like Vault, a failed
   // write returns null; callers must check it.
-  async writeSecretWithObject(path: string, data: SecretData): Promise<any> {
+  async writeSecretWithObject(path: string, data: SecretData, metadata?: SecretMetadata): Promise<any> {
     const { version: _version, ...content } = data as any
     const payload = JSON.stringify(content)
+    let version: number
     try {
       // A retry after a lost response may add a second version; it is older than the one
       // returned here, so destroyOlderVersions removes it.
@@ -294,12 +307,47 @@ export class GcpSecretManagerService implements ISecretManagerService {
         }
       })
       await this.destroyOlderVersions(path, name)
-      const version = versionNumber(name)
+      version = versionNumber(name)
       this.logger.debug(`secret written at path: ${path}, version ${version}`)
-      return { version }
     } catch (error) {
       this.logger.error(`writing secret ${path} failed: ${error?.message}`)
       return null
+    }
+    if (metadata?.hostname) {
+      try {
+        await this.writeSecretMetadata(path, metadata)
+      } catch (error) {
+        this.logger.warn(`writing secret metadata for ${path} failed: ${error?.message}`)
+      }
+    }
+    return { version }
+  }
+
+  // Stores the device hostname as the "hostname" label. Never throws: the label is informational
+  // and must not fail the write of a secret. updateMask=labels replaces the whole label map, so
+  // the existing labels are read first and merged; the etag makes a concurrent label change
+  // fail instead of being overwritten.
+  async writeSecretMetadata(path: string, metadata: SecretMetadata): Promise<void> {
+    if (!isUsableHostname(metadata.hostname)) {
+      this.logger.debug(`skipping secret metadata write for ${path}`)
+      return
+    }
+    try {
+      const secret = await this.call('GET', this.secretName(path))
+      if (typeof secret?.etag !== 'string') {
+        throw new Error('secret has no etag')
+      }
+      const value = toLabelValue(metadata.hostname)
+      if (secret?.labels?.hostname === value) {
+        return
+      }
+      await this.call('PATCH', `${this.secretName(path)}?updateMask=labels`, {
+        labels: { ...(secret?.labels ?? {}), hostname: value },
+        etag: secret.etag
+      })
+      this.logger.debug(`secret metadata written at path: ${path}`)
+    } catch (error) {
+      this.logger.warn(`writing secret metadata for ${path} failed: ${errorStatus(error) ?? ''} ${error?.message}`)
     }
   }
 
