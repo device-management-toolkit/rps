@@ -3,10 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { createHash, generateKeyPairSync, X509Certificate } from 'node:crypto'
-import { asn1 as forgeAsn1, pki } from 'node-forge'
+import { createHash, createPublicKey, generateKeyPairSync, X509Certificate } from 'node:crypto'
+import { asn1 as forgeAsn1 } from 'node-forge'
 import { CertManager, UnsupportedCertificateError } from './certManager.js'
 import { NodeForge } from './NodeForge.js'
+import { issueLeafWithDeviceKey } from './utils/ecLeafCertificate.js'
 import { type AMTKeyUsage, type CertAttributes, type CertificateObject } from './models/index.js'
 import Logger from './Logger.js'
 import { TEST_PFXCERT, EXPECTED_CERT } from './test/helper/certs.js'
@@ -277,8 +278,8 @@ describe('certManager tests', () => {
   describe('EC device keys', () => {
     // AMT 22 generates an ECC-384 key pair and returns its SubjectPublicKeyInfo
     // as AMT_PublicPrivateKeyPair.DERKey. node-forge cannot parse an EC SPKI, so
-    // CertManager embeds it without parsing it. These tests check the resulting
-    // certificate with node:crypto, which can.
+    // the leaf is assembled from node-forge's generic ASN.1 encoders around the key node:crypto validated. These
+    // tests check the resulting certificate with node:crypto.
     const issueEcLeaf = (): { leafCert: any; rootCert: any; spki: Buffer } => {
       const nodeForge = new NodeForge()
       const certManager = new CertManager(new Logger('CertManager'), nodeForge)
@@ -309,86 +310,88 @@ describe('certManager tests', () => {
 
       expect(parsed.publicKey.asymmetricKeyType).toBe('ec')
       expect(parsed.publicKey.asymmetricKeyDetails?.namedCurve).toBe('secp384r1')
-      // The stand-in RSA key used to build the TBSCertificate must not survive.
       expect(parsed.publicKey.export({ type: 'spki', format: 'der' })).toEqual(spki)
     })
 
-    test('signs over the EC key, not over the stand-in', () => {
+    test('signs over the EC key', () => {
       const { leafCert, rootCert } = issueEcLeaf()
       const parsed = new X509Certificate(Buffer.from(leafCert.certbin, 'base64'))
       const root = new X509Certificate(Buffer.from(rootCert.certbin, 'base64'))
 
       // verify() re-digests the TBSCertificate that is actually in the DER. It
-      // only passes if the spliced SPKI was present when the signature was taken.
+      // only passes if the EC SPKI was present when the signature was taken.
       expect(parsed.verify(root.publicKey)).toBe(true)
       expect(parsed.checkIssued(root)).toBe(true)
     })
 
-    test('derives the subjectKeyIdentifier from the EC key', () => {
+    test('derives the subjectKeyIdentifier from the EC point', () => {
       const { leafCert, spki } = issueEcLeaf()
-      // RFC 5280 4.2.1.2 method (1): SHA-1 over the subjectPublicKey BIT STRING
-      // contents. Computed here from the SPKI independently of CertManager.
-      const bitString = forgeAsn1.fromDer(spki.toString('binary')).value[1] as any
-      const expected = createHash('sha1')
-        .update(Buffer.from(bitString.bitStringContents.slice(1), 'binary'))
-        .digest('hex')
-
-      const ski = (leafCert.cert.getExtension('subjectKeyIdentifier') as any).subjectKeyIdentifier
-      expect(ski.toLowerCase()).toBe(expected)
-    })
-
-    test('derives the subjectKeyIdentifier from the raw key bits when they also parse as DER', () => {
-      // forge decodes this BIT STRING into an ASN.1 array because its bytes (after the unused-bits octet) are valid DER
-      const nodeForge = new NodeForge()
-      const certManager = new CertManager(new Logger('CertManager'), nodeForge)
-      const keyBits = Buffer.from('3003020105', 'hex')
-      const spki = forgeAsn1.create(forgeAsn1.Class.UNIVERSAL, forgeAsn1.Type.SEQUENCE, true, [
-        forgeAsn1.create(forgeAsn1.Class.UNIVERSAL, forgeAsn1.Type.SEQUENCE, true, []),
-        forgeAsn1.create(
-          forgeAsn1.Class.UNIVERSAL,
-          forgeAsn1.Type.BITSTRING,
-          false,
-          Buffer.concat([Buffer.from([0]), keyBits]).toString('binary')
-        )
+      // RFC 5280 4.2.1.2 method (1): SHA-1 over the subjectPublicKey BIT STRING contents, which for an uncompressed
+      // EC key is 0x04 || x || y. Derived here from the JWK, independently of the code under test.
+      const jwk = createPublicKey({ key: spki, format: 'der', type: 'spki' }).export({ format: 'jwk' })
+      const point = Buffer.concat([
+        Buffer.from([4]),
+        Buffer.from(jwk.x, 'base64url'),
+        Buffer.from(jwk.y, 'base64url')
       ])
-      const decoded = forgeAsn1.fromDer(forgeAsn1.toDer(spki))
-      expect(Array.isArray((decoded.value as any[])[1].value)).toBe(true)
+      const expected = createHash('sha1').update(point).digest()
 
-      const { privateKey } = pki.rsa.generateKeyPair(512)
-      const cert = pki.createCertificate()
-      certManager.standInForExternalPublicKey(cert, decoded, privateKey)
-
-      const expected = createHash('sha1').update(keyBits).digest('hex')
-      expect((cert as any).generateSubjectKeyIdentifier().toHex()).toBe(expected)
+      const parsed = forgeAsn1.fromDer(Buffer.from(leafCert.certbin, 'base64').toString('binary'))
+      const tbs = (parsed.value as any[])[0].value as any[]
+      const extensions = tbs[tbs.length - 1].value[0].value as any[]
+      const ski = extensions.find((e) => forgeAsn1.derToOid(e.value[0].value) === '2.5.29.14')
+      // extnValue is an OCTET STRING wrapping the OCTET STRING with the identifier
+      const wrapped = forgeAsn1.fromDer(ski.value[ski.value.length - 1].value)
+      expect(Buffer.from(wrapped.value as string, 'binary')).toEqual(expected)
     })
 
-    test('refuses to sign when node-forge puts a different field at the key position', () => {
-      // Simulates a node-forge change: move the public key one position later. Replacing position 6
-      // would then overwrite the wrong field, so signing must fail loudly instead.
-      const nodeForge = new NodeForge()
-      const realGetTBSCertificate = nodeForge.getTBSCertificate.bind(nodeForge)
-      vi.spyOn(nodeForge, 'getTBSCertificate').mockImplementation((cert) => {
-        const tbs = realGetTBSCertificate(cert)
-        const fields = tbs.value as any[]
-        ;[fields[5], fields[6]] = [fields[6], fields[5]]
-        return tbs
-      })
-      const certManager = new CertManager(new Logger('CertManager'), nodeForge)
-      const { publicKey } = generateKeyPairSync('ec', { namedCurve: 'secp384r1' })
-      const spki = (publicKey.export({ type: 'spki', format: 'der' }) as Buffer).toString('base64')
-      const rootAttr: CertAttributes = { CN: 'MPSRoot-f95514', O: 'unknown', C: 'unknown' }
-      const rootCert = certManager.createCertificate(rootAttr)
+    test('does not return a node-forge certificate object for an EC leaf', () => {
+      const { leafCert } = issueEcLeaf()
+      expect(leafCert.cert).toBeNull()
+    })
 
-      expect(() =>
-        certManager.amtCertSignWithCAKey(
-          spki,
-          rootCert.key,
-          { CN: 'AMT-testhost', C: 'None', ST: 'None', O: 'None' },
-          rootAttr,
-          { name: 'extKeyUsage', serverAuth: true } as AMTKeyUsage,
-          rootCert.pem
-        )
-      ).toThrow(/Unexpected certificate layout from node-forge/)
+    test('produces the same bytes as node-forge would for an RSA key', () => {
+      // The EC path assembles the TBSCertificate itself. With an RSA device key node-forge can build the same
+      // certificate, and RSA PKCS#1 v1.5 signatures are deterministic, so the two outputs must be identical.
+      const nodeForge = new NodeForge()
+      const certManager = new CertManager(new Logger('CertManager'), nodeForge)
+      const certAttr: CertAttributes = { CN: 'AMT-testhost', O: 'None', ST: 'None', C: 'None' }
+      const rootCert = certManager.createCertificate(certAttr, null, null, null, null, undefined, 'sha384', 3072)
+      const { publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
+      const spki = publicKey.export({ type: 'spki', format: 'der' }) as Buffer
+      const usage = { name: 'extKeyUsage', serverAuth: true } as AMTKeyUsage
+      const forgeLeaf = certManager.createCertificate(
+        certAttr,
+        rootCert.key,
+        spki.toString('base64'),
+        certAttr,
+        usage,
+        rootCert.pem,
+        'sha384',
+        3072
+      )
+
+      const der = issueLeafWithDeviceKey({
+        cert: forgeLeaf.cert as any,
+        devicePublicKey: { spki, keyIdentifier: Buffer.alloc(0) },
+        caPrivateKeyPem: nodeForge.privateKeyToPem(rootCert.key),
+        hashAlgorithm: 'sha384'
+      })
+
+      expect(der.toString('base64')).toBe(forgeLeaf.certbin)
+    })
+
+    test('rejects a public key that is neither RSA nor EC', () => {
+      const nodeForge = new NodeForge()
+      const certManager = new CertManager(new Logger('CertManager'), nodeForge)
+      const certAttr: CertAttributes = { CN: 'AMT-testhost', O: 'None', ST: 'None', C: 'None' }
+      const rootCert = certManager.createCertificate(certAttr)
+      const { publicKey } = generateKeyPairSync('ed25519')
+      const spki = (publicKey.export({ type: 'spki', format: 'der' }) as Buffer).toString('base64')
+
+      expect(() => certManager.createCertificate(certAttr, rootCert.key, spki, certAttr, null)).toThrow(
+        UnsupportedCertificateError
+      )
     })
 
     test('still parses an RSA device key directly rather than splicing it', () => {

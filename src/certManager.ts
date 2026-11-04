@@ -4,7 +4,7 @@
  **********************************************************************/
 
 import { randomBytes } from 'node:crypto'
-import { type asn1, type md, type pkcs12, type pki } from 'node-forge'
+import { type pkcs12, type pki } from 'node-forge'
 import { type ILogger } from './interfaces/ILogger.js'
 import type Logger from './Logger.js'
 import {
@@ -17,6 +17,12 @@ import {
   type RootCertFingerprint
 } from './models/index.js'
 import { type NodeForge } from './NodeForge.js'
+import {
+  type DevicePublicKey,
+  issueLeafWithDeviceKey,
+  parseDevicePublicKey,
+  UnsupportedDeviceKeyError
+} from './utils/ecLeafCertificate.js'
 
 interface Attribute {
   name?: string
@@ -307,107 +313,23 @@ export class CertManager {
   }
 
   /**
-   * Index of the SubjectPublicKeyInfo inside a forge TBSCertificate.
-   * forge.pki.getTBSCertificate always emits version, serialNumber, signature,
-   * issuer, validity, subject, subjectPublicKeyInfo in that order, with the
-   * version tag unconditional (node-forge lib/x509.js, getTBSCertificate).
-   */
-  private static readonly TBS_SPKI_INDEX = 6
-
-  /**
    * Accept a device public key node-forge cannot represent.
    *
-   * AMT returns AMT_PublicPrivateKeyPair.DERKey as a DER SubjectPublicKeyInfo.
-   * For an RSA key forge parses it directly; for the ECC-384 key AMT 22
-   * generates, publicKeyFromPem throws because forge is RSA-only. It does not
-   * need to understand the key: the leaf is signed with the RPS root's *RSA*
-   * key, and the device key is only ever embedded. So the SPKI is kept as an
-   * opaque ASN.1 node and copied into the certificate byte-for-byte.
+   * AMT returns AMT_PublicPrivateKeyPair.DERKey as a DER SubjectPublicKeyInfo. For an RSA key forge parses it
+   * directly; for the ECC-384 key AMT 22 generates, publicKeyFromPem throws because forge is RSA-only. node:crypto
+   * validates the key instead, and the leaf is built around it in issueLeafWithDeviceKey.
    */
-  parseExternalPublicKey(DERKey: string, forgeError: unknown): asn1.Asn1 {
-    let spki: asn1.Asn1
+  parseExternalPublicKey(DERKey: string, forgeError: unknown): DevicePublicKey {
     try {
-      spki = this.nodeForge.asn1FromDer(Buffer.from(DERKey, 'base64').toString('binary'))
+      const key = parseDevicePublicKey(DERKey)
+      this.logger.debug('AMT public key is not RSA; embedding its SubjectPublicKeyInfo as exported by node:crypto')
+      return key
     } catch (err) {
-      throw new UnsupportedCertificateError(
-        `AMT returned a public key that is neither a parsable RSA key (${String(forgeError)}) ` +
-          `nor valid DER (${String(err)})`
-      )
+      if (err instanceof UnsupportedDeviceKeyError) {
+        throw new UnsupportedCertificateError(`${err.message} (not a parsable RSA key either: ${String(forgeError)})`)
+      }
+      throw err
     }
-    if (!Array.isArray(spki.value) || spki.value.length !== 2) {
-      throw new UnsupportedCertificateError('AMT returned a public key that is not a SubjectPublicKeyInfo')
-    }
-    this.logger.debug('AMT public key is not RSA; embedding its SubjectPublicKeyInfo verbatim')
-    return spki
-  }
-
-  /**
-   * Give forge a stand-in public key so it can build a TBSCertificate and derive
-   * a subjectKeyIdentifier. The CA's own RSA key is used because it is already
-   * to hand and costs nothing to reuse; it never reaches the output, because
-   * signWithExternalPublicKey replaces the SubjectPublicKeyInfo before the
-   * digest is taken.
-   *
-   * The subjectKeyIdentifier would otherwise be computed over the stand-in, so
-   * it is overridden here with the real one: RFC 5280 §4.2.1.2 method (1),
-   * SHA-1 over the subjectPublicKey BIT STRING contents, excluding the
-   * unused-bits octet.
-   */
-  standInForExternalPublicKey(cert: pki.Certificate, spki: asn1.Asn1, caPrivateKey: pki.rsa.PrivateKey): void {
-    cert.publicKey = this.nodeForge.setRsaPublicKey(caPrivateKey.n, caPrivateKey.e)
-    const bitString = (spki.value as asn1.Asn1[])[1]
-    // forge decodes a BIT STRING whose bytes also parse as DER into an array, so read the raw contents it keeps
-    // aside (unused-bits octet first) rather than `value`.
-    const rawContents =
-      (bitString as asn1.Asn1 & { bitStringContents?: string }).bitStringContents ?? (bitString.value as string)
-    const keyBits = rawContents.slice(1)
-    cert.generateSubjectKeyIdentifier = () => {
-      const digest = this.nodeForge.sha1Create()
-      digest.update(keyBits)
-      return digest.digest()
-    }
-  }
-
-  /**
-   * cert.sign() would regenerate the TBSCertificate from cert.publicKey and so
-   * sign over the stand-in key. Do the same steps by hand with the real
-   * SubjectPublicKeyInfo spliced in, and cache the result on the certificate —
-   * forge.pki.certificateToAsn1 prefers a cached cert.tbsCertificate, so both
-   * the PEM and the DER emitted below carry the device's key and a signature
-   * that actually covers it.
-   */
-  signWithExternalPublicKey(
-    cert: pki.Certificate,
-    spki: asn1.Asn1,
-    caPrivateKey: pki.rsa.PrivateKey,
-    digest: md.MessageDigest,
-    hashAlgorithm: 'sha256' | 'sha384'
-  ): void {
-    cert.signatureOid = cert.siginfo.algorithmOid = this.nodeForge.rsaSignatureOid(hashAlgorithm)
-    const tbs = this.nodeForge.getTBSCertificate(cert)
-    const tbsFields = tbs.value as asn1.Asn1[]
-    // getTBSCertificate is an undocumented node-forge function, and TBS_SPKI_INDEX is an assumption about
-    // the order of the fields it emits. Before overwriting that position, confirm it still holds the
-    // stand-in key that standInForExternalPublicKey put on the certificate. If a node-forge upgrade adds,
-    // removes or reorders a field, we would otherwise overwrite the wrong field (for example the subject)
-    // and still sign the result, and the problem would only surface when AMT rejects the certificate.
-    // Failing here makes such a change visible immediately, with a message that names the cause.
-    const standInSpki = this.nodeForge.publicKeyToAsn1(cert.publicKey)
-    const fieldAtSpkiIndex = tbsFields[CertManager.TBS_SPKI_INDEX]
-    if (
-      fieldAtSpkiIndex == null ||
-      this.nodeForge.asn1ToDer(fieldAtSpkiIndex).getBytes() !== this.nodeForge.asn1ToDer(standInSpki).getBytes()
-    ) {
-      throw new UnsupportedCertificateError(
-        `Unexpected certificate layout from node-forge: the stand-in public key is not at TBSCertificate ` +
-          `position ${CertManager.TBS_SPKI_INDEX}. node-forge may have changed; refusing to sign.`
-      )
-    }
-    tbsFields[CertManager.TBS_SPKI_INDEX] = spki
-    cert.tbsCertificate = tbs
-    cert.md = digest
-    digest.update(this.nodeForge.asn1ToDer(tbs).getBytes())
-    cert.signature = caPrivateKey.sign(digest)
   }
 
   amtCertSignWithCAKey(
@@ -461,9 +383,8 @@ export class CertManager {
   ): CertCreationResult {
     // Generate a keypair and create an X.509v3 certificate
     let keys
-    // Set when the AMT-supplied key is not RSA (AMT 22 generates ECC-384). Holds
-    // the device's SubjectPublicKeyInfo, to be spliced in below.
-    let externalSpki: asn1.Asn1 | null = null
+    // Set when the AMT-supplied key is not RSA (AMT 22 generates ECC-384).
+    let externalKey: DevicePublicKey | null = null
     let cert = this.nodeForge.createCert()
     if (!DERKey) {
       keys = this.nodeForge.rsaGenerateKeyPair(rsaKeySize)
@@ -472,7 +393,7 @@ export class CertManager {
       try {
         cert.publicKey = this.nodeForge.publicKeyFromPem(`-----BEGIN PUBLIC KEY-----${DERKey}-----END PUBLIC KEY-----`)
       } catch (err) {
-        externalSpki = this.parseExternalPublicKey(DERKey, err)
+        externalKey = this.parseExternalPublicKey(DERKey, err)
       }
     }
     // RFC 5280: serialNumber must be a positive integer. node-forge reads this as a hex string and
@@ -518,16 +439,33 @@ export class CertManager {
       if (issuerAttributes?.ST) rootattrs.push({ shortName: 'ST', value: issuerAttributes.ST })
       if (issuerAttributes?.O) rootattrs.push({ name: 'organizationName', value: issuerAttributes.O })
       cert.setIssuer(rootattrs)
-      if (externalSpki) {
-        this.standInForExternalPublicKey(cert, externalSpki, caPrivateKey as pki.rsa.PrivateKey)
+      if (externalKey) {
+        // forge would derive the key identifier from cert.publicKey, which an EC key cannot be
+        const keyIdentifier = this.nodeForge.createBuffer(externalKey.keyIdentifier.toString('binary'))
+        cert.generateSubjectKeyIdentifier = () => keyIdentifier
       }
       cert = this.generateLeafCertificate(cert, extKeyUsage)
-      const digest = hashAlgorithm === 'sha384' ? this.nodeForge.sha384Create() : this.nodeForge.sha256Create()
-      if (externalSpki) {
-        this.signWithExternalPublicKey(cert, externalSpki, caPrivateKey as pki.rsa.PrivateKey, digest, hashAlgorithm)
-      } else {
-        cert.sign(caPrivateKey as pki.rsa.PrivateKey, digest)
+      if (externalKey) {
+        const certDer = issueLeafWithDeviceKey({
+          cert,
+          devicePublicKey: externalKey,
+          caPrivateKeyPem: this.nodeForge.privateKeyToPem(caPrivateKey),
+          hashAlgorithm
+        })
+        const certBase64 = certDer.toString('base64')
+        return {
+          h: Math.random(),
+          cert: null,
+          pem: `-----BEGIN CERTIFICATE-----${certBase64}-----END CERTIFICATE-----`,
+          certbin: certBase64,
+          privateKey: undefined as any,
+          privateKeyBin: null,
+          checked: false,
+          key: null
+        }
       }
+      const digest = hashAlgorithm === 'sha384' ? this.nodeForge.sha384Create() : this.nodeForge.sha256Create()
+      cert.sign(caPrivateKey as pki.rsa.PrivateKey, digest)
     } else {
       // Use our own attributes
       cert.setIssuer(attrs)
