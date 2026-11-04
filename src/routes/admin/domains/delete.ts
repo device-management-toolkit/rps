@@ -11,7 +11,7 @@ import { type Request, type Response } from 'express'
 import { RPSError } from '../../../utils/RPSError.js'
 import handleError from '../../../utils/handleError.js'
 
-export async function deleteDomain(req: Request, res: Response): Promise<void> {
+export async function deleteDomain(req: Request<{ domainName: string }>, res: Response): Promise<void> {
   const log = new Logger('deleteDomain')
   const { domainName } = req.params
   try {

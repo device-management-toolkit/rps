@@ -10,7 +10,7 @@ import { MqttProvider } from '../../../utils/MqttProvider.js'
 import handleError from '../../../utils/handleError.js'
 import { RPSError } from '../../../utils/RPSError.js'
 
-export async function getIEEE8021xProfile(req: Request, res: Response): Promise<void> {
+export async function getIEEE8021xProfile(req: Request<{ profileName: string }>, res: Response): Promise<void> {
   const log = new Logger('getIeee8021xProfile')
   const { profileName } = req.params
   try {

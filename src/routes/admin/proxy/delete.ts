@@ -10,7 +10,7 @@ import handleError from '../../../utils/handleError.js'
 import { RPSError } from '../../../utils/RPSError.js'
 import { API_UNEXPECTED_EXCEPTION, NOT_FOUND_EXCEPTION, NOT_FOUND_MESSAGE } from '../../../utils/constants.js'
 
-export async function deleteProxyProfile(req: Request, res: Response): Promise<void> {
+export async function deleteProxyProfile(req: Request<{ name: string }>, res: Response): Promise<void> {
   const { name } = req.params
   const tenantId = req.tenantId || ''
   const log = new Logger('deleteProxyProfile')

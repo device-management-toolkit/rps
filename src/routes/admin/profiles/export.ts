@@ -13,7 +13,7 @@ import { Environment } from '../../../utils/Environment.js'
 // Constants for export configuration
 const DEFAULT_USER_CONSENT = 'None'
 
-export async function exportProfile(req: Request, res: Response): Promise<void> {
+export async function exportProfile(req: Request<{ profileName: string }>, res: Response): Promise<void> {
   const log = new Logger('exportProfile')
   const { profileName } = req.params
   const { domainName } = req.query as { domainName: string }

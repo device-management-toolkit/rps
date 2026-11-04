@@ -11,7 +11,7 @@ import { type Request, type Response } from 'express'
 import handleError from '../../../utils/handleError.js'
 import { RPSError } from '../../../utils/RPSError.js'
 
-export async function getProfile(req: Request, res: Response): Promise<void> {
+export async function getProfile(req: Request<{ profileName: string }>, res: Response): Promise<void> {
   const log = new Logger('getProfile')
   const { profileName } = req.params
   try {

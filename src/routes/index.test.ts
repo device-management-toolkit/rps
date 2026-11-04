@@ -3,33 +3,20 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import express from 'express'
 import router from './index.js'
+import { request } from '../test/helper/http.js'
 
-describe('Check index from admin', () => {
-  const routes: any = [
-    // { path: '/', method: 'get' }
-  ]
+vi.mock('./admin/index.js', async () => {
+  const { Router } = await import('express')
+  return { default: Router().get('/', (_req, res) => res.json({ mounted: 'admin' })) }
+})
 
-  it('should have routes', () => {
-    routes.forEach((route) => {
-      const match = router.stack.find((s) => s.route?.path === route.path && s.route?.methods[route.method])
-      expect(match).toBeTruthy()
-    })
-  })
-  const routers = [
-    { path: '/admin', method: 'use' }
-  ]
-
-  it('should have routers', () => {
-    routers.forEach((route) => {
-      const match = router.stack.find((s) => {
-        const isPathMatched = (s.regexp as RegExp).exec(route.path)
-        if (isPathMatched != null) {
-          return isPathMatched.length > 0 && s.path == null
-        }
-        return false
-      })
-      expect(match).toBeTruthy()
+describe('API router', () => {
+  it('mounts the admin router under /admin', async () => {
+    expect(await request(express().use('/api/v1', router), '/api/v1/admin')).toEqual({
+      status: 200,
+      body: { mounted: 'admin' }
     })
   })
 })

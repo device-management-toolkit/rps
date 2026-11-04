@@ -28,8 +28,9 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url))
 const log = new Logger('Index')
 
 const app = express()
+app.set('query parser', 'extended')
 app.use(cors())
-app.use(express.urlencoded())
+app.use(express.urlencoded({ extended: true }))
 app.use(express.json())
 
 export const waitForDB = async function (db: IDB): Promise<void> {

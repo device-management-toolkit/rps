@@ -10,7 +10,7 @@ import { MqttProvider } from '../../../utils/MqttProvider.js'
 import handleError from '../../../utils/handleError.js'
 import { RPSError } from '../../../utils/RPSError.js'
 
-export async function getWirelessProfile(req: Request, res: Response): Promise<void> {
+export async function getWirelessProfile(req: Request<{ profileName: string }>, res: Response): Promise<void> {
   const log = new Logger('getWirelessProfile')
   const { profileName } = req.params
   try {
