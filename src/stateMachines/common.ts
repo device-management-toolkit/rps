@@ -4,6 +4,7 @@
  **********************************************************************/
 
 import ClientResponseMsg from '../utils/ClientResponseMsg.js'
+import { getTlsTrustMaterial } from './tlsReuse.js'
 import { Environment } from '../utils/Environment.js'
 import { devices } from '../devices.js'
 import {
@@ -130,16 +131,16 @@ const invokeWsmanCallViaTLSTunnel = async <T>(context: any, message: string): Pr
     //     digest auth via the admin password is the trust boundary. Skip verification.
     //   - After RPS has generated/uploaded a TLS cert: issuedCertPEM pins the exact
     //     cert. If an MPS root CA was used instead, mpsRootCertPEM wins.
-    const hasIssuedCert = clientObj.tls?.issuedCertPEM != null && clientObj.tls.issuedCertPEM !== ''
-    const caCert: string | undefined = clientObj.tls?.mpsRootCertPEM ?? clientObj.tls?.issuedCertPEM
+    const { hasManagedIdentity, caCert } = getTlsTrustMaterial(clientObj.tls)
     const hasTrustAnchor = caCert != null && caCert !== ''
 
     // Phase A (post-CCM transition): CCM complete but issued cert not yet installed on AMT.
     // If no trust anchor is available, skip verification as before.
     // If MPS root trust anchor exists, enforce verification and allow temporary
     // self-signed fallback for AMT's brief post-CCM transition period.
-    const inPostCcmTransitionNoAnchor = clientObj.activationStatus === true && !hasIssuedCert && !hasTrustAnchor
-    const inPostCcmTransitionSelfSignedPhase = clientObj.activationStatus === true && !hasIssuedCert && hasTrustAnchor
+    const inPostCcmTransitionNoAnchor = clientObj.activationStatus === true && !hasManagedIdentity && !hasTrustAnchor
+    const inPostCcmTransitionSelfSignedPhase =
+      clientObj.activationStatus === true && !hasManagedIdentity && hasTrustAnchor
     const skipVerify = context.skipTlsVerification === true || inPostCcmTransitionNoAnchor
     const rejectUnauthorized = skipVerify ? false : Environment.Config.amt_post_tls_reject === true
 
@@ -170,6 +171,9 @@ const invokeWsmanCallViaTLSTunnel = async <T>(context: any, message: string): Pr
     clientObj.tlsTunnelSessionId = clientObj.tlsTunnelManager.getSessionId()
     clientObj.tlsTunnelNeedsReset = false
 
+    invokeWsmanLogger.debug(
+      `TLS tunnel connecting: port=${clientObj.connectionParams?.port ?? '?'}, session=${clientObj.tlsTunnelSessionId}, verify=${rejectUnauthorized}`
+    )
     try {
       await clientObj.tlsTunnelManager.connect()
       clientObj.tlsTunnelManager.onData((data: Buffer) => {
@@ -327,9 +331,13 @@ const invokeWsmanCall = async <T>(context: any, maxRetries = 0, timeoutMs?: numb
       ])
       return result as any
     } catch (error) {
-      // On TLS errors, clean up tunnel so next operation gets a fresh one.
-      // Exception: 401 is a normal digest auth challenge — tunnel is fine, just needs credentials.
-      if (clientObj?.tlsEnforced === true && (error as any)?.statusCode !== 401) {
+      // On TLS transport errors, clean up tunnel so next operation gets a fresh one.
+      // A parsed HTTP response of any status (401 challenge, 400 for a missing object, ...)
+      // proves the tunnel works: the error belongs to the state machine, not the transport.
+      // AMT responses are rejected as the raw parsed message; transport failures are Error
+      // instances (which also carry a synthetic statusCode, so that field alone cannot decide).
+      const isHttpResponse = !(error instanceof Error) && typeof (error as any)?.statusCode === 'number'
+      if (clientObj?.tlsEnforced === true && !isHttpResponse) {
         invokeWsmanLogger.warn(`Error during TLS operation, marking tunnel for reset`)
         if (clientObj.tlsTunnelManager != null) {
           clientObj.tlsTunnelManager.close()

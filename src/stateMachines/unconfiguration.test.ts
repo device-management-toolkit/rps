@@ -14,7 +14,7 @@ import {
 } from './unconfiguration.js'
 import { config } from '../test/helper/Config.js'
 import { HttpHandler } from '../HttpHandler.js'
-import { type MachineImplementationsSimplified, createActor, fromPromise } from 'xstate'
+import { type MachineImplementationsSimplified, createActor, createMachine, fromPromise, waitFor } from 'xstate'
 import { AMT, CIM, IPS } from '@device-management-toolkit/wsman-messages'
 
 import { HttpResponseError, coalesceMessage, isDigestRealmValid } from './common.js'
@@ -1175,5 +1175,100 @@ describe('Unconfiguration State Machine', () => {
     unconfigContext.ips = undefined
     await unconfiguration.deleteHTTPProxyAccessPoint({ input: unconfigContext })
     expect(loggerSpy).toHaveBeenCalled()
+  })
+})
+
+describe('TLS cleanup read optimization', () => {
+  afterEach(() => {
+    delete devices[clientId]
+  })
+
+  it.each([
+    { enforced: true, mps: false },
+    { enforced: true, mps: true },
+    { enforced: false, mps: false },
+    { enforced: false, mps: true }
+  ])('retains cleanup routing for $enforced/$mps', async ({ enforced, mps }) => {
+    devices[clientId] = { tlsEnforced: enforced, status: {} } as any
+    const enumerate = vi.fn(async () => ({}))
+    const pull = vi.fn(async () => ({
+      Envelope: { Body: { PullResponse: { Items: { AMT_TLSSettingData: [{ Enabled: true }] } } } }
+    }))
+    const removeMps = vi.fn(async () => ({}))
+    const getEnvironment = vi.fn(async () => ({
+      Envelope: { Body: { AMT_EnvironmentDetectionSettingData: { DetectionStrings: ['example'] } } }
+    }))
+    const clearEnvironment = vi.fn(async () => ({}))
+    const machine = new Unconfiguration().machine.provide({
+      actors: {
+        enumerateTLSSettingData: fromPromise(enumerate),
+        pullTLSSettingData: fromPromise(pull),
+        deleteRemoteAccessService: fromPromise(removeMps),
+        getEnvironmentDetectionSettings: fromPromise(getEnvironment),
+        clearEnvironmentDetectionSettings: fromPromise(clearEnvironment)
+      }
+    })
+    const segment = createMachine(
+      {
+        ...machine.config,
+        initial: 'PULL_MANAGEMENT_PRESENCE_REMOTE_SAP_RESPONSE',
+        context: {
+          clientId,
+          message: {
+            Envelope: { Body: { PullResponse: { Items: mps ? { AMT_ManagementPresenceRemoteSAP: {} } : {} } } }
+          }
+        } as any,
+        states: { ...machine.config.states, DISABLE_TLS_SETTING_DATA: { type: 'final' } }
+      },
+      machine.implementations
+    )
+    const actor = createActor(segment)
+    try {
+      actor.start()
+      const snapshot = await waitFor(actor, (snapshot) => snapshot.status === 'done', { timeout: 1000 })
+      expect(snapshot.value).toBe(enforced ? 'SUCCESS' : 'DISABLE_TLS_SETTING_DATA')
+      expect(enumerate).toHaveBeenCalledTimes(enforced ? 0 : 1)
+      expect(pull).toHaveBeenCalledTimes(enforced ? 0 : 1)
+      expect(removeMps).toHaveBeenCalledTimes(mps ? 1 : 0)
+      expect(getEnvironment).toHaveBeenCalledTimes(enforced ? 1 : 0)
+      expect(clearEnvironment).toHaveBeenCalledTimes(enforced ? 1 : 0)
+    } finally {
+      actor.stop()
+    }
+  })
+
+  it.each([
+    'deleteRemoteAccessService',
+    'getEnvironmentDetectionSettings',
+    'clearEnvironmentDetectionSettings'
+  ])('retains failure from %s', async (failedActor) => {
+    devices[clientId] = { tlsEnforced: true, status: {} } as any
+    const actors: any = {
+      deleteRemoteAccessService: fromPromise(async () => ({})),
+      getEnvironmentDetectionSettings: fromPromise(async () => ({
+        Envelope: { Body: { AMT_EnvironmentDetectionSettingData: { DetectionStrings: ['example'] } } }
+      })),
+      clearEnvironmentDetectionSettings: fromPromise(async () => ({}))
+    }
+    actors[failedActor] = fromPromise(async () => {
+      throw new Error('simulated cleanup failure')
+    })
+    const machine = new Unconfiguration().machine.provide({ actors })
+    const segment = createMachine(
+      {
+        ...machine.config,
+        initial: 'DELETE_MANAGEMENT_PRESENCE_REMOTE_SAP',
+        context: { clientId } as any
+      },
+      machine.implementations
+    )
+    const actor = createActor(segment)
+    try {
+      actor.start()
+      const snapshot = await waitFor(actor, (snapshot) => snapshot.status === 'done', { timeout: 1000 })
+      expect(snapshot.value).toBe('FAILURE')
+    } finally {
+      actor.stop()
+    }
   })
 })
