@@ -3299,6 +3299,34 @@ describe('TLS reconfiguration reuse optimizations', () => {
     input.tlsProbeSnapshot = (await activation.checkAmtTlsState({ input })).snapshot
   }
 
+  it('reuses the initial tunnel identity without a pre-seeded session ID', async () => {
+    const device = devices[syntheticId]
+    device.tlsTunnelManager = undefined
+    device.tlsTunnelSessionId = undefined
+    input.tlsIdentityValidatedSessionId = undefined
+    vi.spyOn(TLSTunnelManager.prototype, 'connect').mockResolvedValue(undefined)
+    vi.spyOn(TLSTunnelManager.prototype, 'onData').mockImplementation(() => {})
+
+    await activation.initializeTLSTunnel({ input })
+    const sessionId = device.tlsTunnelManager!.getSessionId()
+    expect(device.tlsTunnelSessionId).toBe(sessionId)
+    await probe()
+    expect(input.tlsProbeSnapshot?.sessionId).toBe(sessionId)
+    queueCertificates()
+    expect((await activation.validateActivatedTlsIdentity({ input })).reuseApproved).toBe(true)
+    expect(requests).toHaveLength(6)
+  })
+
+  it('clears the initial tunnel session ID when connection fails', async () => {
+    const device = devices[syntheticId]
+    device.tlsTunnelManager = undefined
+    device.tlsTunnelSessionId = undefined
+    vi.spyOn(TLSTunnelManager.prototype, 'connect').mockRejectedValue(new Error('handshake failed'))
+    await expect(activation.initializeTLSTunnel({ input })).rejects.toThrow('handshake failed')
+    expect(device.tlsTunnelManager).toBeUndefined()
+    expect(device.tlsTunnelSessionId).toBeUndefined()
+  })
+
   it('reuses credential reads while retaining live certificate and current-root verification', async () => {
     await probe()
     queueCertificates()

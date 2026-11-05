@@ -39,6 +39,33 @@ describe('TLSTunnelManager.injectData before the handshake completes', () => {
     expect(m.pendingData).toHaveLength(3)
   })
 
+  it.each([
+    1,
+    2,
+    3,
+    4,
+    5
+  ])('keeps every byte when the initial handshake header is split at byte %i', (split) => {
+    const m = manager()
+    const hello = record(0x16, 'hello')
+    const encrypted = record(0x17, 'finished')
+    m.injectData(hello.subarray(0, split))
+    m.injectData(hello.subarray(split))
+    m.injectData(encrypted)
+    expect(Buffer.concat(m.pendingData)).toEqual(Buffer.concat([hello, encrypted]))
+  })
+
+  it('drops a complete stale record before accepting a fragmented handshake', () => {
+    const m = manager()
+    const hello = record(0x16, 'hello')
+    const encrypted = record(0x17, 'finished')
+    m.injectData(record(0x17, 'stale'))
+    m.injectData(hello.subarray(0, 1))
+    m.injectData(hello.subarray(1))
+    m.injectData(encrypted)
+    expect(Buffer.concat(m.pendingData)).toEqual(Buffer.concat([hello, encrypted]))
+  })
+
   it('keeps a chunk that begins in the middle of a record once the handshake has started', () => {
     const m = manager()
     m.injectData(record(0x16, 'hello'))

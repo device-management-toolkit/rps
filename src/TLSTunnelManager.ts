@@ -154,10 +154,15 @@ export class TLSTunnelManager {
       return
     }
 
+    // A streamed handshake header may arrive one byte at a time. Recognize its
+    // initial content-type byte before requiring enough bytes to extract certificates.
+    if (!this.connected && data.length > 0 && data[0] === 0x16) {
+      this.serverHandshakeSeen = true
+    }
+
     // Capture server certificates from TLS Handshake Certificate message (type 0x0b)
     // before OpenSSL processes them, so we can diagnose verification failures
     if (!this.connected && contentType === 0x16 && data.length > 5) {
-      this.serverHandshakeSeen = true
       this.extractHandshakeCerts(data)
     }
 

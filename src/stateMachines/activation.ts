@@ -324,6 +324,7 @@ export class Activation {
         !isAlreadyActivated,
         Environment.Config.amt_legacy_tls_compatibility === true
       )
+      clientObj.tlsTunnelSessionId = clientObj.tlsTunnelManager.getSessionId()
 
       // Connect (initiates TLS handshake)
       await clientObj.tlsTunnelManager.connect()
@@ -339,6 +340,7 @@ export class Activation {
       const errMsg = err instanceof globalThis.Error ? err.message : String(err)
       this.logger.error(`Failed to establish TLS tunnel for device ${clientObj.uuid}: ${errMsg}`)
       clientObj.tlsTunnelManager = undefined
+      clientObj.tlsTunnelSessionId = undefined
       throw err
     }
   }
