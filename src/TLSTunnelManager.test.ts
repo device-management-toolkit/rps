@@ -4,80 +4,43 @@
  **********************************************************************/
 
 import crypto from 'node:crypto'
-import forge from 'node-forge'
-import { vi } from 'vitest'
-import { TLSTunnelManager, isIntelDiceSubCASubject } from './TLSTunnelManager.js'
-import { AMT_ODCA_ROOT_CERTS } from './certs/amt-odca.js'
-import Logger from './Logger.js'
+import { describe, expect, it } from 'vitest'
+import { getTrustedAmtRoots } from './TLSTunnelManager.js'
+import { DEBUG_DEVICE_TOP_PEM, PUBLISHED_DICE_SUBCA_PEM } from './test/helper/diceCerts.js'
 
-const DICE_SUBJECT = 'O=Intel Corporation\norganizationIdentifier=PEN:343\nCN=Intel DICE SubCA CAID:343_1'
+const DEBUG_ROOT_FP = '24:F8:14:D4:F9:C1:8A:0A:B7:95:D4:49:71:18:30:DD:D2:C9:55:6F:D5:28:93:8D:A2:BD:FE:2C:C6:CC:41:9C'
+const RELEASE_ROOT_FP =
+  '80:31:CD:5E:07:D4:9B:E7:F3:08:90:0E:F1:77:51:45:CD:E8:D2:64:D3:85:45:00:38:F2:E8:29:04:D5:C9:07'
 
-/** A self-signed certificate with the given subject attributes, as DER. */
-const selfSignedDer = (attributes: forge.pki.CertificateField[]): Buffer => {
-  const keys = forge.pki.rsa.generateKeyPair(1024)
-  const cert = forge.pki.createCertificate()
-  cert.publicKey = keys.publicKey
-  cert.serialNumber = '01'
-  cert.validity.notBefore = new Date()
-  cert.validity.notAfter = new Date(Date.now() + 86400000)
-  cert.setSubject(attributes)
-  cert.setIssuer(attributes)
-  cert.sign(keys.privateKey)
-  return Buffer.from(forge.asn1.toDer(forge.pki.certificateToAsn1(cert)).getBytes(), 'binary')
+/** Fingerprints of the trusted roots that sign `top`. */
+function signers(roots: ReturnType<typeof getTrustedAmtRoots>, top: crypto.X509Certificate): string[] {
+  return roots.filter(({ cert }) => top.verify(cert.publicKey)).map(({ cert }) => cert.fingerprint256)
 }
 
-const verify = (chainDer: Buffer[]): { ok: boolean; reason: string } => {
-  const manager: any = new TLSTunnelManager({ on: vi.fn(), send: vi.fn() } as any, 'client', true)
-  manager.peerChainDer = chainDer
-  return manager.verifyAmtChainAgainstODCA({})
-}
+describe('getTrustedAmtRoots', () => {
+  const productionTop = new crypto.X509Certificate(PUBLISHED_DICE_SUBCA_PEM)
+  const debugTop = new crypto.X509Certificate(DEBUG_DEVICE_TOP_PEM)
 
-describe('isIntelDiceSubCASubject', () => {
-  it('identifies the Intel DICE SubCA subject', () => {
-    expect(isIntelDiceSubCASubject(DICE_SUBJECT)).toBe(true)
+  it('trusts only release roots when the debug root is not enabled', () => {
+    const roots = getTrustedAmtRoots(false)
+    expect(roots.some(({ debug }) => debug)).toBe(false)
+    const fps = roots.map(({ cert }) => cert.fingerprint256)
+    expect(fps).toContain(RELEASE_ROOT_FP)
+    expect(fps).not.toContain(DEBUG_ROOT_FP)
   })
 
-  it.each([
-    'O=Example Corporation\norganizationIdentifier=PEN:343\nCN=Intel DICE SubCA CAID:343_1',
-    'O=Intel Corporation\nCN=Intel DICE SubCA CAID:343_1',
-    'O=Intel Corporation\norganizationIdentifier=PEN:343\nCN=Example SubCA'
-  ])('rejects a subject that is not the Intel DICE SubCA: %s', (subject) => {
-    expect(isIntelDiceSubCASubject(subject)).toBe(false)
-  })
-})
-
-describe('AMT chain verification', () => {
-  it('warns and accepts an Intel DICE chain', () => {
-    const der = selfSignedDer([
-      { name: 'organizationName', value: 'Intel Corporation' },
-      { type: '2.5.4.97', value: 'PEN:343' },
-      { name: 'commonName', value: 'Intel DICE SubCA CAID:343_1' }
-    ])
-    expect(new crypto.X509Certificate(der).subject).toBe(DICE_SUBJECT)
-    const warnSpy = vi.spyOn(Logger.prototype, 'warn')
-
-    const result = verify([der])
-
-    expect(result.ok).toBe(true)
-    expect(result.reason).toBe('Intel DICE chain accepted without validation')
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('SECURITY WARNING: Intel DICE certificate chain'))
+  it('accepts a production device chain through the release root in either setting', () => {
+    expect(signers(getTrustedAmtRoots(false), productionTop)).toEqual([RELEASE_ROOT_FP])
+    expect(signers(getTrustedAmtRoots(true), productionTop)).toEqual([RELEASE_ROOT_FP])
   })
 
-  it('still rejects a chain that does not end at an ODCA root', () => {
-    const der = selfSignedDer([{ name: 'commonName', value: 'Not Intel' }])
-
-    const result = verify([der])
-
-    expect(result.ok).toBe(false)
-    expect(result.reason).toContain('does not terminate at any trusted ODCA root')
+  it('refuses a debug-signed device chain when the debug root is not enabled', () => {
+    expect(signers(getTrustedAmtRoots(false), debugTop)).toEqual([])
   })
 
-  it('still accepts a chain that ends at an ODCA root', () => {
-    const root = new crypto.X509Certificate(AMT_ODCA_ROOT_CERTS[0])
-
-    const result = verify([root.raw])
-
-    expect(result.ok).toBe(true)
-    expect(result.reason).toContain('trusted ODCA root')
+  it('accepts a debug-signed device chain only through the debug root when enabled', () => {
+    const roots = getTrustedAmtRoots(true)
+    expect(roots.filter(({ debug }) => debug).map(({ cert }) => cert.fingerprint256)).toEqual([DEBUG_ROOT_FP])
+    expect(signers(roots, debugTop)).toEqual([DEBUG_ROOT_FP])
   })
 })

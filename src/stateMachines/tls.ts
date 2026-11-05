@@ -62,7 +62,21 @@ export class TLS {
     return await invokeWsmanCall(input, 2)
   }
 
-  addCertificate = async ({ input }: { input: { context: TLSContext; event: TLSEvent } }): Promise<any> => {
+  addCertificate = async (args: { input: { context: TLSContext; event: TLSEvent } }): Promise<any> => {
+    try {
+      return await this.buildAndAddCertificate(args)
+    } catch (err) {
+      // The state machine reports only "Failed to add certificate", so record the cause here.
+      this.logger.error(`Failed to build or add the device TLS certificate: ${(err as globalThis.Error).message}`)
+      throw err
+    }
+  }
+
+  private readonly buildAndAddCertificate = async ({
+    input
+  }: {
+    input: { context: TLSContext; event: TLSEvent }
+  }): Promise<any> => {
     const clientObj = devices[input.context.clientId]
     let cert: string
     if (
