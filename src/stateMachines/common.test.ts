@@ -12,6 +12,10 @@ import { GATEWAY_TIMEOUT_ERROR, UNEXPECTED_PARSE_ERROR, EA_TIMEOUT_ERROR } from 
 import { randomUUID } from 'node:crypto'
 import { WSEnterpriseAssistantListener, enterpriseAssistantSocket, promises } from '../WSEnterpriseAssistantListener.js'
 import { config } from '../test/helper/Config.js'
+import { performance } from 'node:perf_hooks'
+import { TLSTunnelManager } from '../TLSTunnelManager.js'
+import * as diagnostics from '../diagnostics/index.js'
+import { ActivationDiagnostics } from '../diagnostics/ActivationDiagnostics.js'
 
 import { vi, type MockInstance } from 'vitest'
 import {
@@ -112,6 +116,42 @@ describe('Common', () => {
     devices[clientId].resolve(expected)
     await expect(wsmanPromise).resolves.toEqual(expected)
   })
+
+  it('records TLS request duration from send, excluding tunnel establishment', async () => {
+    let now = 0
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now)
+    const attempt = new ActivationDiagnostics({
+      tenantId: '',
+      deviceId: clientId,
+      amtVersion: '21.0',
+      startingMode: 0,
+      profileName: 'acm',
+      tlsEnforced: true,
+      settings: {}
+    })
+    const lookup = vi.spyOn(diagnostics, 'diagnosticsFor').mockReturnValue(attempt)
+    const connect = vi.spyOn(TLSTunnelManager.prototype, 'connect').mockImplementation(async () => {
+      now += 5000
+    })
+    const send = vi.spyOn(TLSTunnelManager.prototype, 'send').mockImplementation(async () => {
+      now += 123
+      attempt.response(200)
+      devices[clientId].resolve('done')
+    })
+    devices[clientId].tlsEnforced = true
+    try {
+      await expect(invokeWsmanCall(context)).resolves.toBe('done')
+      expect(attempt.snapshot()).toMatchObject({ requests: [{ durationMs: 123, statusCode: 200, outcome: 'success' }] })
+      expect(attempt.summary.wsmanRequestDurationMs).toBe(5123)
+    } finally {
+      devices[clientId].tlsTunnelManager?.close()
+      send.mockRestore()
+      connect.mockRestore()
+      lookup.mockRestore()
+      clock.mockRestore()
+    }
+  })
+
   it('should successfully resolve after one UNEXPECTED_PARSE_ERROR', async () => {
     const expected = '123'
     let invokeWsmanCallInternalCallCount = 0

@@ -37,6 +37,11 @@ config.amt_tls_tunnel_persistent = config.amt_tls_tunnel_persistent ?? true
 // MPS devices table must be removed (rpc-go deactivation or the REST API) before it can be
 // re-provisioned. Keeps the MPS devices table free of orphaned records. Off by default.
 config.prevent_orphaned_devices = config.prevent_orphaned_devices ?? false
+config.diagnostics_enabled = config.diagnostics_enabled === true
+const retentionDays = Number(config.diagnostics_retention_days ?? 7)
+config.diagnostics_retention_days = Number.isFinite(retentionDays)
+  ? Math.min(365, Math.max(1, Math.floor(retentionDays)))
+  : 7
 log.silly(`config: ${JSON.stringify(config, null, 2)}`)
 
 const Environment = {

@@ -24,6 +24,7 @@ import { type ComponentResult, type ComponentResults } from '../models/RCS.Confi
 import pkg, { type HttpZResponseModel } from 'http-z'
 import { parseChunkedMessage } from '../utils/parseChunkedMessage.js'
 import { TLSTunnelManager } from '../TLSTunnelManager.js'
+import { diagnosticsFor } from '../diagnostics/index.js'
 
 const invokeWsmanLogger = new Logger('invokeWsmanCall')
 const progressLogger = new Logger('sendProgressToDevice')
@@ -82,11 +83,15 @@ const invokeWsmanCallInternal = async <T>(context: any): Promise<T> => {
   const resourceMatch = xmlMessage?.match(/<w:ResourceURI>([^<]+)<\/w:ResourceURI>/)
   const action = actionMatch ? actionMatch[1].split('/').pop() : 'unknown'
   const resource = resourceMatch ? resourceMatch[1].split('/').pop() : 'unknown'
+  diagnosticsFor(clientId)?.event('wsman_request', { action, resource })
   invokeWsmanLogger.debug(`WSMAN REQUEST: ${action} on ${resource}`)
   invokeWsmanLogger.debug(`WSMAN REQUEST XML:\n${xmlMessage}`)
 
   if (clientObj.tlsEnforced === true) {
-    return await invokeWsmanCallViaTLSTunnel<T>(context, message)
+    return await invokeWsmanCallViaTLSTunnel<T>(
+      { ...context, diagnosticsAction: action, diagnosticsResource: resource },
+      message
+    )
   }
 
   // Standard WebSocket JSON path
@@ -97,6 +102,7 @@ const invokeWsmanCallInternal = async <T>(context: any): Promise<T> => {
     clientObj.reject = reject
   })
   if (clientObj.ClientSocket) {
+    diagnosticsFor(clientId)?.beginRequest(action, resource)
     clientObj.ClientSocket.send(clientMsgStr)
     return await clientObj.pendingPromise
   }
@@ -193,6 +199,10 @@ const invokeWsmanCallViaTLSTunnel = async <T>(context: any, message: string): Pr
   })
 
   try {
+    diagnosticsFor(clientId)?.beginRequest(
+      context.diagnosticsAction ?? 'unknown',
+      context.diagnosticsResource ?? 'unknown'
+    )
     await clientObj.tlsTunnelManager!.send(Buffer.from(message))
   } catch (err) {
     invokeWsmanLogger.error(`TLS send error: ${(err as Error).message}`)
@@ -208,7 +218,7 @@ const invokeWsmanCallViaTLSTunnel = async <T>(context: any, message: string): Pr
   // the TCP socket after each response. Close the tunnel here so the next call rebuilds.
   if (Environment.Config.amt_tls_tunnel_persistent === false) {
     invokeWsmanLogger.debug('Closing TLS tunnel after response (amt_tls_tunnel_persistent=false)')
-    clientObj.tlsTunnelManager?.close()
+    clientObj.tlsTunnelManager?.close('persistence_disabled')
     clientObj.tlsTunnelManager = undefined
     clientObj.tlsTunnelSessionId = undefined
     clientObj.tlsTunnelNeedsReset = true
@@ -267,6 +277,7 @@ export const processTLSTunnelResponse = (clientId: string, data: Buffer, httpHan
     const { parse } = pkg
     const httpRsp = parse(responseData.toString()) as HttpZResponseModel
     const statusCode = httpRsp.statusCode
+    diagnosticsFor(clientId)?.response(statusCode)
 
     if (statusCode === 200) {
       const isChunkedResponse = /Transfer-Encoding:\s*chunked/i.test(responseData.toString())
@@ -309,7 +320,12 @@ const invokeWsmanCall = async <T>(context: any, maxRetries = 0, timeoutMs?: numb
   if (clientObj?.amtReconfiguring === true) {
     const delaySeconds = Environment.Config.delay_tls_timer
     invokeWsmanLogger.info(`Waiting ${delaySeconds}s for AMT TLS reconfiguration...`)
+    const completeWait = diagnosticsFor(clientId)?.measure('wait', {
+      reason: 'amt_reconfiguration',
+      configuredMs: delaySeconds * 1000
+    })
     await new Promise((resolve) => setTimeout(resolve, delaySeconds * 1000))
+    completeWait?.()
     clientObj.amtReconfiguring = false
   }
 
@@ -320,19 +336,24 @@ const invokeWsmanCall = async <T>(context: any, maxRetries = 0, timeoutMs?: numb
   const retryDelayMs = Environment.Config.delay_tls_timer * 1000
 
   while (retriesUsed < maxAttempts) {
+    const completeRequest = diagnosticsFor(clientId)?.measure('wsman')
     try {
       const result = await Promise.race([
         invokeWsmanCallInternal<T>(context),
         timeout(timeoutValue)
       ])
+      diagnosticsFor(clientId)?.endRequest('success')
+      completeRequest?.()
       return result as any
     } catch (error) {
+      diagnosticsFor(clientId)?.endRequest(error instanceof GATEWAY_TIMEOUT_ERROR ? 'timeout' : 'transport_error')
+      completeRequest?.(false)
       // On TLS errors, clean up tunnel so next operation gets a fresh one.
       // Exception: 401 is a normal digest auth challenge — tunnel is fine, just needs credentials.
       if (clientObj?.tlsEnforced === true && (error as any)?.statusCode !== 401) {
         invokeWsmanLogger.warn(`Error during TLS operation, marking tunnel for reset`)
         if (clientObj.tlsTunnelManager != null) {
-          clientObj.tlsTunnelManager.close()
+          clientObj.tlsTunnelManager.close('wsman_operation_error')
           clientObj.tlsTunnelManager = undefined
           clientObj.tlsTunnelSessionId = undefined
         }
@@ -352,6 +373,8 @@ const invokeWsmanCall = async <T>(context: any, maxRetries = 0, timeoutMs?: numb
 
       if (isRetryableError && retriesUsed < maxAttempts - 1) {
         retriesUsed++
+        const attempt = diagnosticsFor(clientId)
+        if (attempt != null) attempt.summary.retries++
         const errorType = (error as any)?.constructor?.name ?? typeof error
         const shouldDelay =
           error instanceof CONNECTION_RESET_ERROR ||
@@ -364,7 +387,12 @@ const invokeWsmanCall = async <T>(context: any, maxRetries = 0, timeoutMs?: numb
           invokeWsmanLogger.info(
             `Retryable WSMAN error (${errorType}); retry ${retriesUsed}/${maxAttempts - 1}, waiting ${configuredDelaySeconds}s (${retryDelayMs}ms) before retry... (Error: ${(error as any)?.message})`
           )
+          const completeWait = diagnosticsFor(clientId)?.measure('wait', {
+            reason: 'wsman_retry',
+            configuredMs: retryDelayMs
+          })
           await new Promise((resolve) => setTimeout(resolve, retryDelayMs))
+          completeWait?.()
           clientObj.amtReconfiguring = false
         } else {
           invokeWsmanLogger.warn(

@@ -11,6 +11,7 @@ import { type ILogger } from './interfaces/ILogger.js'
 import { type DataProcessor } from './DataProcessor.js'
 import { Environment } from './utils/Environment.js'
 import { devices } from './devices.js'
+import { finishDiagnostics } from './diagnostics/index.js'
 const maxMessageSize = 1024 * 10 * 10
 
 export class WebSocketListener {
@@ -76,6 +77,7 @@ export class WebSocketListener {
    * @param {string} clientId Index of the connected client
    */
   onClientDisconnected(clientId: string): void {
+    finishDiagnostics(clientId, 'interrupted')
     delete devices[clientId]
     this.logger.debug(`Connection ended for client : ${clientId}`)
   }

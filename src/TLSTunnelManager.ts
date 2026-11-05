@@ -11,6 +11,7 @@ import ClientResponseMsg from './utils/ClientResponseMsg.js'
 import { AMT_ODCA_ROOT_CERTS } from './certs/amt-odca.js'
 import Logger from './Logger.js'
 import { ensurePemCertificate } from './utils/certHelpers.js'
+import { diagnosticsFor } from './diagnostics/index.js'
 
 const logger = new Logger('TLSTunnelManager')
 
@@ -303,7 +304,14 @@ export class TLSTunnelManager {
     this.pendingData = []
 
     const useLegacyProfile = this.legacyTlsCompatibility
-    await this.connectAttempt(useLegacyProfile)
+    const complete = diagnosticsFor(this.clientId)?.measure('tls_connect')
+    try {
+      await this.connectAttempt(useLegacyProfile)
+      complete?.()
+    } catch (error) {
+      complete?.(false)
+      throw error
+    }
   }
 
   private splitPemBundle(pemBundle: string): string[] {
@@ -586,7 +594,12 @@ export class TLSTunnelManager {
     this.tlsSocket?.on('data', callback)
   }
 
-  close(): void {
+  close(reason = 'rps_transport_cleanup'): void {
+    const attempt = diagnosticsFor(this.clientId)
+    if (!this.intentionalClose && attempt != null) {
+      attempt.summary.tlsClosures++
+      attempt.event('tls_close', { reason })
+    }
     this.intentionalClose = true
     if (this.tlsSocket != null) {
       this.tlsSocket.destroy()

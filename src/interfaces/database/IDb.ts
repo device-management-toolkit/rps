@@ -11,8 +11,10 @@ import { type IProfilesWifiConfigsTable } from './IProfileWifiConfigsDb.js'
 import { type IWirelessProfilesTable } from './IWirelessProfilesDB.js'
 import { type IProfileProxyConfigsTable } from './IProfileProxyConfigsDb.js'
 import { type IProxyConfigsTable } from './IProxyConfigsDB.js'
+import { type IActivationAttemptsTable } from './IActivationAttemptsDb.js'
 
 export interface IDB {
+  activationAttempts: IActivationAttemptsTable
   ciraConfigs: ICiraConfigTable
   domains: IDomainsTable
   profiles: IProfilesTable

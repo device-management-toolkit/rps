@@ -16,8 +16,10 @@ import { readFileSync } from 'fs'
 import { Environment } from '../../utils/Environment.js'
 import { ProxyConfigsTable } from './tables/proxyConfigs.js'
 import { ProfileProxyConfigsTable } from './tables/profileProxyConfigs.js'
+import { ActivationAttemptsTable } from './tables/activationAttempts.js'
 
 export default class Db implements IDB {
+  activationAttempts: ActivationAttemptsTable
   pool: InstanceType<typeof Pool>
   ciraConfigs: CiraConfigTable
   domains: DomainsTable
@@ -77,6 +79,7 @@ export default class Db implements IDB {
     }
 
     this.pool = new Pool(poolConfig)
+    this.activationAttempts = new ActivationAttemptsTable(this)
     this.ciraConfigs = new CiraConfigTable(this)
     this.profiles = new ProfilesTable(this)
     this.domains = new DomainsTable(this)

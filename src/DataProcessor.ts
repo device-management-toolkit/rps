@@ -23,6 +23,8 @@ import { SyncHostNameEventType } from './stateMachines/maintenance/syncHostName.
 import { SyncIPEventType } from './stateMachines/maintenance/syncIP.js'
 import { SyncDeviceInfoEventType } from './stateMachines/maintenance/syncDeviceInfo.js'
 import { devices } from './devices.js'
+import { diagnosticsFor, startDiagnostics, finishDiagnostics } from './diagnostics/index.js'
+import { Environment } from './utils/Environment.js'
 
 export class DataProcessor {
   httpHandler: HttpHandler
@@ -109,6 +111,47 @@ export class DataProcessor {
     )
     await this.validator.validateActivationMsg(clientMsg, clientId) // Validate the activation message payload
     this.setConnectionParams(clientId)
+    startDiagnostics(clientId, {
+      tenantId: clientMsg.tenantId ?? '',
+      deviceId: clientMsg.payload.uuid,
+      amtVersion: String(clientMsg.payload.ver ?? 'unknown'),
+      startingMode: clientMsg.payload.currentMode ?? null,
+      profileName:
+        typeof clientMsg.payload.profile === 'string'
+          ? clientMsg.payload.profile
+          : clientMsg.payload.profile?.profileName ?? null,
+      tlsEnforced: devices[clientId].tlsEnforced === true,
+      settings: {
+        delayTlsSeconds: Environment.Config.delay_tls_timer,
+        delayTimerSeconds: Environment.Config.delay_timer,
+        delayActivationSyncMs: Environment.Config.delay_activation_sync,
+        delayTlsPutDataSyncMs: Environment.Config.delay_tls_put_data_sync,
+        persistentTunnel: Environment.Config.amt_tls_tunnel_persistent !== false,
+        wsmanMaxAttempts: Environment.Config.wsman_max_attempts
+      }
+    })
+    const inspection = activation.service.system.inspect((event) => {
+      if (event.type !== '@xstate.snapshot') return
+      const snapshot = event.snapshot as any
+      const attempt = diagnosticsFor(clientId)
+      if (snapshot.value != null) attempt?.state(event.actorRef.id, snapshot.value, snapshot.status)
+      if (snapshot.context?.profile?.profileName != null && attempt != null) {
+        attempt.metadata.profileName = snapshot.context.profile.profileName
+      }
+    })
+    activation.service.subscribe({
+      complete: () => {
+        finishDiagnostics(
+          clientId,
+          activation.service.getSnapshot().context.status === 'success' ? 'success' : 'failed'
+        )
+        inspection.unsubscribe()
+      },
+      error: () => {
+        finishDiagnostics(clientId, 'failed')
+        inspection.unsubscribe()
+      }
+    })
     activation.service.start()
     const event: ActivationEvent = {
       type: devices[clientId].activationStatus ? 'ACTIVATED' : 'ACTIVATION',
@@ -147,6 +190,7 @@ export class DataProcessor {
       const { parse } = pkg
       const httpRsp = parse(clientMsg.payload) as HttpZResponseModel
       const statusCode = httpRsp.statusCode
+      diagnosticsFor(clientId)?.response(statusCode)
       if (statusCode === 200) {
         const xmlBody = parseChunkedMessage(httpRsp.body.text)
         resolveValue = this.httpHandler.parseXML(xmlBody)
@@ -259,6 +303,11 @@ export class DataProcessor {
     this.logger.info(`PORT_SWITCH_ACK received from rpc-go for device ${clientObj?.uuid}`)
 
     if (clientObj?.pendingPromise != null && clientObj.resolve != null) {
+      const attempt = diagnosticsFor(clientId)
+      if (attempt != null) {
+        attempt.summary.portSwitches++
+        attempt.event('port_switch', { reason: 'rpc_port_switch_ack' })
+      }
       clientObj.resolve('port_switch_ack')
     }
   }
@@ -271,6 +320,7 @@ export class DataProcessor {
       return
     }
 
+    diagnosticsFor(clientId)?.event('connection_reset', { reason: 'rpc_connection_reset' })
     if (clientObj.tlsTunnelManager != null) {
       clientObj.tlsTunnelManager.close()
       clientObj.tlsTunnelManager = undefined
