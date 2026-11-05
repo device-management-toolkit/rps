@@ -23,6 +23,7 @@ import { SyncHostNameEventType } from './stateMachines/maintenance/syncHostName.
 import { SyncIPEventType } from './stateMachines/maintenance/syncIP.js'
 import { SyncDeviceInfoEventType } from './stateMachines/maintenance/syncDeviceInfo.js'
 import { devices } from './devices.js'
+import { traceStateTransitions } from './utils/stateTransitionLog.js'
 
 export class DataProcessor {
   httpHandler: HttpHandler
@@ -109,6 +110,7 @@ export class DataProcessor {
     )
     await this.validator.validateActivationMsg(clientMsg, clientId) // Validate the activation message payload
     this.setConnectionParams(clientId)
+    traceStateTransitions(activation.service, clientId)
     activation.service.start()
     const event: ActivationEvent = {
       type: devices[clientId].activationStatus ? 'ACTIVATED' : 'ACTIVATION',

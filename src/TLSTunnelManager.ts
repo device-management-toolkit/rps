@@ -30,6 +30,10 @@ export class TLSTunnelManager {
   private duplexStream: Duplex
   private connected = false
   private handshakeStarted = false
+  // Set once a handshake record (0x16) from the peer has been seen on this session. Before
+  // that, this reader treats application-data chunks as stale; after it, TLS 1.3
+  // may deliver the remaining server handshake as encrypted 0x17 records.
+  private serverHandshakeSeen = false
   private pendingData: Buffer[] = []
   private sessionId: string
   private intentionalClose = false
@@ -143,9 +147,17 @@ export class TLSTunnelManager {
       contentType = data[0]
     }
 
-    // Discard stale Application Data (0x17) received before handshake completes
-    if (!this.connected && contentType === 0x17) {
+    // Before the first peer handshake record, treat application-data chunks as stale.
+    // After it, pass all chunks to the TLS library for validation: TLS 1.3 uses encrypted
+    // 0x17 handshake records, and a streamed chunk may begin in the middle of a record.
+    if (!this.connected && !this.serverHandshakeSeen && contentType === 0x17) {
       return
+    }
+
+    // A streamed handshake header may arrive one byte at a time. Recognize its
+    // initial content-type byte before requiring enough bytes to extract certificates.
+    if (!this.connected && data.length > 0 && data[0] === 0x16) {
+      this.serverHandshakeSeen = true
     }
 
     // Capture server certificates from TLS Handshake Certificate message (type 0x0b)

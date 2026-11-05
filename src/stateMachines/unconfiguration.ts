@@ -947,6 +947,8 @@ export class Unconfiguration {
         }
       },
       ENUMERATE_TLS_SETTING_DATA: {
+        // Preserve the active tunnel identity without reading settings that this branch discards.
+        always: { guard: 'isTLSEnforced', target: 'GET_ENVIRONMENT_DETECTION_SETTINGS' },
         invoke: {
           src: 'enumerateTLSSettingData',
           input: ({ context }) => context,
