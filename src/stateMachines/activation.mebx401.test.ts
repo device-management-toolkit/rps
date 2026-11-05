@@ -4,7 +4,8 @@
  **********************************************************************/
 
 import { AMT } from '@device-management-toolkit/wsman-messages'
-import { createActor, createMachine, fromPromise, waitFor } from 'xstate'
+import { fromPromise } from 'xstate'
+import { runMachineSegment } from '../test/helper/xstate.js'
 import { devices } from '../devices.js'
 import { Environment } from '../utils/Environment.js'
 import { config } from '../test/helper/Config.js'
@@ -38,19 +39,6 @@ afterEach(() => {
   delete devices[clientId]
 })
 
-async function runSegment(machine: any, initial: string, context: any, terminals: string[]): Promise<any> {
-  const states = { ...machine.config.states }
-  for (const terminal of terminals) states[terminal] = { type: 'final' }
-  const segment = createMachine({ ...machine.config, initial, context, states }, machine.implementations)
-  const actor = createActor(segment)
-  try {
-    actor.start()
-    return await waitFor(actor, (snapshot) => snapshot.status === 'done', { timeout: 1000 })
-  } finally {
-    actor.stop()
-  }
-}
-
 describe('SetMEBxPassword digest challenge in the TLS ACM phase', () => {
   it('routes a 401 to the error machine instead of deactivating', async () => {
     const machine = new Activation().machine.provide({
@@ -60,7 +48,7 @@ describe('SetMEBxPassword digest challenge in the TLS ACM phase', () => {
         })
       }
     })
-    const snapshot = await runSegment(machine, 'SET_MEBX_PASSWORD', tlsAcmContext, ['ERROR', 'DEACTIVATION'])
+    const snapshot = await runMachineSegment(machine, 'SET_MEBX_PASSWORD', tlsAcmContext, ['ERROR', 'DEACTIVATION'])
     expect(snapshot.value).toBe('ERROR')
     expect(snapshot.context.targetAfterError).toBe('SET_MEBX_PASSWORD')
   })
@@ -73,13 +61,13 @@ describe('SetMEBxPassword digest challenge in the TLS ACM phase', () => {
         })
       }
     })
-    const snapshot = await runSegment(machine, 'SET_MEBX_PASSWORD', tlsAcmContext, ['ERROR', 'DEACTIVATION'])
+    const snapshot = await runMachineSegment(machine, 'SET_MEBX_PASSWORD', tlsAcmContext, ['ERROR', 'DEACTIVATION'])
     expect(snapshot.value).toBe('DEACTIVATION')
   })
 
   it('retries SetMEBxPassword after re-authentication', async () => {
     const machine = new Activation().machine
-    const snapshot = await runSegment(
+    const snapshot = await runMachineSegment(
       machine,
       'NEXT_STATE',
       { ...tlsAcmContext, targetAfterError: 'SET_MEBX_PASSWORD' },
@@ -90,7 +78,7 @@ describe('SetMEBxPassword digest challenge in the TLS ACM phase', () => {
 
   it('keeps deactivating from NEXT_STATE for other recovered steps in the TLS ACM phase', async () => {
     const machine = new Activation().machine
-    const snapshot = await runSegment(
+    const snapshot = await runMachineSegment(
       machine,
       'NEXT_STATE',
       { ...tlsAcmContext, targetAfterError: 'GET_GENERAL_SETTINGS' },

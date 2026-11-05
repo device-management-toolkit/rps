@@ -31,8 +31,8 @@ export class TLSTunnelManager {
   private connected = false
   private handshakeStarted = false
   // Set once a handshake record (0x16) from the peer has been seen on this session. Before
-  // that, application-data records can only be stale bytes from a previous session; after
-  // it, TLS 1.3 delivers the rest of the server's handshake as encrypted 0x17 records.
+  // that, this reader treats application-data chunks as stale; after it, TLS 1.3
+  // may deliver the remaining server handshake as encrypted 0x17 records.
   private serverHandshakeSeen = false
   private pendingData: Buffer[] = []
   private sessionId: string
@@ -147,10 +147,9 @@ export class TLSTunnelManager {
       contentType = data[0]
     }
 
-    // Discard stale Application Data (0x17) from a previous session: it can only precede this
-    // session's first handshake record. Once the peer's handshake has started, every chunk is
-    // part of this session (TLS 1.3 sends the rest of the server handshake as encrypted 0x17
-    // records, and a chunk may begin in the middle of a record), so nothing may be dropped.
+    // Before the first peer handshake record, treat application-data chunks as stale.
+    // After it, pass all chunks to the TLS library for validation: TLS 1.3 uses encrypted
+    // 0x17 handshake records, and a streamed chunk may begin in the middle of a record.
     if (!this.connected && !this.serverHandshakeSeen && contentType === 0x17) {
       return
     }

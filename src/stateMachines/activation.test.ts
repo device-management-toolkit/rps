@@ -16,7 +16,7 @@ import { PasswordHelper } from '../utils/PasswordHelper.js'
 import { ClientAction } from '../models/RCS.Config.js'
 import { HttpHandler } from '../HttpHandler.js'
 import ClientResponseMsg from '../utils/ClientResponseMsg.js'
-import { type MachineImplementationsSimplified, createActor, fromPromise } from 'xstate'
+import { type MachineImplementationsSimplified, createActor, createMachine, fromPromise } from 'xstate'
 import { AMTUserName, GATEWAY_TIMEOUT_ERROR } from '../utils/constants.js'
 import got from 'got'
 
@@ -3215,7 +3215,7 @@ describe('TLS reconfiguration reuse optimizations', () => {
   let responses: any[]
   let requests: string[]
   const syntheticId = 'tls-reuse-test'
-  let certs: ReturnType<typeof import('../test/helper/TlsReuseCertificates.js').createTlsReuseCertificates>
+  let certs: ReturnType<typeof import('../test/helper/tlsReuseCertificates.js').createTlsReuseCertificates>
   const enumeration = { Envelope: { Body: { EnumerateResponse: { EnumerationContext: 'test' } } } }
   const pull = (items: any): any => ({ Envelope: { Body: { PullResponse: { Items: items, EndOfSequence: '' } } } })
   const settings = [
@@ -3249,7 +3249,7 @@ describe('TLS reconfiguration reuse optimizations', () => {
   }
 
   beforeAll(async () => {
-    const { createTlsReuseCertificates } = await import('../test/helper/TlsReuseCertificates.js')
+    const { createTlsReuseCertificates } = await import('../test/helper/tlsReuseCertificates.js')
     certs = createTlsReuseCertificates()
   })
   beforeEach(() => {
@@ -3602,5 +3602,45 @@ describe('TLS reconfiguration reuse optimizations', () => {
     expect(
       canReuseTlsIdentity(input.profile, settings as any, certs.issue('test-device', 90, 1), certs.root, 'test-device')
     ).toBe(false)
+  })
+})
+
+describe('TLS reuse state at the start of a provisioning attempt', () => {
+  it.each(['ACTIVATION', 'ACTIVATED'] as const)('clears prior reuse approval on %s', (type) => {
+    const machine = new Activation().machine
+    const segment = createMachine(
+      {
+        ...machine.config,
+        context: {
+          tlsProbeSnapshot: { sessionId: 'previous-session' },
+          tlsIdentityReuseApproved: true,
+          tlsIdentityReuseFingerprint: 'previous-identity',
+          tlsIdentityValidatedSessionId: 'previous-session',
+          skipTlsRolloverWait: true
+        },
+        states: { ...machine.config.states, GET_AMT_PROFILE: { type: 'final' } }
+      },
+      machine.implementations
+    )
+    const actor = createActor(segment)
+    try {
+      actor.start()
+      actor.send({ type, clientId: 'new-attempt', tenantId: 'tenant', friendlyName: 'device' })
+      const snapshot = actor.getSnapshot()
+      expect(snapshot.value).toBe('GET_AMT_PROFILE')
+      expect(snapshot.context).toMatchObject({
+        clientId: 'new-attempt',
+        isActivated: type === 'ACTIVATED',
+        tenantId: 'tenant',
+        friendlyName: 'device',
+        tlsProbeSnapshot: undefined,
+        tlsIdentityReuseApproved: false,
+        tlsIdentityReuseFingerprint: undefined,
+        tlsIdentityValidatedSessionId: undefined,
+        skipTlsRolloverWait: false
+      })
+    } finally {
+      actor.stop()
+    }
   })
 })

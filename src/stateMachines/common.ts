@@ -17,7 +17,8 @@ import {
   UNEXPECTED_PARSE_ERROR,
   EA_TIMEOUT_ERROR,
   CONNECTION_RESET_ERROR,
-  TLS_TUNNEL_ERROR
+  TLS_TUNNEL_ERROR,
+  hasStatusCode
 } from '../utils/constants.js'
 import Logger from '../Logger.js'
 import { type HttpHandler } from '../HttpHandler.js'
@@ -336,7 +337,7 @@ const invokeWsmanCall = async <T>(context: any, maxRetries = 0, timeoutMs?: numb
       // proves the tunnel works: the error belongs to the state machine, not the transport.
       // AMT responses are rejected as the raw parsed message; transport failures are Error
       // instances (which also carry a synthetic statusCode, so that field alone cannot decide).
-      const isHttpResponse = !(error instanceof Error) && typeof (error as any)?.statusCode === 'number'
+      const isHttpResponse = !(error instanceof Error) && hasStatusCode(error)
       if (clientObj?.tlsEnforced === true && !isHttpResponse) {
         invokeWsmanLogger.warn(`Error during TLS operation, marking tunnel for reset`)
         if (clientObj.tlsTunnelManager != null) {

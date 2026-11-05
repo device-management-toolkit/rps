@@ -4,7 +4,8 @@
  **********************************************************************/
 
 import { AMT } from '@device-management-toolkit/wsman-messages'
-import { createActor, createMachine, fromPromise, waitFor } from 'xstate'
+import { createMachine, fromPromise } from 'xstate'
+import { runMachineSegment } from './helper/xstate.js'
 import { devices } from '../devices.js'
 import { Environment } from '../utils/Environment.js'
 import { config } from './helper/Config.js'
@@ -64,15 +65,8 @@ async function runSegment(machine: any, initial: string, context: any, terminals
   if (states.ENUMERATE_TLS_SETTING_DATA != null) {
     states.ENUMERATE_TLS_SETTING_DATA = { ...states.ENUMERATE_TLS_SETTING_DATA, always: undefined }
   }
-  for (const terminal of terminals) states[terminal] = { type: 'final' }
-  const segment = createMachine({ ...machine.config, initial, context, states }, machine.implementations)
-  const actor = createActor(segment)
-  try {
-    actor.start()
-    return await waitFor(actor, (snapshot) => snapshot.status === 'done', { timeout: 1000 })
-  } finally {
-    actor.stop()
-  }
+  const baseline = createMachine({ ...machine.config, states }, machine.implementations)
+  return runMachineSegment(baseline, initial, context, terminals)
 }
 
 describe('Baseline TLS cleanup behavior', () => {

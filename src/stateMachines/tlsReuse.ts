@@ -9,6 +9,9 @@ import { type AMTConfiguration } from '../models/index.js'
 import { type TLSConfigFlow, TlsMode, TlsSigningAuthority } from '../models/RCS.Config.js'
 import { ensurePemCertificate } from '../utils/certHelpers.js'
 
+const remoteTlsSettingName = 'Intel(r) AMT 802.3 TLS Settings'
+const localTlsSettingName = 'Intel(r) AMT LMS TLS Settings'
+
 const renewalWindowMs = 30 * 24 * 60 * 60 * 1000
 const enabled = (value: unknown): boolean => value === true || value === 'true'
 const disabled = (value: unknown): boolean => value === false || value === 'false'
@@ -38,8 +41,8 @@ export function canReuseTlsIdentity(
         TlsMode.MUTUAL_ONLY,
         TlsMode.MUTUAL_ALLOW_NONTLS
       ].includes(profile.tlsMode)) return false
-    const remote = settings.find((entry) => entry.ElementName === 'Intel(r) AMT 802.3 TLS Settings')
-    const local = settings.find((entry) => entry.ElementName === 'Intel(r) AMT LMS TLS Settings')
+    const remote = settings.find((entry) => entry.ElementName === remoteTlsSettingName)
+    const local = settings.find((entry) => entry.ElementName === localTlsSettingName)
     if (!remote || !local || !enabled(remote.Enabled) || !enabled(local.Enabled)) return false
     const mutual = profile.tlsMode === TlsMode.MUTUAL_ONLY || profile.tlsMode === TlsMode.MUTUAL_ALLOW_NONTLS
     if (mutual ? !enabled(remote.MutualAuthentication) : !disabled(remote.MutualAuthentication)) return false

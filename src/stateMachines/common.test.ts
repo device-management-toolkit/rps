@@ -8,7 +8,7 @@ import { HttpHandler } from '../HttpHandler.js'
 import Logger from '../Logger.js'
 import ClientResponseMsg from '../utils/ClientResponseMsg.js'
 import { devices } from '../devices.js'
-import { GATEWAY_TIMEOUT_ERROR, UNEXPECTED_PARSE_ERROR, EA_TIMEOUT_ERROR } from '../utils/constants.js'
+import { GATEWAY_TIMEOUT_ERROR, UNEXPECTED_PARSE_ERROR, EA_TIMEOUT_ERROR, hasStatusCode } from '../utils/constants.js'
 import { randomUUID } from 'node:crypto'
 import { WSEnterpriseAssistantListener, enterpriseAssistantSocket, promises } from '../WSEnterpriseAssistantListener.js'
 import { config } from '../test/helper/Config.js'
@@ -502,5 +502,24 @@ describe('Retained TLS identity trust', () => {
       Environment.Config = originalConfig
       delete devices[id]
     }
+  })
+})
+
+describe('Status code detection', () => {
+  it('recognizes both parsed HTTP responses and transport errors without classifying them as equivalent', () => {
+    expect(hasStatusCode({ statusCode: 400 })).toBe(true)
+    expect(hasStatusCode(new GATEWAY_TIMEOUT_ERROR())).toBe(true)
+    expect(hasStatusCode(Object.assign(() => {}, { statusCode: 401 }))).toBe(true)
+  })
+
+  it.each([
+    null,
+    undefined,
+    401,
+    '401',
+    {},
+    { statusCode: '401' }
+  ])('rejects values without a numeric statusCode', (value) => {
+    expect(hasStatusCode(value)).toBe(false)
   })
 })

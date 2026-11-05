@@ -3,23 +3,25 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 import Logger from '../Logger.js'
+import { type AnyActorRef, type InspectionEvent } from 'xstate'
 
 const logger = new Logger('StateTrace')
 
 /**
  * Logs every state-machine transition under the given root actor at debug level.
- * Measurement aid for issue #2935: one log line per transition, no behavior change.
- * Promise actors are skipped; only machine snapshots carry a state value.
+ * Emits one line when an actor state or status changes.
+ * Only snapshots exposing the machine matches() method are logged.
  */
-export function traceStateTransitions(service: any, clientId: string): void {
+export function traceStateTransitions(service: AnyActorRef, clientId: string): void {
   if (typeof service?.system?.inspect !== 'function') return
   const last = new Map<string, string>()
-  const subscription = service.system.inspect((event: any) => {
+  const subscription = service.system.inspect((event: InspectionEvent) => {
     if (event.type !== '@xstate.snapshot') return
     const snapshot = event.snapshot
-    if (snapshot == null || typeof snapshot.matches !== 'function') return
-    const actor: string = event.actorRef?.id ?? 'unknown'
-    const value = typeof snapshot.value === 'string' ? snapshot.value : JSON.stringify(snapshot.value)
+    if (snapshot == null || !('matches' in snapshot) || typeof snapshot.matches !== 'function') return
+    const actor = (event.actorRef as AnyActorRef)?.id ?? 'unknown'
+    const state = 'value' in snapshot ? snapshot.value : undefined
+    const value = typeof state === 'string' ? state : JSON.stringify(state)
     const key = `${value}|${snapshot.status}`
     if (last.get(actor) === key) return
     last.set(actor, key)

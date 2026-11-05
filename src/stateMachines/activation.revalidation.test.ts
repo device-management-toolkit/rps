@@ -4,7 +4,8 @@
  **********************************************************************/
 
 import { AMT } from '@device-management-toolkit/wsman-messages'
-import { createActor, createMachine, fromPromise, waitFor } from 'xstate'
+import { fromPromise } from 'xstate'
+import { runMachineSegment } from '../test/helper/xstate.js'
 import { devices } from '../devices.js'
 import { Environment } from '../utils/Environment.js'
 import { config } from '../test/helper/Config.js'
@@ -36,19 +37,6 @@ afterEach(() => {
   delete devices[clientId]
 })
 
-async function runSegment(machine: any, initial: string, context: any, terminals: string[]): Promise<any> {
-  const states = { ...machine.config.states }
-  for (const terminal of terminals) states[terminal] = { type: 'final' }
-  const segment = createMachine({ ...machine.config, initial, context, states }, machine.implementations)
-  const actor = createActor(segment)
-  try {
-    actor.start()
-    return await waitFor(actor, (snapshot) => snapshot.status === 'done', { timeout: 1000 })
-  } finally {
-    actor.stop()
-  }
-}
-
 const base = () => ({
   clientId,
   amt: new AMT.Messages(),
@@ -61,7 +49,7 @@ describe('TLS activation Phase 2 re-entry', () => {
   const machine = () => new Activation().machine.provide({ guards: { isDigestRealmInvalid: () => false } })
 
   it('goes straight to the ACM upgrade after CCM over TLS in the same run', async () => {
-    const snapshot = await runSegment(
+    const snapshot = await runMachineSegment(
       machine(),
       'CHECK_DIGEST_REALM',
       { ...base(), isActivated: true, tlsCCMComplete: true, tlsACMComplete: false, tlsNeedsProvisioning: true },
@@ -72,7 +60,7 @@ describe('TLS activation Phase 2 re-entry', () => {
   })
 
   it('still probes TLS state for a device that was already activated before this run', async () => {
-    const snapshot = await runSegment(
+    const snapshot = await runMachineSegment(
       machine(),
       'CHECK_DIGEST_REALM',
       { ...base(), isActivated: true, tlsCCMComplete: false, tlsACMComplete: false },
@@ -82,7 +70,7 @@ describe('TLS activation Phase 2 re-entry', () => {
   })
 
   it('still probes TLS state once the ACM upgrade has completed', async () => {
-    const snapshot = await runSegment(
+    const snapshot = await runMachineSegment(
       machine(),
       'CHECK_DIGEST_REALM',
       { ...base(), isActivated: true, tlsCCMComplete: true, tlsACMComplete: true },
@@ -98,7 +86,7 @@ describe('--tls-tunnel re-validation after saving device info', () => {
 
   it('does not validate and port-switch again for an activated device whose certificate already passed', async () => {
     devices[clientId].tlsTunnelActivation = true
-    const snapshot = await runSegment(
+    const snapshot = await runMachineSegment(
       machine(),
       'SAVE_DEVICE_TO_MPS',
       { ...base(), isActivated: true, tlsNeedsProvisioning: false, tlsTunnelCCMComplete: false },
@@ -109,7 +97,7 @@ describe('--tls-tunnel re-validation after saving device info', () => {
 
   it('still provisions TLS for a first-time --tls-tunnel activation', async () => {
     devices[clientId].tlsTunnelActivation = true
-    const snapshot = await runSegment(
+    const snapshot = await runMachineSegment(
       machine(),
       'SAVE_DEVICE_TO_MPS',
       { ...base(), isActivated: false, tlsNeedsProvisioning: false, tlsTunnelCCMComplete: false },
@@ -120,7 +108,7 @@ describe('--tls-tunnel re-validation after saving device info', () => {
 
   it('still provisions TLS for an activated --tls-tunnel device whose certificate did not pass', async () => {
     devices[clientId].tlsTunnelActivation = true
-    const snapshot = await runSegment(
+    const snapshot = await runMachineSegment(
       machine(),
       'SAVE_DEVICE_TO_MPS',
       { ...base(), isActivated: true, tlsNeedsProvisioning: true, tlsTunnelCCMComplete: false },
@@ -138,7 +126,7 @@ describe('--tls-tunnel re-validation after saving device info', () => {
         })
       }
     })
-    const snapshot = await runSegment(
+    const snapshot = await runMachineSegment(
       failing,
       'CHECK_AMT_TLS_STATE',
       { ...base(), isActivated: true, tlsNeedsProvisioning: false },
