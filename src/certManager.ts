@@ -25,6 +25,28 @@ import {
   UnsupportedDeviceKeyError
 } from './utils/ecLeafCertificate.js'
 
+/** What the firmware checks on each certificate of a provisioning chain as it is uploaded. */
+export interface ProvisioningCertInfo {
+  role: 'leaf' | 'intermediate' | 'root'
+  /** Common name, falling back to the role when the certificate has none. */
+  name: string
+  /** Digest the certificate is signed with, for example sha256. */
+  hashAlgorithm: string | null
+  /** RSA modulus size in bits, null for a key that is not RSA. */
+  rsaKeySize: number | null
+}
+
+function describeCertificate(cert: pki.Certificate, role: ProvisioningCertInfo['role']): ProvisioningCertInfo {
+  const cn = cert.subject?.getField?.('CN')?.value
+  const modulus = (cert.publicKey as pki.rsa.PublicKey | undefined)?.n
+  return {
+    role,
+    name: typeof cn === 'string' && cn !== '' ? cn : role,
+    hashAlgorithm: cert.md?.algorithm?.toLowerCase() ?? null,
+    rsaKeySize: typeof modulus?.bitLength === 'function' ? modulus.bitLength() : null
+  }
+}
+
 /** The digest a certificate is signed with and the size of a key RPS generates, as chosen by the certificate policy. */
 export type CertificateSigningOptions = Partial<Pick<AMTCertificatePolicy, 'hashAlgorithm' | 'rsaKeySize'>>
 
@@ -80,6 +102,7 @@ export class CertManager {
     provisioningCertificateObj: ProvisioningCertObj
     fingerprint: RootCertFingerprint
     hashAlgorithm: string | null
+    certificates: ProvisioningCertInfo[]
   } {
     const provisioningCertificateObj: ProvisioningCertObj = {} as ProvisioningCertObj
     const interObj: CertificateObject[] = []
@@ -87,6 +110,7 @@ export class CertManager {
     const root: CertificateObject = {} as CertificateObject
     const fingerprint: RootCertFingerprint = {} as RootCertFingerprint
     let hashAlgorithm: string | null = null
+    const certificates: ProvisioningCertInfo[] = []
 
     this.logger.debug(
       `Processing PFX with ${pfxobj.certs?.length ?? 0} certificates and ${pfxobj.keys?.length ?? 0} keys`
@@ -95,6 +119,8 @@ export class CertManager {
     if (pfxobj.certs?.length > 0) {
       for (let i = 0; i < pfxobj.certs.length; i++) {
         const cert = pfxobj.certs[i]
+        const role = i === 0 ? 'leaf' : cert.subject.hash === cert.issuer.hash ? 'root' : 'intermediate'
+        certificates.push(describeCertificate(cert, role))
         let pem = this.nodeForge.pkiCertificateToPem(cert)
         // Need to trim off the BEGIN and END so we just have the raw pem
         pem = pem
@@ -173,7 +199,7 @@ export class CertManager {
       `Certificate chain built: ${provisioningCertificateObj.certChain.length} certificates (leaf -> intermediate -> root)`
     )
 
-    return { provisioningCertificateObj, fingerprint, hashAlgorithm }
+    return { provisioningCertificateObj, fingerprint, hashAlgorithm, certificates }
   }
 
   /**
