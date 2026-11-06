@@ -3,8 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { createHash, createPublicKey, generateKeyPairSync, X509Certificate } from 'node:crypto'
+import { asn1 as forgeAsn1 } from 'node-forge'
 import { CertManager, UnsupportedCertificateError } from './certManager.js'
 import { NodeForge } from './NodeForge.js'
+import { issueLeafWithDeviceKey } from './utils/ecLeafCertificate.js'
 import { type AMTKeyUsage, type CertAttributes, type CertificateObject } from './models/index.js'
 import Logger from './Logger.js'
 import { TEST_PFXCERT, EXPECTED_CERT } from './test/helper/certs.js'
@@ -201,6 +204,20 @@ describe('certManager tests', () => {
       expect(leafCert.cert.subject.attributes[3].value).toEqual(certAttr.O)
     })
 
+    test('should sign a leaf certificate with SHA384 when requested', () => {
+      const nodeForge = new NodeForge()
+      const certManager = new CertManager(new Logger('CertManager'), nodeForge)
+      const certAttr: CertAttributes = { CN: 'AMT', O: 'None', ST: 'None', C: 'None' }
+      const keyUsage: AMTKeyUsage = { name: 'extKeyUsage', serverAuth: true } as any
+      const rootCert = certManager.createCertificate(certAttr)
+
+      const leafCert = certManager.createCertificate(certAttr, rootCert.key, null, certAttr, keyUsage, undefined, {
+        hashAlgorithm: 'sha384'
+      })
+
+      expect(leafCert.cert.md.algorithm).toBe('sha384')
+    })
+
     test('should generate root certificate', () => {
       const nodeForge = new NodeForge()
       const certManager = new CertManager(new Logger('CertManager'), nodeForge)
@@ -217,6 +234,8 @@ describe('certManager tests', () => {
       expect(rootCert.cert.serialNumber).toBeDefined()
       expect(rootCert.cert.serialNumber).toMatch(/^[0-7][0-9a-f]{31}$/)
       expect(rootCert.cert.publicKey).toBeDefined()
+      expect(rootCert.cert.md.algorithm).toBe('sha256')
+      expect((rootCert.cert.publicKey as forge.pki.rsa.PublicKey).n.bitLength()).toBe(2048)
       expect(rootCert.cert.validity.notBefore).toEqual(new Date(2018, 0, 1))
       expect(rootCert.cert.validity.notAfter).toEqual(new Date(2049, 11, 31))
       expect(rootCert.cert.issuer.attributes.length).toEqual(4)
@@ -236,6 +255,168 @@ describe('certManager tests', () => {
       expect(rootCert.cert.extensions[1].emailCA).toBe(true)
       expect(rootCert.cert.extensions[1].objCA).toBe(true)
       expect(rootCert.cert.extensions[2].name).toEqual('subjectKeyIdentifier')
+    })
+
+    test('should generate an AMT 22 root certificate with SHA384 and a 3072-bit key', () => {
+      const nodeForge = new NodeForge()
+      const certManager = new CertManager(new Logger('CertManager'), nodeForge)
+      const certAttr: CertAttributes = { CN: 'AMT 22 Root', O: 'Intel', ST: 'California', C: 'US' }
+
+      const rootCert = certManager.createCertificate(certAttr, null, null, null, null, undefined, {
+        hashAlgorithm: 'sha384',
+        rsaKeySize: 3072
+      })
+
+      expect(rootCert.cert.md.algorithm).toBe('sha384')
+      expect((rootCert.cert.publicKey as forge.pki.rsa.PublicKey).n.bitLength()).toBe(3072)
+    })
+  })
+
+  describe('EC device keys', () => {
+    // AMT 22 generates an ECC-384 key pair and returns its SubjectPublicKeyInfo
+    // as AMT_PublicPrivateKeyPair.DERKey. node-forge cannot parse an EC SPKI, so
+    // the leaf is assembled from node-forge's generic ASN.1 encoders around the key node:crypto validated. These
+    // tests check the resulting certificate with node:crypto.
+    const issueEcLeaf = (): { leafCert: any; rootCert: any; spki: Buffer } => {
+      const nodeForge = new NodeForge()
+      const certManager = new CertManager(new Logger('CertManager'), nodeForge)
+      const { publicKey } = generateKeyPairSync('ec', { namedCurve: 'secp384r1' })
+      const spki = publicKey.export({ type: 'spki', format: 'der' }) as Buffer
+
+      const rootAttr: CertAttributes = { CN: 'MPSRoot-f95514', O: 'unknown', C: 'unknown' }
+      const leafAttr: CertAttributes = { CN: 'AMT-testhost', C: 'None', ST: 'None', O: 'None' }
+      const keyUsage: AMTKeyUsage = { name: 'extKeyUsage', serverAuth: true } as AMTKeyUsage
+      const rootCert = certManager.createCertificate(rootAttr, null, null, null, null, undefined, {
+        hashAlgorithm: 'sha384',
+        rsaKeySize: 3072
+      })
+
+      const leafCert = certManager.amtCertSignWithCAKey(
+        spki.toString('base64'),
+        rootCert.key,
+        leafAttr,
+        rootAttr,
+        keyUsage,
+        rootCert.pem,
+        { hashAlgorithm: 'sha384', rsaKeySize: 3072 }
+      )
+      return { leafCert, rootCert, spki }
+    }
+
+    test('carries the AMT EC public key into the leaf byte-for-byte', () => {
+      const { leafCert, spki } = issueEcLeaf()
+      const parsed = new X509Certificate(Buffer.from(leafCert.certbin, 'base64'))
+
+      expect(parsed.publicKey.asymmetricKeyType).toBe('ec')
+      expect(parsed.publicKey.asymmetricKeyDetails?.namedCurve).toBe('secp384r1')
+      expect(parsed.publicKey.export({ type: 'spki', format: 'der' })).toEqual(spki)
+    })
+
+    test('signs over the EC key', () => {
+      const { leafCert, rootCert } = issueEcLeaf()
+      const parsed = new X509Certificate(Buffer.from(leafCert.certbin, 'base64'))
+      const root = new X509Certificate(Buffer.from(rootCert.certbin, 'base64'))
+
+      // verify() re-digests the TBSCertificate that is actually in the DER. It
+      // only passes if the EC SPKI was present when the signature was taken.
+      expect(parsed.verify(root.publicKey)).toBe(true)
+      expect(parsed.checkIssued(root)).toBe(true)
+    })
+
+    test('derives the subjectKeyIdentifier from the EC point', () => {
+      const { leafCert, spki } = issueEcLeaf()
+      // RFC 5280 4.2.1.2 method (1): SHA-1 over the subjectPublicKey BIT STRING contents, which for an uncompressed
+      // EC key is 0x04 || x || y. Derived here from the JWK, independently of the code under test.
+      const jwk = createPublicKey({ key: spki, format: 'der', type: 'spki' }).export({ format: 'jwk' })
+      const point = Buffer.concat([
+        Buffer.from([4]),
+        Buffer.from(jwk.x, 'base64url'),
+        Buffer.from(jwk.y, 'base64url')
+      ])
+      const expected = createHash('sha1').update(point).digest()
+
+      const parsed = forgeAsn1.fromDer(Buffer.from(leafCert.certbin, 'base64').toString('binary'))
+      const tbs = (parsed.value as any[])[0].value as any[]
+      const extensions = tbs[tbs.length - 1].value[0].value as any[]
+      const ski = extensions.find((e) => forgeAsn1.derToOid(e.value[0].value) === '2.5.29.14')
+      // extnValue is an OCTET STRING wrapping the OCTET STRING with the identifier
+      const wrapped = forgeAsn1.fromDer(ski.value[ski.value.length - 1].value)
+      expect(Buffer.from(wrapped.value as string, 'binary')).toEqual(expected)
+    })
+
+    test('produces the same bytes as node-forge would for an RSA key', () => {
+      // The EC path assembles the TBSCertificate itself. With an RSA device key node-forge can build the same
+      // certificate, and RSA PKCS#1 v1.5 signatures are deterministic, so the two outputs must be identical.
+      const nodeForge = new NodeForge()
+      const certManager = new CertManager(new Logger('CertManager'), nodeForge)
+      const certAttr: CertAttributes = { CN: 'AMT-testhost', O: 'None', ST: 'None', C: 'None' }
+      const rootCert = certManager.createCertificate(certAttr, null, null, null, null, undefined, {
+        hashAlgorithm: 'sha384',
+        rsaKeySize: 3072
+      })
+      const { publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
+      const spki = publicKey.export({ type: 'spki', format: 'der' }) as Buffer
+      const usage = { name: 'extKeyUsage', serverAuth: true } as AMTKeyUsage
+      const forgeLeaf = certManager.createCertificate(
+        certAttr,
+        rootCert.key,
+        spki.toString('base64'),
+        certAttr,
+        usage,
+        rootCert.pem,
+        { hashAlgorithm: 'sha384', rsaKeySize: 3072 }
+      )
+
+      const der = issueLeafWithDeviceKey({
+        cert: forgeLeaf.cert as any,
+        devicePublicKey: { spki, keyIdentifier: Buffer.alloc(0) },
+        caPrivateKeyPem: nodeForge.privateKeyToPem(rootCert.key),
+        hashAlgorithm: 'sha384'
+      })
+
+      expect(der.toString('base64')).toBe(forgeLeaf.certbin)
+    })
+
+    test('rejects a public key that is neither RSA nor EC', () => {
+      const nodeForge = new NodeForge()
+      const certManager = new CertManager(new Logger('CertManager'), nodeForge)
+      const certAttr: CertAttributes = { CN: 'AMT-testhost', O: 'None', ST: 'None', C: 'None' }
+      const rootCert = certManager.createCertificate(certAttr)
+      const { publicKey } = generateKeyPairSync('ed25519')
+      const spki = (publicKey.export({ type: 'spki', format: 'der' }) as Buffer).toString('base64')
+
+      expect(() => certManager.createCertificate(certAttr, rootCert.key, spki, certAttr, null)).toThrow(
+        UnsupportedCertificateError
+      )
+    })
+
+    test('keeps an RSA device key on the node-forge path', () => {
+      const nodeForge = new NodeForge()
+      const certManager = new CertManager(new Logger('CertManager'), nodeForge)
+      const externalKeySpy = vi.spyOn(certManager, 'parseExternalPublicKey')
+      const { publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
+      const spki = (publicKey.export({ type: 'spki', format: 'der' }) as Buffer).toString('base64')
+      const certAttr: CertAttributes = { CN: 'AMT-testhost', O: 'None', ST: 'None', C: 'None' }
+      const rootCert = certManager.createCertificate(certAttr)
+
+      const leafCert = certManager.createCertificate(certAttr, rootCert.key, spki, certAttr, {
+        name: 'extKeyUsage',
+        serverAuth: true
+      } as AMTKeyUsage)
+
+      expect(externalKeySpy).not.toHaveBeenCalled()
+      expect(new X509Certificate(Buffer.from(leafCert.certbin, 'base64')).publicKey.asymmetricKeyType).toBe('rsa')
+    })
+
+    test('rejects a device key that is neither RSA nor valid DER', () => {
+      const nodeForge = new NodeForge()
+      const certManager = new CertManager(new Logger('CertManager'), nodeForge)
+      const certAttr: CertAttributes = { CN: 'AMT-testhost', O: 'None', ST: 'None', C: 'None' }
+      const rootCert = certManager.createCertificate(certAttr)
+
+      expect(() =>
+        certManager.createCertificate(certAttr, rootCert.key, Buffer.from('not der').toString('base64'), certAttr, null)
+      ).toThrow(UnsupportedCertificateError)
     })
   })
 
