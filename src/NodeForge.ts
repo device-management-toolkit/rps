@@ -60,6 +60,10 @@ export class NodeForge {
     return forge.pki.publicKeyFromPem(pem)
   }
 
+  createBuffer(binary: string): forge.util.ByteStringBuffer {
+    return forge.util.createBuffer(binary)
+  }
+
   rsaGenerateKeyPair(length: number): forge.pki.rsa.KeyPair {
     return forge.pki.rsa.generateKeyPair(length)
   }
