@@ -4,7 +4,7 @@
  **********************************************************************/
 
 import { AMT } from '@device-management-toolkit/wsman-messages'
-import { getAMTCertificatePolicy } from './amtCertificatePolicy.js'
+import { getAMTCertificatePolicy, resolveProvisioningSignature } from './amtCertificatePolicy.js'
 
 const RSA_2048 = { KeyAlgorithm: 0, KeyLength: 2048 }
 const ECC_384 = { KeyAlgorithm: 1, KeyLength: 384 }
@@ -106,4 +106,57 @@ describe('shared policy constants', () => {
       expect(requestBody(second)).not.toContain('h:h:')
     }
   )
+})
+
+describe('resolveProvisioningSignature', () => {
+  const SHA384_3 = { hashAlgorithm: 'sha384', signingAlgorithm: 3 }
+  const SHA256_2 = { hashAlgorithm: 'sha256', signingAlgorithm: 2 }
+
+  it.each([
+    // weakAlgorithmsRemoved true, reported or inferred from AMT 22 or later: SHA-384 nonce, label 3.
+    { cert: 'sha384', weak: true, version: '22.0.0', expected: SHA384_3 },
+    { cert: 'SHA384', weak: true, version: '21.0.6', expected: SHA384_3 },
+    { cert: 'sha384', weak: undefined, version: '22.0.0', expected: SHA384_3 },
+    // A SHA-256 certificate never reaches a SHA-384 label; createSignedString rejects it first.
+    { cert: 'sha256', weak: true, version: '22.0.0', expected: SHA256_2 },
+    // weakAlgorithmsRemoved false: the certificate may be SHA-384, the nonce is still SHA-256 / 2.
+    // AMT 20.0.5 accepted a SHA-384 chain and refused SigningAlgorithm 3.
+    { cert: 'sha384', weak: false, version: '22.0.0', expected: SHA256_2 },
+    { cert: 'sha384', weak: false, version: '20.0.5', expected: SHA256_2 },
+    { cert: 'sha384', weak: undefined, version: '20.0.5', expected: SHA256_2 },
+    { cert: 'sha384', weak: undefined, version: '21.0.6', expected: SHA256_2 },
+    { cert: 'sha384', weak: undefined, version: undefined, expected: SHA256_2 },
+    { cert: 'sha256', weak: false, version: '20.0.5', expected: SHA256_2 },
+    { cert: undefined, weak: true, version: '22.0.0', expected: SHA256_2 },
+    { cert: null, weak: true, version: '22.0.0', expected: SHA256_2 }
+  ])('$cert certificate, weakAlgorithmsRemoved=$weak, version=$version', ({ cert, weak, version, expected }) => {
+    expect(resolveProvisioningSignature(cert, weak, version)).toEqual(expected)
+  })
+
+  it('never labels the signature with a digest it was not made with', () => {
+    // The firmware recomputes the digest named by SigningAlgorithm, so the two halves have to be
+    // resolved together rather than derived independently.
+    for (const weak of [
+      true,
+      false,
+      undefined
+    ]) {
+      for (const version of [
+        '12.0.95',
+        '20.0.5',
+        '21.0.6',
+        '22.0.0',
+        undefined
+      ]) {
+        for (const cert of [
+          'sha256',
+          'sha384',
+          undefined
+        ]) {
+          const { hashAlgorithm, signingAlgorithm } = resolveProvisioningSignature(cert, weak, version)
+          expect(signingAlgorithm).toBe(hashAlgorithm === 'sha384' ? 3 : 2)
+        }
+      }
+    }
+  })
 })
