@@ -75,6 +75,8 @@ export interface CertCreationResult {
 export interface CertsAndKeys {
   certs: pki.Certificate[]
   keys: pki.PrivateKey[]
+  /** Certificate bags that could not be parsed, for example because of an unsupported public-key algorithm. */
+  unreadableCertificates?: number
 }
 export interface CertificateObject {
   pem: string

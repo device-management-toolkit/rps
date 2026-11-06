@@ -4,7 +4,7 @@
  **********************************************************************/
 
 import { createHash, createPublicKey, generateKeyPairSync, X509Certificate } from 'node:crypto'
-import { asn1 as forgeAsn1 } from 'node-forge'
+import forge, { asn1 as forgeAsn1 } from 'node-forge'
 import { CertManager, UnsupportedCertificateError } from './certManager.js'
 import { NodeForge } from './NodeForge.js'
 import { issueLeafWithDeviceKey } from './utils/ecLeafCertificate.js'
@@ -114,6 +114,95 @@ describe('certManager tests', () => {
       expect(certChainPfx.hashAlgorithm).toEqual(EXPECTED_CERT.hashAlgorithm)
       expect(certChainPfx.provisioningCertificateObj).toHaveProperty('privateKey')
       expect(certChainPfx.provisioningCertificateObj.privateKey).toBeDefined()
+    })
+
+    test('describes every certificate of the chain by role, digest and RSA key size', () => {
+      const certManager = new CertManager(new Logger('CertManager'), new NodeForge())
+      const certChainPfx = certManager.dumpPfx(certManager.convertPfxToObject(TEST_PFXCERT, 'P@ssw0rd'))
+
+      const { certificates } = certChainPfx
+      expect(certificates).toHaveLength(certChainPfx.provisioningCertificateObj.certChain.length)
+      expect(certificates[0]).toMatchObject({ role: 'leaf', hashAlgorithm: certChainPfx.hashAlgorithm })
+      expect(certificates.at(-1)?.role).toBe('root')
+      for (const cert of certificates) {
+        expect(cert.name).not.toBe('')
+        expect(cert.rsaKeySize).toBeGreaterThanOrEqual(2048)
+      }
+    })
+
+    describe('chain details', () => {
+      const keys = forge.pki.rsa.generateKeyPair(1024)
+      const issue = (cn: string, issuer: string, md: forge.md.MessageDigest): forge.pki.Certificate => {
+        const cert = forge.pki.createCertificate()
+        cert.publicKey = keys.publicKey
+        cert.serialNumber = '01'
+        cert.validity.notBefore = new Date(Date.now() - 1000)
+        cert.validity.notAfter = new Date(Date.now() + 86400000)
+        cert.setSubject([{ name: 'commonName', value: cn }])
+        cert.setIssuer([{ name: 'commonName', value: issuer }])
+        cert.sign(keys.privateKey, md)
+        // Parsing fills in the name hashes that the chain ordering relies on.
+        return forge.pki.certificateFromPem(forge.pki.certificateToPem(cert), true)
+      }
+      const sha384 = (): forge.md.MessageDigest => forge.md.sha384.create()
+      const sha256 = (): forge.md.MessageDigest => forge.md.sha256.create()
+
+      test('describes only the certificates that are sent, not a root that was replaced', () => {
+        const certManager = new CertManager(new Logger('CertManager'), new NodeForge())
+        const certs = [
+          issue('leaf', 'inter', sha384()),
+          issue('unused-root', 'unused-root', sha256()),
+          issue('inter', 'real-root', sha384()),
+          issue('real-root', 'real-root', sha384())
+        ]
+
+        const result = certManager.dumpPfx({ certs, keys: [keys.privateKey] })
+
+        expect(result.provisioningCertificateObj.certChain).toHaveLength(3)
+        expect(result.certificates.map((c) => c.name)).toEqual([
+          'leaf',
+          'inter',
+          'real-root'
+        ])
+      })
+
+      test('reports the certificates in the order they are sent', () => {
+        const certManager = new CertManager(new Logger('CertManager'), new NodeForge())
+        const certs = [
+          issue('leaf', 'inter-a', sha384()),
+          issue('inter-b', 'root', sha384()),
+          issue('inter-a', 'inter-b', sha384()),
+          issue('root', 'root', sha384())
+        ]
+
+        const result = certManager.dumpPfx({ certs, keys: [] })
+
+        expect(result.certificates.map((c) => c.name)).toEqual([
+          'leaf',
+          'inter-a',
+          'inter-b',
+          'root'
+        ])
+      })
+
+      test('counts a certificate bag that cannot be read', () => {
+        const nodeForge = new NodeForge()
+        const certManager = new CertManager(new Logger('CertManager'), nodeForge)
+        const readable = issue('leaf', 'root', sha384())
+        const oid = nodeForge.pkiOidsCertBag
+        vi.spyOn(nodeForge, 'pkcs12FromAsn1').mockReturnValue({
+          getBags: (filter: { bagType: string }) =>
+            filter.bagType === oid
+              ? { [oid]: [{ cert: null }, { cert: readable }] }
+              : { [filter.bagType]: [{ key: keys.privateKey }] }
+        } as any)
+
+        const result = certManager.convertPfxToObject(TEST_PFXCERT, 'P@ssw0rd')
+
+        expect(result.certs).toHaveLength(1)
+        expect(result.unreadableCertificates).toBe(1)
+        expect(certManager.dumpPfx(result).unreadableCertificates).toBe(1)
+      })
     })
 
     test('should generate SHA384 fingerprint along with SHA256 and SHA1', () => {
