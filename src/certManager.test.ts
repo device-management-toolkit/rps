@@ -116,6 +116,20 @@ describe('certManager tests', () => {
       expect(certChainPfx.provisioningCertificateObj.privateKey).toBeDefined()
     })
 
+    test('describes every certificate of the chain by role, digest and RSA key size', () => {
+      const certManager = new CertManager(new Logger('CertManager'), new NodeForge())
+      const certChainPfx = certManager.dumpPfx(certManager.convertPfxToObject(TEST_PFXCERT, 'P@ssw0rd'))
+
+      const { certificates } = certChainPfx
+      expect(certificates).toHaveLength(certChainPfx.provisioningCertificateObj.certChain.length)
+      expect(certificates[0]).toMatchObject({ role: 'leaf', hashAlgorithm: certChainPfx.hashAlgorithm })
+      expect(certificates.at(-1)?.role).toBe('root')
+      for (const cert of certificates) {
+        expect(cert.name).not.toBe('')
+        expect(cert.rsaKeySize).toBeGreaterThanOrEqual(2048)
+      }
+    })
+
     test('should generate SHA384 fingerprint along with SHA256 and SHA1', () => {
       const nodeForge = new NodeForge()
       const certManager = new CertManager(new Logger('CertManager'), nodeForge)
