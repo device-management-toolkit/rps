@@ -9,24 +9,50 @@ import { Duplex } from 'node:stream'
 import type Server from 'ws'
 import ClientResponseMsg from './utils/ClientResponseMsg.js'
 import { AMT_ODCA_ROOT_CERTS } from './certs/amt-odca.js'
+import { AMT_DICE_DEBUG_ROOT_CERTS, AMT_DICE_ROOT_CERTS } from './certs/amt-dice.js'
+import { Environment } from './utils/Environment.js'
 import Logger from './Logger.js'
 import { ensurePemCertificate } from './utils/certHelpers.js'
+import {
+  checkProductionRomCertificate,
+  checkUpid,
+  describeChain,
+  type ChainFinding
+} from './utils/amtChainDiagnostics.js'
 
 const logger = new Logger('TLSTunnelManager')
 
 let sessionCounter = 0
 
+export interface TrustedAmtRoot {
+  cert: crypto.X509Certificate
+  /** True for a pre-production (debug) root. Such a root is only present when explicitly enabled. */
+  debug: boolean
+}
+
 /**
- * Whether a certificate subject is the Intel DICE SubCA that AMT 22 and later present at the top of
- * their TLS chain. DICE chains do not terminate at an Intel ODCA root.
+ * The roots an AMT chain may terminate at: the ODCA roots (AMT 21 and earlier) and the release DICE
+ * roots (AMT 22+) always, and the DICE debug root only when `allowDiceDebugRoot` is set, for
+ * pre-production hardware.
  */
-export function isIntelDiceSubCASubject(subject: string): boolean {
-  const attributes = new Set(subject.split(/\n|,\s*/).map((attribute) => attribute.trim()))
-  return (
-    attributes.has('O=Intel Corporation') &&
-    attributes.has('organizationIdentifier=PEN:343') &&
-    [...attributes].some((attribute) => attribute.startsWith('CN=Intel DICE SubCA CAID:'))
-  )
+export function getTrustedAmtRoots(allowDiceDebugRoot: boolean): TrustedAmtRoot[] {
+  const sources: { pems: string[]; debug: boolean }[] = [
+    { pems: [...AMT_ODCA_ROOT_CERTS, ...AMT_DICE_ROOT_CERTS], debug: false }
+  ]
+  if (allowDiceDebugRoot) {
+    sources.push({ pems: AMT_DICE_DEBUG_ROOT_CERTS, debug: true })
+  }
+  const roots: TrustedAmtRoot[] = []
+  for (const { pems, debug } of sources) {
+    for (const pem of pems) {
+      try {
+        roots.push({ cert: new crypto.X509Certificate(pem), debug })
+      } catch (err) {
+        logger.warn(`Failed to parse trusted AMT root: ${(err as Error).message}`)
+      }
+    }
+  }
+  return roots
 }
 
 interface TLSTunnelOptions {
@@ -490,6 +516,8 @@ export class TLSTunnelManager {
       return { ok: false, reason: 'peer certificate chain not available after handshake' }
     }
 
+    this.logPeerChain(chain)
+
     const now = Date.now()
     for (let i = 0; i < chain.length; i++) {
       const cert = chain[i]
@@ -516,52 +544,61 @@ export class TLSTunnelManager {
       }
     }
 
-    const trustedRoots: crypto.X509Certificate[] = []
-    for (const pem of AMT_ODCA_ROOT_CERTS) {
-      try {
-        trustedRoots.push(new crypto.X509Certificate(pem))
-      } catch (err) {
-        logger.warn(`Failed to parse trusted ODCA root: ${(err as Error).message}`)
-      }
-    }
+    const allowDebugRoot = Environment.Config.amt_dice_allow_debug_root === true
+    const trustedRoots = getTrustedAmtRoots(allowDebugRoot)
 
     if (trustedRoots.length === 0) {
-      return { ok: false, reason: 'no trusted ODCA roots available' }
+      return { ok: false, reason: 'no trusted AMT roots available' }
     }
 
     const topCert = chain[chain.length - 1]
-    for (const root of trustedRoots) {
+    for (const { cert: root, debug } of trustedRoots) {
+      let matched: string | undefined
       if (topCert.fingerprint256 === root.fingerprint256) {
-        return {
-          ok: true,
-          reason: `chain terminates at trusted ODCA root (fp=${root.fingerprint256})`
-        }
-      }
-      try {
-        if (topCert.verify(root.publicKey)) {
-          return {
-            ok: true,
-            reason: `top of chain signed by trusted ODCA root (fp=${root.fingerprint256})`
+        matched = `chain terminates at trusted AMT root (fp=${root.fingerprint256})`
+      } else {
+        try {
+          if (topCert.verify(root.publicKey)) {
+            matched = `top of chain signed by trusted AMT root (fp=${root.fingerprint256})`
           }
+        } catch {
+          // Try the next root.
         }
-      } catch {
-        // Try the next root.
+      }
+      if (matched != null) {
+        if (debug) {
+          logger.warn(
+            `NON-PRODUCTION: chain accepted through the DICE debug root (amt_dice_allow_debug_root=true), fp=${root.fingerprint256}`
+          )
+          return { ok: true, reason: `${matched} [DICE debug root, pre-production hardware]` }
+        }
+        return { ok: true, reason: matched }
       }
     }
 
-    // Intel DICE chains are not validated yet: warn and accept them. Every other chain, including
-    // those of older devices, must still terminate at an ODCA root.
-    if (isIntelDiceSubCASubject(topCert.subject)) {
-      logger.warn(
-        `SECURITY WARNING: Intel DICE certificate chain is not validated and is accepted without verification ` +
-          `(top subject=${topCert.subject.replace(/\n/g, ' ')}, top fp256=${topCert.fingerprint256})`
-      )
-      return { ok: true, reason: 'Intel DICE chain accepted without validation' }
-    }
-
+    const debugHint = allowDebugRoot
+      ? ''
+      : ' (set amt_dice_allow_debug_root / RPS_AMT_DICE_ALLOW_DEBUG_ROOT=true to accept pre-production DICE hardware)'
     return {
       ok: false,
-      reason: `chain does not terminate at any trusted ODCA root (${trustedRoots.length} root(s) checked, top subject=${topCert.subject.replace(/\n/g, ' ')})`
+      reason: `chain does not terminate at any trusted AMT root (${trustedRoots.length} root(s) checked, top subject=${topCert.subject.replace(/\n/g, ' ')}, top fp256=${topCert.fingerprint256})${debugHint}`
+    }
+  }
+
+  /** Records the whole chain and the UPID and production findings. Informational only: never changes the verdict. */
+  private logPeerChain(chain: crypto.X509Certificate[]): void {
+    try {
+      logger.debug(`AMT peer chain: ${chain.length} certificate(s), session=${this.sessionId}`)
+      for (const line of describeChain(chain)) {
+        logger.debug(line)
+      }
+
+      const findings: ChainFinding[] = [...checkUpid(chain), ...checkProductionRomCertificate(chain)]
+      for (const finding of findings) {
+        logger[finding.level](`AMT chain check: ${finding.message}`)
+      }
+    } catch (err) {
+      logger.warn(`Failed to log AMT peer chain details: ${(err as Error).message}`)
     }
   }
 
