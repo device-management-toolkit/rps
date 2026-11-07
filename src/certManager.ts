@@ -17,6 +17,16 @@ import {
   type RootCertFingerprint
 } from './models/index.js'
 import { type NodeForge } from './NodeForge.js'
+import { type AMTCertificatePolicy } from './utils/amtCertificatePolicy.js'
+import {
+  type DevicePublicKey,
+  issueLeafWithDeviceKey,
+  parseDevicePublicKey,
+  UnsupportedDeviceKeyError
+} from './utils/ecLeafCertificate.js'
+
+/** The digest a certificate is signed with and the size of a key RPS generates, as chosen by the certificate policy. */
+export type CertificateSigningOptions = Partial<Pick<AMTCertificatePolicy, 'hashAlgorithm' | 'rsaKeySize'>>
 
 interface Attribute {
   name?: string
@@ -306,19 +316,50 @@ export class CertManager {
     return str
   }
 
+  /**
+   * Accept a device public key node-forge cannot represent.
+   *
+   * AMT returns AMT_PublicPrivateKeyPair.DERKey as a DER SubjectPublicKeyInfo. For an RSA key forge parses it
+   * directly; for the ECC-384 key AMT 22 generates, publicKeyFromPem throws because forge is RSA-only. node:crypto
+   * validates the key instead, and the leaf is built around it in issueLeafWithDeviceKey.
+   */
+  parseExternalPublicKey(DERKey: string, forgeError: unknown): DevicePublicKey {
+    try {
+      const key = parseDevicePublicKey(DERKey)
+      this.logger.debug('AMT public key is not RSA; embedding its SubjectPublicKeyInfo as exported by node:crypto')
+      return key
+    } catch (err) {
+      if (err instanceof UnsupportedDeviceKeyError) {
+        throw new UnsupportedCertificateError(`${err.message} (not a parsable RSA key either: ${String(forgeError)})`)
+      }
+      throw err
+    }
+  }
+
   amtCertSignWithCAKey(
     DERKey: string,
     caPrivateKey: pki.PrivateKey | null,
     certAttributes: CertAttributes,
     issuerAttributes: CertAttributes,
     extKeyUsage: AMTKeyUsage,
-    rootCertPem?: string
+    rootCertPem?: string,
+    options: CertificateSigningOptions = {}
   ): CertCreationResult {
     if (!caPrivateKey || caPrivateKey == null) {
-      const certAndKey = this.createCertificate(issuerAttributes)
+      // Fallback CA: honour the policy key size here too, otherwise an AMT 22
+      // profile silently gets a 2048-bit signing key.
+      const certAndKey = this.createCertificate(issuerAttributes, null, null, null, null, undefined, options)
       caPrivateKey = certAndKey.key
     }
-    return this.createCertificate(certAttributes, caPrivateKey, DERKey, issuerAttributes, extKeyUsage, rootCertPem)
+    return this.createCertificate(
+      certAttributes,
+      caPrivateKey,
+      DERKey,
+      issuerAttributes,
+      extKeyUsage,
+      rootCertPem,
+      options
+    )
   }
 
   // Generate a certificate with a set of attributes signed by a rootCert. If the rootCert is omitted, the generated certificate is self-signed.
@@ -329,16 +370,24 @@ export class CertManager {
     DERKey: string | null = null,
     issuerAttributes: CertAttributes | null = null,
     extKeyUsage: AMTKeyUsage | null = null,
-    rootCertPem?: string
+    rootCertPem?: string,
+    options: CertificateSigningOptions = {}
   ): CertCreationResult {
+    const { hashAlgorithm = 'sha256', rsaKeySize = 2048 } = options
     // Generate a keypair and create an X.509v3 certificate
     let keys
+    // Set when the AMT-supplied key is not RSA (AMT 22 generates ECC-384).
+    let externalKey: DevicePublicKey | null = null
     let cert = this.nodeForge.createCert()
     if (!DERKey) {
-      keys = this.nodeForge.rsaGenerateKeyPair(2048)
+      keys = this.nodeForge.rsaGenerateKeyPair(rsaKeySize)
       cert.publicKey = keys.publicKey
     } else {
-      cert.publicKey = this.nodeForge.publicKeyFromPem(`-----BEGIN PUBLIC KEY-----${DERKey}-----END PUBLIC KEY-----`)
+      try {
+        cert.publicKey = this.nodeForge.publicKeyFromPem(`-----BEGIN PUBLIC KEY-----${DERKey}-----END PUBLIC KEY-----`)
+      } catch (err) {
+        externalKey = this.parseExternalPublicKey(DERKey, err)
+      }
     }
     // RFC 5280: serialNumber must be a positive integer. node-forge reads this as a hex string and
     // DER-encodes it as a signed two's-complement INTEGER, so the high bit of the first byte must
@@ -383,13 +432,39 @@ export class CertManager {
       if (issuerAttributes?.ST) rootattrs.push({ shortName: 'ST', value: issuerAttributes.ST })
       if (issuerAttributes?.O) rootattrs.push({ name: 'organizationName', value: issuerAttributes.O })
       cert.setIssuer(rootattrs)
+      if (externalKey) {
+        // forge would derive the key identifier from cert.publicKey, which an EC key cannot be
+        const keyIdentifier = this.nodeForge.createBuffer(externalKey.keyIdentifier.toString('binary'))
+        cert.generateSubjectKeyIdentifier = () => keyIdentifier
+      }
       cert = this.generateLeafCertificate(cert, extKeyUsage)
-      cert.sign(caPrivateKey as pki.rsa.PrivateKey, this.nodeForge.sha256Create())
+      if (externalKey) {
+        const certDer = issueLeafWithDeviceKey({
+          cert,
+          devicePublicKey: externalKey,
+          caPrivateKeyPem: this.nodeForge.privateKeyToPem(caPrivateKey),
+          hashAlgorithm
+        })
+        const certBase64 = certDer.toString('base64')
+        return {
+          h: Math.random(),
+          cert: null,
+          pem: `-----BEGIN CERTIFICATE-----${certBase64}-----END CERTIFICATE-----`,
+          certbin: certBase64,
+          privateKey: undefined as any,
+          privateKeyBin: null,
+          checked: false,
+          key: null
+        }
+      }
+      const digest = hashAlgorithm === 'sha384' ? this.nodeForge.sha384Create() : this.nodeForge.sha256Create()
+      cert.sign(caPrivateKey as pki.rsa.PrivateKey, digest)
     } else {
       // Use our own attributes
       cert.setIssuer(attrs)
       cert = this.generateRootCertificate(cert)
-      cert.sign(keys.privateKey, this.nodeForge.sha256Create())
+      const digest = hashAlgorithm === 'sha384' ? this.nodeForge.sha384Create() : this.nodeForge.sha256Create()
+      cert.sign(keys.privateKey, digest)
     }
 
     return {
