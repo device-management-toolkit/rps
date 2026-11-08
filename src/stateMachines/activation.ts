@@ -42,7 +42,7 @@ import { type DeviceCredentials } from '../interfaces/ISecretManagerService.js'
 import { type ClientObject } from '../models/RCS.Config.js'
 import { NetworkConfiguration } from './networkConfiguration.js'
 import { error } from 'console'
-import { TLSTunnelManager } from '../TLSTunnelManager.js'
+import { AmtChainVerificationError, TLSTunnelManager } from '../TLSTunnelManager.js'
 import { ensurePemCertificate } from '../utils/certHelpers.js'
 import {
   getAMTCertificatePolicy,
@@ -158,6 +158,11 @@ export class Activation {
       input.tenantId
     )
     return domain
+  }
+
+  /** The provisioning status text for a failed tunnel: names a refused chain, otherwise the generic text. */
+  tlsTunnelFailureMessage(error: unknown, fallback: string): string {
+    return error instanceof AmtChainVerificationError ? error.summary : fallback
   }
 
   domainCertFailureMessage(context: ActivationContext): string {
@@ -1760,7 +1765,9 @@ export class Activation {
             target: 'GET_GENERAL_SETTINGS'
           },
           onError: {
-            actions: assign({ errorMessage: 'Failed to initialize TLS tunnel' }),
+            actions: assign({
+              errorMessage: ({ event }) => this.tlsTunnelFailureMessage(event.error, 'Failed to initialize TLS tunnel')
+            }),
             target: 'FAILED'
           }
         }
@@ -2614,7 +2621,10 @@ export class Activation {
             }
           ],
           onError: {
-            actions: assign({ errorMessage: 'Failed to establish TLS tunnel connection' }),
+            actions: assign({
+              errorMessage: ({ event }) =>
+                this.tlsTunnelFailureMessage(event.error, 'Failed to establish TLS tunnel connection')
+            }),
             target: 'FAILED'
           }
         }

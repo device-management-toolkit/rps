@@ -9,24 +9,80 @@ import { Duplex } from 'node:stream'
 import type Server from 'ws'
 import ClientResponseMsg from './utils/ClientResponseMsg.js'
 import { AMT_ODCA_ROOT_CERTS } from './certs/amt-odca.js'
+import { AMT_DICE_DEBUG_ROOT_CERTS, AMT_DICE_ROOT_CERTS } from './certs/amt-dice.js'
+import { Environment } from './utils/Environment.js'
 import Logger from './Logger.js'
 import { ensurePemCertificate } from './utils/certHelpers.js'
+import {
+  checkAmtChain,
+  checkDiceEditionAgainstRoot,
+  describeChain,
+  dnAttribute,
+  isDiceChain,
+  sanitizeForLog,
+  type ChainFinding
+} from './utils/amtChainDiagnostics.js'
 
 const logger = new Logger('TLSTunnelManager')
 
 let sessionCounter = 0
 
 /**
- * Whether a certificate subject is the Intel DICE SubCA that AMT 22 and later present at the top of
- * their TLS chain. DICE chains do not terminate at an Intel ODCA root.
+ * The device's certificate chain was refused. `message` is the full reason for the logs and `summary` is a short
+ * explanation that says which kind of chain failed, for the provisioning status.
  */
-export function isIntelDiceSubCASubject(subject: string): boolean {
-  const attributes = new Set(subject.split(/\n|,\s*/).map((attribute) => attribute.trim()))
-  return (
-    attributes.has('O=Intel Corporation') &&
-    attributes.has('organizationIdentifier=PEN:343') &&
-    [...attributes].some((attribute) => attribute.startsWith('CN=Intel DICE SubCA CAID:'))
-  )
+export class AmtChainVerificationError extends Error {
+  constructor(
+    message: string,
+    readonly summary: string
+  ) {
+    super(message)
+    this.name = 'AmtChainVerificationError'
+  }
+}
+
+interface ChainVerdict {
+  ok: boolean
+  reason: string
+  /** Set when the chain is refused. */
+  summary?: string
+}
+
+export interface TrustedAmtRoot {
+  cert: crypto.X509Certificate
+  /** True for a pre-production (debug) root. Such a root is only present when explicitly enabled. */
+  debug: boolean
+}
+
+/**
+ * The roots an AMT chain may terminate at: the ODCA roots (AMT 21 and earlier) and the release DICE
+ * roots (AMT 22+) always, and the DICE debug root only when `allowDiceDebugRoot` is set, for
+ * pre-production hardware.
+ */
+export function getTrustedAmtRoots(allowDiceDebugRoot: boolean): TrustedAmtRoot[] {
+  const sources: { pems: string[]; debug: boolean }[] = [
+    { pems: [...AMT_ODCA_ROOT_CERTS, ...AMT_DICE_ROOT_CERTS], debug: false }
+  ]
+  if (allowDiceDebugRoot) {
+    sources.push({ pems: AMT_DICE_DEBUG_ROOT_CERTS, debug: true })
+  }
+  const roots: TrustedAmtRoot[] = []
+  for (const { pems, debug } of sources) {
+    for (const pem of pems) {
+      try {
+        roots.push({ cert: new crypto.X509Certificate(pem), debug })
+      } catch (err) {
+        logger.warn(`Failed to parse trusted AMT root: ${(err as Error).message}`)
+      }
+    }
+  }
+  return roots
+}
+
+/** Name and fingerprint of a trusted root, marking the debug root: the release and debug DICE roots share a subject. */
+function describeTrustedRoot({ cert, debug }: TrustedAmtRoot): string {
+  const name = dnAttribute(cert.subject, 'CN')[0] ?? cert.subject.replace(/\n/g, ' ')
+  return `${sanitizeForLog(name)} fp256=${cert.fingerprint256}${debug ? ' [DICE debug root]' : ''}`
 }
 
 interface TLSTunnelOptions {
@@ -253,6 +309,7 @@ export class TLSTunnelManager {
       // verifiers walk the chain cryptographically and skip the EKU check, which is the
       // behavior we want for AMT management TLS.
       const doCustomVerification = this.rejectUnauthorized
+      let chainRefused = false
 
       const tlsOptions: tls.ConnectionOptions = {
         socket: this.duplexStream as any,
@@ -272,9 +329,11 @@ export class TLSTunnelManager {
               : this.verifyAmtChainAgainstODCA(this.tlsSocket!)
 
           if (!verifyResult.ok) {
-            const err = new Error(verifyResult.reason)
-            logger.error(`TLS custom verification failed: ${verifyResult.reason}`)
+            const err = new AmtChainVerificationError(verifyResult.reason, verifyResult.summary ?? verifyResult.reason)
+            // The activation logs the failure with the device once, at error level.
+            logger.warn(`TLS custom verification failed: ${verifyResult.reason}`)
             this.logTLSDiagnostics(this.tlsSocket!, err)
+            chainRefused = true
             this.tlsSocket?.destroy(err)
             settleReject(err)
             return
@@ -288,6 +347,11 @@ export class TLSTunnelManager {
       })
 
       this.tlsSocket.on('error', (err: Error) => {
+        if (chainRefused) {
+          // Raised by destroy() after the chain was refused and already logged.
+          logger.debug(`TLS socket closed after the chain was refused: ${err.message}`)
+          return
+        }
         logger.error(`TLS error: ${err.message}`)
         this.logTLSDiagnostics(this.tlsSocket!, err)
         if (!this.connected) {
@@ -324,7 +388,7 @@ export class TLSTunnelManager {
     return matches ?? [pemBundle]
   }
 
-  private verifyPeerAgainstCustomCA(socket: tls.TLSSocket): { ok: boolean; reason: string } {
+  private verifyPeerAgainstCustomCA(socket: tls.TLSSocket): ChainVerdict {
     const peer = socket.getPeerCertificate(true) as tls.DetailedPeerCertificate
     if (peer?.raw == null) {
       return { ok: false, reason: 'peer certificate not available after handshake' }
@@ -418,12 +482,12 @@ export class TLSTunnelManager {
 
   private logTLSDiagnostics(socket: tls.TLSSocket, err: Error): void {
     try {
-      logger.error(`TLS diagnostics for session ${this.sessionId}:`)
-      logger.error(`  rejectUnauthorized: ${this.rejectUnauthorized}`)
-      logger.error(`  authorized: ${socket.authorized}`)
-      logger.error(`  authorizationError: ${socket.authorizationError ?? 'none'}`)
-      logger.error(`  protocol: ${socket.getProtocol() ?? 'unknown'}`)
-      logger.error(`  cipher: ${JSON.stringify(socket.getCipher?.() ?? 'unavailable')}`)
+      logger.debug(`TLS diagnostics for session ${this.sessionId}:`)
+      logger.debug(`  rejectUnauthorized: ${this.rejectUnauthorized}`)
+      logger.debug(`  authorized: ${socket.authorized}`)
+      logger.debug(`  authorizationError: ${socket.authorizationError ?? 'none'}`)
+      logger.debug(`  protocol: ${socket.getProtocol() ?? 'unknown'}`)
+      logger.debug(`  cipher: ${JSON.stringify(socket.getCipher?.() ?? 'unavailable')}`)
 
       let peerCert: tls.DetailedPeerCertificate | undefined
       try {
@@ -433,33 +497,33 @@ export class TLSTunnelManager {
       }
 
       if (peerCert?.subject) {
-        logger.error(
-          `  peer cert: fp256=${peerCert.fingerprint256 ?? 'n/a'}, serial=${peerCert.serialNumber ?? 'n/a'}, subject=${JSON.stringify(peerCert.subject)}, issuer=${JSON.stringify(peerCert.issuer)}, validFrom=${peerCert.valid_from ?? 'n/a'}, validTo=${peerCert.valid_to ?? 'n/a'}`
+        logger.debug(
+          `  peer cert: fp256=${peerCert.fingerprint256 ?? 'n/a'}, serial=${peerCert.serialNumber ?? 'n/a'}, subject=${sanitizeForLog(JSON.stringify(peerCert.subject))}, issuer=${sanitizeForLog(JSON.stringify(peerCert.issuer))}, validFrom=${peerCert.valid_from ?? 'n/a'}, validTo=${peerCert.valid_to ?? 'n/a'}`
         )
 
         // Parse raw DER for concise normalized view
         if (peerCert.raw) {
           try {
             const x509 = new crypto.X509Certificate(peerCert.raw)
-            logger.error(
-              `  peer x509: fp256=${x509.fingerprint256}, subject=${x509.subject}, issuer=${x509.issuer}, validTo=${x509.validTo}, isCA=${x509.ca}`
+            logger.debug(
+              `  peer x509: fp256=${x509.fingerprint256}, subject=${sanitizeForLog(x509.subject.replace(/\n/g, ' '))}, issuer=${sanitizeForLog(x509.issuer.replace(/\n/g, ' '))}, validTo=${x509.validTo}, isCA=${x509.ca}`
             )
           } catch (parseErr) {
-            logger.error(`  x509 parse error: ${(parseErr as Error).message}`)
+            logger.debug(`  x509 parse error: ${(parseErr as Error).message}`)
           }
         }
       } else {
-        logger.error(`  peer certificate: not available (handshake may not have completed)`)
+        logger.debug(`  peer certificate: not available (handshake may not have completed)`)
       }
 
       // Log the CA certs we're trusting
       const effectiveCa = this.caCerts != null ? this.caCerts : AMT_ODCA_ROOT_CERTS
       const caCount = Array.isArray(effectiveCa) ? effectiveCa.length : 1
-      logger.error(
+      logger.debug(
         `  trusted CA certs loaded: ${caCount} (source: ${this.caCerts != null ? 'MPS root CA' : 'Intel ODCA'})`
       )
     } catch (diagErr) {
-      logger.error(`  diagnostics collection failed: ${(diagErr as Error).message}`)
+      logger.debug(`  diagnostics collection failed: ${(diagErr as Error).message}`)
     }
   }
 
@@ -474,7 +538,7 @@ export class TLSTunnelManager {
    * serverAuth EKU, which would make OpenSSL's default verify reject it with
    * INVALID_PURPOSE despite a cryptographically valid chain.
    */
-  private verifyAmtChainAgainstODCA(socket: tls.TLSSocket): { ok: boolean; reason: string } {
+  private verifyAmtChainAgainstODCA(socket: tls.TLSSocket): ChainVerdict {
     let chain: crypto.X509Certificate[]
     if (this.peerChainDer.length > 0) {
       try {
@@ -490,78 +554,97 @@ export class TLSTunnelManager {
       return { ok: false, reason: 'peer certificate chain not available after handshake' }
     }
 
+    this.logPeerChain(chain)
+    const kind = isDiceChain(chain) ? 'Intel DICE' : 'AMT ODCA'
+    const refuse = (reason: string, summary = `${kind} chain verification failed: ${reason}`): ChainVerdict => ({
+      ok: false,
+      reason,
+      summary
+    })
+
     const now = Date.now()
     for (let i = 0; i < chain.length; i++) {
       const cert = chain[i]
       const validFrom = Date.parse(cert.validFrom)
       const validTo = Date.parse(cert.validTo)
       if (!Number.isNaN(validFrom) && now < validFrom) {
-        return { ok: false, reason: `chain[${i}] not yet valid (validFrom=${cert.validFrom})` }
+        return refuse(`chain[${i}] not yet valid (validFrom=${cert.validFrom})`)
       }
       if (!Number.isNaN(validTo) && now > validTo) {
-        return { ok: false, reason: `chain[${i}] expired (validTo=${cert.validTo})` }
+        return refuse(`chain[${i}] expired (validTo=${cert.validTo})`)
       }
     }
 
     for (let i = 0; i < chain.length - 1; i++) {
       try {
         if (!chain[i].verify(chain[i + 1].publicKey)) {
-          return {
-            ok: false,
-            reason: `chain[${i}] signature does not validate against chain[${i + 1}] public key`
-          }
+          return refuse(`chain[${i}] signature does not validate against chain[${i + 1}] public key`)
         }
       } catch (err) {
-        return { ok: false, reason: `chain[${i}] signature check error: ${(err as Error).message}` }
+        return refuse(`chain[${i}] signature check error: ${(err as Error).message}`)
       }
     }
 
-    const trustedRoots: crypto.X509Certificate[] = []
-    for (const pem of AMT_ODCA_ROOT_CERTS) {
-      try {
-        trustedRoots.push(new crypto.X509Certificate(pem))
-      } catch (err) {
-        logger.warn(`Failed to parse trusted ODCA root: ${(err as Error).message}`)
-      }
-    }
+    const allowDebugRoot = Environment.Config.amt_dice_allow_debug_root === true
+    const trustedRoots = getTrustedAmtRoots(allowDebugRoot)
 
     if (trustedRoots.length === 0) {
-      return { ok: false, reason: 'no trusted ODCA roots available' }
+      return refuse('no trusted AMT roots available')
     }
 
     const topCert = chain[chain.length - 1]
-    for (const root of trustedRoots) {
+    for (const { cert: root, debug } of trustedRoots) {
+      let matched: string | undefined
       if (topCert.fingerprint256 === root.fingerprint256) {
-        return {
-          ok: true,
-          reason: `chain terminates at trusted ODCA root (fp=${root.fingerprint256})`
+        matched = `chain terminates at trusted AMT root (fp=${root.fingerprint256})`
+      } else {
+        try {
+          if (topCert.verify(root.publicKey)) {
+            matched = `top of chain signed by trusted AMT root (fp=${root.fingerprint256})`
+          }
+        } catch {
+          // Try the next root.
         }
       }
-      try {
-        if (topCert.verify(root.publicKey)) {
-          return {
-            ok: true,
-            reason: `top of chain signed by trusted ODCA root (fp=${root.fingerprint256})`
+      if (matched != null) {
+        if (isDiceChain(chain)) {
+          for (const finding of checkDiceEditionAgainstRoot(chain, debug)) {
+            logger[finding.level](`AMT chain check: ${finding.message}`)
           }
         }
-      } catch {
-        // Try the next root.
+        if (debug) {
+          logger.warn(
+            `NON-PRODUCTION: chain accepted through the DICE debug root (amt_dice_allow_debug_root=true), fp=${root.fingerprint256}`
+          )
+          return { ok: true, reason: `${matched} [DICE debug root, pre-production hardware]` }
+        }
+        return { ok: true, reason: matched }
       }
     }
 
-    // Intel DICE chains are not validated yet: warn and accept them. Every other chain, including
-    // those of older devices, must still terminate at an ODCA root.
-    if (isIntelDiceSubCASubject(topCert.subject)) {
-      logger.warn(
-        `SECURITY WARNING: Intel DICE certificate chain is not validated and is accepted without verification ` +
-          `(top subject=${topCert.subject.replace(/\n/g, ' ')}, top fp256=${topCert.fingerprint256})`
-      )
-      return { ok: true, reason: 'Intel DICE chain accepted without validation' }
-    }
+    const debugHint = allowDebugRoot
+      ? ''
+      : ' (set amt_dice_allow_debug_root / RPS_AMT_DICE_ALLOW_DEBUG_ROOT=true to accept pre-production DICE hardware)'
+    return refuse(
+      `chain does not terminate at any trusted AMT root (${trustedRoots.length} root(s) checked: ${trustedRoots.map(describeTrustedRoot).join('; ')}; top subject=${sanitizeForLog(topCert.subject.replace(/\n/g, ' '))}, top fp256=${topCert.fingerprint256})${debugHint}`,
+      `${kind} chain verification failed: not signed by a trusted root`
+    )
+  }
 
-    return {
-      ok: false,
-      reason: `chain does not terminate at any trusted ODCA root (${trustedRoots.length} root(s) checked, top subject=${topCert.subject.replace(/\n/g, ' ')})`
+  /** Records the whole chain and the UPID and production findings. Informational only: never changes the verdict. */
+  private logPeerChain(chain: crypto.X509Certificate[]): void {
+    try {
+      logger.debug(`AMT peer chain: ${chain.length} certificate(s), session=${this.sessionId}`)
+      for (const line of describeChain(chain)) {
+        logger.debug(line)
+      }
+
+      const findings: ChainFinding[] = checkAmtChain(chain)
+      for (const finding of findings) {
+        logger[finding.level](`AMT chain check: ${finding.message}`)
+      }
+    } catch (err) {
+      logger.warn(`Failed to log AMT peer chain details: ${(err as Error).message}`)
     }
   }
 
