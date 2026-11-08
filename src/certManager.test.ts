@@ -323,6 +323,21 @@ describe('certManager tests', () => {
       expect(parsed.checkIssued(root)).toBe(true)
     })
 
+    test('does not set the key encipherment bits that RFC 5480 forbids for an EC key', () => {
+      const { leafCert } = issueEcLeaf()
+      const parsed = forgeAsn1.fromDer(Buffer.from(leafCert.certbin, 'base64').toString('binary'))
+      const tbs = (parsed.value as any[])[0].value as any[]
+      const extensions = tbs[tbs.length - 1].value[0].value as any[]
+      const keyUsageExt = extensions.find((e) => forgeAsn1.derToOid(e.value[0].value) === '2.5.29.15')
+      // extnValue is an OCTET STRING wrapping the BIT STRING: the first byte is the unused-bit count, then the bits
+      const bits = forgeAsn1.fromDer(keyUsageExt.value[keyUsageExt.value.length - 1].value).value as string
+      const usage = bits.charCodeAt(1)
+
+      expect(usage & 0x80).toBeTruthy() // digitalSignature
+      expect(usage & 0x20).toBeFalsy() // keyEncipherment
+      expect(usage & 0x10).toBeFalsy() // dataEncipherment
+    })
+
     test('derives the subjectKeyIdentifier from the EC point', () => {
       const { leafCert, spki } = issueEcLeaf()
       // RFC 5280 4.2.1.2 method (1): SHA-1 over the subjectPublicKey BIT STRING contents, which for an uncompressed
