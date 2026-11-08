@@ -11,12 +11,13 @@ import { Environment } from '../utils/Environment.js'
 import { config } from '../test/helper/Config.js'
 import { NodeForge } from '../NodeForge.js'
 import { CertManager } from '../certManager.js'
+import { AmtChainVerificationError } from '../TLSTunnelManager.js'
 import Logger from '../Logger.js'
 import { PasswordHelper } from '../utils/PasswordHelper.js'
 import { ClientAction } from '../models/RCS.Config.js'
 import { HttpHandler } from '../HttpHandler.js'
 import ClientResponseMsg from '../utils/ClientResponseMsg.js'
-import { type MachineImplementationsSimplified, createActor, fromPromise } from 'xstate'
+import { type MachineImplementationsSimplified, createActor, fromPromise, getNextSnapshot } from 'xstate'
 import { AMTUserName, GATEWAY_TIMEOUT_ERROR } from '../utils/constants.js'
 import got from 'got'
 
@@ -2716,6 +2717,41 @@ describe('Activation State Machine', () => {
         service.send({ type: 'ACTIVATION', clientId, tenantId: '', friendlyName: null as any })
         vi.runAllTicks()
       }))
+
+    describe('tunnel failure status', () => {
+      it('names a refused chain in the provisioning status', () => {
+        const error = new AmtChainVerificationError('full reason', 'Intel DICE chain verification failed: not trusted')
+
+        expect(activation.tlsTunnelFailureMessage(error, 'Failed to initialize TLS tunnel')).toBe(
+          'Intel DICE chain verification failed: not trusted'
+        )
+      })
+
+      it('keeps the generic text for any other failure', () => {
+        expect(activation.tlsTunnelFailureMessage(new Error('socket hang up'), 'Failed to initialize TLS tunnel')).toBe(
+          'Failed to initialize TLS tunnel'
+        )
+        expect(activation.tlsTunnelFailureMessage(undefined, 'Failed to initialize TLS tunnel')).toBe(
+          'Failed to initialize TLS tunnel'
+        )
+      })
+
+      it.each([
+        [
+          new AmtChainVerificationError('full reason', 'Intel DICE chain verification failed: not trusted'),
+          'Intel DICE chain verification failed: not trusted'
+        ],
+        [new Error('socket hang up'), 'Failed to initialize TLS tunnel']
+      ])('records the right status when the tunnel fails with %s', (error, expected) => {
+        const machine = activation.machine.provide({ actions: { 'Send Message to Device': () => {} } })
+        const snapshot = machine.resolveState({ value: 'INIT_TLS_TUNNEL', context: { ...context } })
+
+        const next = getNextSnapshot(machine, snapshot, { type: 'xstate.error.actor.init-tls-tunnel', error })
+
+        expect(next.context.errorMessage).toBe(expected)
+        expect(next.value).toBe('FINAL')
+      })
+    })
 
     describe('provisioning certificate chain check', () => {
       interface Info {
