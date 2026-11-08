@@ -246,7 +246,11 @@ export class CertManager {
     return pfxOut
   }
 
-  generateLeafCertificate(cert: pki.Certificate, keyUsage: AMTKeyUsage | null): pki.Certificate {
+  /**
+   * @param deviceKeyIsEc True when the certificate carries an elliptic-curve key. RFC 5480 section 3 does not allow
+   * the keyEncipherment and dataEncipherment bits for such a key, so they are left out.
+   */
+  generateLeafCertificate(cert: pki.Certificate, keyUsage: AMTKeyUsage | null, deviceKeyIsEc = false): pki.Certificate {
     if (keyUsage) {
       // Figure out the extended key usages
       if (
@@ -268,8 +272,8 @@ export class CertManager {
         keyCertSign: true,
         digitalSignature: true,
         nonRepudiation: true,
-        keyEncipherment: true,
-        dataEncipherment: true
+        keyEncipherment: !deviceKeyIsEc,
+        dataEncipherment: !deviceKeyIsEc
       },
       keyUsage,
       {
@@ -437,7 +441,7 @@ export class CertManager {
         const keyIdentifier = this.nodeForge.createBuffer(externalKey.keyIdentifier.toString('binary'))
         cert.generateSubjectKeyIdentifier = () => keyIdentifier
       }
-      cert = this.generateLeafCertificate(cert, extKeyUsage)
+      cert = this.generateLeafCertificate(cert, extKeyUsage, externalKey != null)
       if (externalKey) {
         const certDer = issueLeafWithDeviceKey({
           cert,
