@@ -283,6 +283,8 @@ export class DataProcessor {
     }
     if (clientMsg.streamClosed === true && clientObj.tlsTunnelManager != null) {
       const manager = clientObj.tlsTunnelManager
+      // Draining the final response may start another request before the EOF callback.
+      clientObj.tlsTunnelNeedsReset = true
       manager.endInput(() => {
         // A retry may already have created another session while the old input drained.
         if (clientObj.tlsTunnelManager !== manager) return

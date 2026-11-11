@@ -186,12 +186,14 @@ describe('DataProcessor TLS methods', () => {
       const old = {
         close: vi.fn(),
         endInput: vi.fn((callback: () => void) => {
+          expect(devices[clientId].tlsTunnelNeedsReset).toBe(true)
           finish = callback
         })
       }
       devices[clientId] = {
         tlsTunnelManager: old,
         tlsTunnelSessionId: 'current-session',
+        tlsTunnelNeedsReset: false,
         pendingPromise: Promise.resolve(),
         reject: vi.fn()
       } as any
@@ -199,10 +201,12 @@ describe('DataProcessor TLS methods', () => {
       const replacement = { close: vi.fn() }
       devices[clientId].tlsTunnelManager = replacement as any
       devices[clientId].tlsTunnelSessionId = 'replacement-session'
+      devices[clientId].tlsTunnelNeedsReset = false
       finish()
       expect(old.close).not.toHaveBeenCalled()
       expect(replacement.close).not.toHaveBeenCalled()
       expect(devices[clientId].tlsTunnelSessionId).toBe('replacement-session')
+      expect(devices[clientId].tlsTunnelNeedsReset).toBe(false)
       expect(devices[clientId].reject).not.toHaveBeenCalled()
     })
 
