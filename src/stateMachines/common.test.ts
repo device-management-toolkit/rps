@@ -467,42 +467,50 @@ describe('Common', () => {
 
 // Retained identities must keep ordinary transport reconnects out of the bootstrap trust phase.
 describe('Retained TLS identity trust', () => {
-  it('requires managed-identity verification on transport reconnect', async () => {
-    const { TLSTunnelManager } = await import('../TLSTunnelManager.js')
-    const id = 'retained-tls-transport-test'
-    const originalConfig = Environment.Config
-    Environment.Config = { ...originalConfig, amt_post_tls_reject: true, amt_tls_tunnel_persistent: true }
-    devices[id] = {
-      tlsEnforced: true,
-      activationStatus: true,
-      tls: { mpsRootCertPEM: 'synthetic-root', validatedCertPEM: 'synthetic-leaf' },
-      ClientSocket: { send: vi.fn() },
-      ClientData: { payload: { currentMode: 2 } },
-      connectionParams: { port: 16993 }
-    } as any
-    const connect = vi.spyOn(TLSTunnelManager.prototype, 'connect').mockResolvedValue(undefined)
-    const onData = vi.spyOn(TLSTunnelManager.prototype, 'onData').mockImplementation(() => {})
-    const send = vi.spyOn(TLSTunnelManager.prototype, 'send').mockImplementation(async () => {
-      devices[id].resolve({ success: true })
-    })
-    try {
-      const result = await invokeWsmanCall({
-        clientId: id,
-        xmlMessage: 'synthetic-test-message',
-        httpHandler: { wrapIt: () => 'synthetic-test-request' }
+  it.each([
+    { verify: true, skipTlsVerification: false },
+    { verify: false, skipTlsVerification: false },
+    { verify: false, skipTlsVerification: true }
+  ])(
+    'enforces retained trust while preserving explicit deactivation override: %j',
+    async ({ verify, skipTlsVerification }) => {
+      const { TLSTunnelManager } = await import('../TLSTunnelManager.js')
+      const id = 'retained-tls-transport-test'
+      const originalConfig = Environment.Config
+      Environment.Config = { ...originalConfig, amt_post_tls_reject: verify, amt_tls_tunnel_persistent: true }
+      devices[id] = {
+        tlsEnforced: true,
+        activationStatus: true,
+        tls: { mpsRootCertPEM: 'synthetic-root', validatedCertPEM: 'synthetic-leaf' },
+        ClientSocket: { send: vi.fn() },
+        ClientData: { payload: { currentMode: 2 } },
+        connectionParams: { port: 16993 }
+      } as any
+      const connect = vi.spyOn(TLSTunnelManager.prototype, 'connect').mockResolvedValue(undefined)
+      const onData = vi.spyOn(TLSTunnelManager.prototype, 'onData').mockImplementation(() => {})
+      const send = vi.spyOn(TLSTunnelManager.prototype, 'send').mockImplementation(async () => {
+        devices[id].resolve({ success: true })
       })
-      expect(result).toEqual({ success: true })
-      expect((devices[id].tlsTunnelManager as any).allowPostCcmTransitionSelfSigned).toBe(false)
-      expect((devices[id].tlsTunnelManager as any).rejectUnauthorized).toBe(true)
-      expect(devices[id].tls.issuedCertPEM).toBeUndefined()
-    } finally {
-      connect.mockRestore()
-      onData.mockRestore()
-      send.mockRestore()
-      Environment.Config = originalConfig
-      delete devices[id]
+      try {
+        const result = await invokeWsmanCall({
+          clientId: id,
+          skipTlsVerification,
+          xmlMessage: 'synthetic-test-message',
+          httpHandler: { wrapIt: () => 'synthetic-test-request' }
+        })
+        expect(result).toEqual({ success: true })
+        expect((devices[id].tlsTunnelManager as any).allowPostCcmTransitionSelfSigned).toBe(false)
+        expect((devices[id].tlsTunnelManager as any).rejectUnauthorized).toBe(!skipTlsVerification)
+        expect(devices[id].tls.issuedCertPEM).toBeUndefined()
+      } finally {
+        connect.mockRestore()
+        onData.mockRestore()
+        send.mockRestore()
+        Environment.Config = originalConfig
+        delete devices[id]
+      }
     }
-  })
+  )
 })
 
 describe('Status code detection', () => {

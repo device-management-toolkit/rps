@@ -132,7 +132,7 @@ const invokeWsmanCallViaTLSTunnel = async <T>(context: any, message: string): Pr
     //     digest auth via the admin password is the trust boundary. Skip verification.
     //   - After RPS has generated/uploaded a TLS cert: issuedCertPEM pins the exact
     //     cert. If an MPS root CA was used instead, mpsRootCertPEM wins.
-    const { hasManagedIdentity, caCert } = getTlsTrustMaterial(clientObj.tls)
+    const { hasManagedIdentity, hasRetainedIdentity, caCert } = getTlsTrustMaterial(clientObj.tls)
     const hasTrustAnchor = caCert != null && caCert !== ''
 
     // Phase A (post-CCM transition): CCM complete but issued cert not yet installed on AMT.
@@ -143,7 +143,10 @@ const invokeWsmanCallViaTLSTunnel = async <T>(context: any, message: string): Pr
     const inPostCcmTransitionSelfSignedPhase =
       clientObj.activationStatus === true && !hasManagedIdentity && hasTrustAnchor
     const skipVerify = context.skipTlsVerification === true || inPostCcmTransitionNoAnchor
-    const rejectUnauthorized = skipVerify ? false : Environment.Config.amt_post_tls_reject === true
+    // Reuse requires authenticated TLS, regardless of the bootstrap verification setting.
+    const rejectUnauthorized = skipVerify
+      ? false
+      : hasRetainedIdentity || Environment.Config.amt_post_tls_reject === true
 
     if (context.skipTlsVerification === true) {
       invokeWsmanLogger.warn(
@@ -177,8 +180,9 @@ const invokeWsmanCallViaTLSTunnel = async <T>(context: any, message: string): Pr
     )
     try {
       await clientObj.tlsTunnelManager.connect()
+      const sessionId = clientObj.tlsTunnelSessionId
       clientObj.tlsTunnelManager.onData((data: Buffer) => {
-        processTLSTunnelResponse(clientId, data, httpHandler)
+        processTLSTunnelResponse(clientId, data, httpHandler, sessionId)
       })
       invokeWsmanLogger.info(`TLS tunnel established`)
     } catch (err) {
@@ -192,10 +196,17 @@ const invokeWsmanCallViaTLSTunnel = async <T>(context: any, message: string): Pr
   }
 
   clientObj.tlsResponseBuffer = undefined
-  clientObj.pendingPromise = new Promise<T>((resolve, reject) => {
-    clientObj.resolve = resolve
-    clientObj.reject = reject
+  const responsePromise = new Promise<T>((resolve, reject) => {
+    clientObj.resolve = (value: T): void => {
+      clientObj.pendingPromise = undefined
+      resolve(value)
+    }
+    clientObj.reject = (error: unknown): void => {
+      clientObj.pendingPromise = undefined
+      reject(error)
+    }
   })
+  clientObj.pendingPromise = responsePromise
 
   try {
     await clientObj.tlsTunnelManager!.send(Buffer.from(message))
@@ -207,7 +218,7 @@ const invokeWsmanCallViaTLSTunnel = async <T>(context: any, message: string): Pr
     clientObj.reject(err)
   }
 
-  const result = (await clientObj.pendingPromise) as T
+  const result = await responsePromise
 
   // When tunnel persistence is disabled, we send Connection: close so AMT tears down
   // the TCP socket after each response. Close the tunnel here so the next call rebuilds.
@@ -229,8 +240,15 @@ const invokeWsmanCallViaTLSTunnel = async <T>(context: any, message: string): Pr
  * HTTP responses may span multiple TLS records, so we buffer data until we have
  * a complete response (detected by finding the end of chunked encoding: 0\r\n\r\n)
  */
-export const processTLSTunnelResponse = (clientId: string, data: Buffer, httpHandler: HttpHandler): void => {
+export const processTLSTunnelResponse = (
+  clientId: string,
+  data: Buffer,
+  httpHandler: HttpHandler,
+  sessionId?: string
+): void => {
   const clientObj = devices[clientId]
+
+  if (sessionId != null && sessionId !== clientObj?.tlsTunnelSessionId) return
 
   if (clientObj == null || clientObj.pendingPromise == null) {
     invokeWsmanLogger.debug(`TLS response received but no pending promise (${data.length} bytes)`)

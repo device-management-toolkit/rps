@@ -330,8 +330,9 @@ export class Activation {
       await clientObj.tlsTunnelManager.connect()
 
       // Set up data handler to process responses
+      const sessionId = clientObj.tlsTunnelSessionId
       clientObj.tlsTunnelManager.onData((data: Buffer) => {
-        processTLSTunnelResponse(input.clientId, data, input.httpHandler)
+        processTLSTunnelResponse(input.clientId, data, input.httpHandler, sessionId)
       })
 
       this.logger.info(`TLS tunnel established for device ${clientObj.uuid}`)
@@ -1423,20 +1424,21 @@ export class Activation {
       // Post-CCM: the device presents the cert RPS just generated and uploaded. Pin
       // against issuedCertPEM (self-signed case). If the cert was signed by an MPS root
       // CA, mpsRootCertPEM holds that CA and wins.
-      const { hasManagedIdentity, caCert } = getTlsTrustMaterial(clientObj.tls)
+      const { hasManagedIdentity, hasRetainedIdentity, caCert } = getTlsTrustMaterial(clientObj.tls)
       const hasTrustAnchor = caCert != null && caCert !== ''
       const inPostCcmTransitionSelfSignedPhase =
         clientObj.activationStatus === true && !hasManagedIdentity && hasTrustAnchor
+      // Retained identities must authenticate the new handshake before reuse continues.
+      const rejectUnauthorized = hasRetainedIdentity || Environment.Config.amt_post_tls_reject === true
 
       clientObj.tlsTunnelManager = new TLSTunnelManager(
         clientObj.ClientSocket,
         input.clientId,
-        Environment.Config.amt_post_tls_reject === true,
+        rejectUnauthorized,
         Environment.Config.amt_legacy_tls_compatibility === true,
         caCert,
         {
-          allowPostCcmTransitionSelfSigned:
-            inPostCcmTransitionSelfSignedPhase && Environment.Config.amt_post_tls_reject === true
+          allowPostCcmTransitionSelfSigned: inPostCcmTransitionSelfSignedPhase && rejectUnauthorized
         }
       )
       clientObj.tlsTunnelSessionId = clientObj.tlsTunnelManager.getSessionId()
@@ -1445,8 +1447,9 @@ export class Activation {
       await clientObj.tlsTunnelManager.connect()
 
       // Set up data handler to process responses
+      const sessionId = clientObj.tlsTunnelSessionId
       clientObj.tlsTunnelManager.onData((data: Buffer) => {
-        processTLSTunnelResponse(input.clientId, data, input.httpHandler)
+        processTLSTunnelResponse(input.clientId, data, input.httpHandler, sessionId)
       })
 
       // Flip to TLS mode so all subsequent WSMAN calls route through the tunnel

@@ -260,6 +260,8 @@ export interface ClientMsg {
   message: string
   payload: any
   tenantId: string
+  tlsSessionId?: string
+  streamClosed?: boolean
 }
 
 export interface Payload {

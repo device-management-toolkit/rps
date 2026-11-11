@@ -4,7 +4,7 @@
  **********************************************************************/
 
 import { AMT, CIM, IPS } from '@device-management-toolkit/wsman-messages'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, X509Certificate } from 'node:crypto'
 // import { devices } from '../WebSocketListener.js'
 import { devices } from '../devices.js'
 import { Environment } from '../utils/Environment.js'
@@ -3298,6 +3298,33 @@ describe('TLS reconfiguration reuse optimizations', () => {
     queueProbe()
     input.tlsProbeSnapshot = (await activation.checkAmtTlsState({ input })).snapshot
   }
+
+  it.each([true, false])(
+    'verifies a retained identity on fresh connection with amt_post_tls_reject=%s',
+    async (verify) => {
+      const originalConfig = Environment.Config
+      Environment.Config = { ...originalConfig, amt_post_tls_reject: verify }
+      vi.spyOn(TLSTunnelManager.prototype, 'connect').mockResolvedValue(undefined)
+      vi.spyOn(TLSTunnelManager.prototype, 'onData').mockImplementation(() => {})
+      try {
+        await probe()
+        queueCertificates()
+        expect((await activation.validateActivatedTlsIdentity({ input })).reuseApproved).toBe(true)
+        await activation.initializeTlsTunnelConnection({ input })
+        const tunnel = devices[syntheticId].tlsTunnelManager as any
+        expect(tunnel.rejectUnauthorized).toBe(true)
+        expect(tunnel.allowPostCcmTransitionSelfSigned).toBe(false)
+        expect(tunnel.caCerts).toBe(certs.root)
+        expect(
+          tunnel.verifyPeerAgainstCustomCA({ getPeerCertificate: () => ({ raw: new X509Certificate(certs.leaf).raw }) })
+            .ok
+        ).toBe(true)
+        expect(tunnel.verifyPeerAgainstCustomCA({ getPeerCertificate: () => ({}) }).ok).toBe(false)
+      } finally {
+        Environment.Config = originalConfig
+      }
+    }
+  )
 
   it('reuses the initial tunnel identity without a pre-seeded session ID', async () => {
     const device = devices[syntheticId]

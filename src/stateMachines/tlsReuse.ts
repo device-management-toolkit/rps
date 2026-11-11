@@ -71,7 +71,15 @@ export function canReuseTlsIdentity(
 }
 
 /** A validated retained leaf is managed identity, but is not a newly issued leaf. */
-export function getTlsTrustMaterial(tls?: TLSConfigFlow): { hasManagedIdentity: boolean; caCert?: string } {
+export function getTlsTrustMaterial(tls?: TLSConfigFlow): {
+  hasManagedIdentity: boolean
+  hasRetainedIdentity: boolean
+  caCert?: string
+} {
   const leaf = tls?.issuedCertPEM || tls?.validatedCertPEM
-  return { hasManagedIdentity: Boolean(leaf), caCert: tls?.mpsRootCertPEM ?? leaf }
+  return {
+    hasManagedIdentity: Boolean(leaf),
+    hasRetainedIdentity: Boolean(tls?.validatedCertPEM),
+    caCert: tls?.mpsRootCertPEM ?? leaf
+  }
 }

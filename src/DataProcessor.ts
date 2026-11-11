@@ -246,6 +246,11 @@ export class DataProcessor {
   async handleTLSData(clientMsg: ClientMsg, clientId: string): Promise<void> {
     const clientObj = devices[clientId]
 
+    if (clientMsg.tlsSessionId != null && clientMsg.tlsSessionId !== clientObj?.tlsTunnelSessionId) {
+      this.logger.debug('Ignoring TLS data from an obsolete tunnel session')
+      return
+    }
+
     if (clientObj?.tlsTunnelNeedsReset === true) {
       return
     }
@@ -267,11 +272,34 @@ export class DataProcessor {
 
   async handleConnectionReset(clientMsg: ClientMsg, clientId: string): Promise<void> {
     const clientObj = devices[clientId]
-    this.logger.warn(`CONNECTION RESET from rpc-go`)
 
     if (clientObj == null) {
       return
     }
+
+    if (clientMsg.tlsSessionId != null && clientMsg.tlsSessionId !== clientObj.tlsTunnelSessionId) {
+      this.logger.debug('Ignoring closure from an obsolete tunnel session')
+      return
+    }
+    if (clientMsg.streamClosed === true && clientObj.tlsTunnelManager != null) {
+      const manager = clientObj.tlsTunnelManager
+      manager.endInput(() => {
+        // A retry may already have created another session while the old input drained.
+        if (clientObj.tlsTunnelManager !== manager) return
+        const interruptedResponse = clientObj.pendingPromise != null
+        manager.close()
+        clientObj.tlsTunnelManager = undefined
+        clientObj.tlsTunnelSessionId = undefined
+        clientObj.tlsResponseBuffer = undefined
+        clientObj.tlsTunnelNeedsReset = true
+        clientObj.amtReconfiguring = interruptedResponse
+        if (interruptedResponse && clientObj.reject != null) {
+          clientObj.reject(new CONNECTION_RESET_ERROR())
+        }
+      })
+      return
+    }
+    this.logger.warn(`CONNECTION RESET from rpc-go`)
 
     if (clientObj.tlsTunnelManager != null) {
       clientObj.tlsTunnelManager.close()

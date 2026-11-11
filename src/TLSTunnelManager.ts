@@ -31,12 +31,14 @@ export class TLSTunnelManager {
   private connected = false
   private handshakeStarted = false
   // Set once a handshake record (0x16) from the peer has been seen on this session. Before
-  // that, this reader treats application-data chunks as stale; after it, TLS 1.3
+  // that, this reader treats application-data records as stale; after it, TLS 1.3
   // may deliver the remaining server handshake as encrypted 0x17 records.
   private serverHandshakeSeen = false
+  private preHandshakeBuffer: Buffer = Buffer.alloc(0)
   private pendingData: Buffer[] = []
   private sessionId: string
   private intentionalClose = false
+  private inputEnded = false
   private writeBuffer: Buffer[] = []
   private flushPending = false
   private peerChainDer: Buffer[] = []
@@ -119,6 +121,10 @@ export class TLSTunnelManager {
 
   private flushWriteBuffer(): void {
     this.flushPending = false
+    if (this.intentionalClose || this.inputEnded) {
+      this.writeBuffer = []
+      return
+    }
     if (this.writeBuffer.length === 0) {
       return
     }
@@ -129,6 +135,7 @@ export class TLSTunnelManager {
 
     const base64Data = combined.toString('base64')
     const msg = ClientResponseMsg.get(this.clientId, base64Data, 'tls_data', 'ok')
+    msg.tlsSessionId = this.sessionId
     try {
       this.clientSocket.send(JSON.stringify(msg), (err?: Error) => {
         if (err) {
@@ -141,28 +148,37 @@ export class TLSTunnelManager {
   }
 
   injectData(data: Buffer): void {
-    // Parse TLS record type
-    let contentType = -1
-    if (data.length >= 5) {
-      contentType = data[0]
-    }
-
-    // Before the first peer handshake record, treat application-data chunks as stale.
-    // After it, pass all chunks to the TLS library for validation: TLS 1.3 uses encrypted
-    // 0x17 handshake records, and a streamed chunk may begin in the middle of a record.
-    if (!this.connected && !this.serverHandshakeSeen && contentType === 0x17) {
+    if (!this.connected && !this.serverHandshakeSeen) {
+      // RPC chunks are not record boundaries. Buffer complete records so a stale
+      // application's header and payload are discarded together, even across chunks.
+      this.preHandshakeBuffer = Buffer.concat([this.preHandshakeBuffer, data])
+      while (this.preHandshakeBuffer.length >= 5) {
+        const recordLength = 5 + this.preHandshakeBuffer.readUInt16BE(3)
+        if (this.preHandshakeBuffer.length < recordLength) return
+        const contentType = this.preHandshakeBuffer[0]
+        const record = this.preHandshakeBuffer.subarray(0, recordLength)
+        this.preHandshakeBuffer = this.preHandshakeBuffer.subarray(recordLength)
+        if (contentType === 0x17) continue
+        if (contentType === 0x16) {
+          this.serverHandshakeSeen = true
+          this.forwardTlsData(Buffer.concat([record, this.preHandshakeBuffer]))
+          this.preHandshakeBuffer = Buffer.alloc(0)
+          return
+        }
+        // Preserve alerts and other records for the TLS library to validate.
+        this.forwardTlsData(record)
+      }
       return
     }
+    // After ServerHello, forward chunks immediately, including encrypted TLS 1.3
+    // handshake records and chunks beginning in the middle of a record.
+    this.forwardTlsData(data)
+  }
 
-    // A streamed handshake header may arrive one byte at a time. Recognize its
-    // initial content-type byte before requiring enough bytes to extract certificates.
-    if (!this.connected && data.length > 0 && data[0] === 0x16) {
-      this.serverHandshakeSeen = true
-    }
-
+  private forwardTlsData(data: Buffer): void {
     // Capture server certificates from TLS Handshake Certificate message (type 0x0b)
     // before OpenSSL processes them, so we can diagnose verification failures
-    if (!this.connected && contentType === 0x16 && data.length > 5) {
+    if (!this.connected && data.length > 5 && data[0] === 0x16) {
       this.extractHandshakeCerts(data)
     }
 
@@ -596,6 +612,28 @@ export class TLSTunnelManager {
 
   onData(callback: (data: Buffer) => void): void {
     this.tlsSocket?.on('data', callback)
+  }
+
+  /** Finish decrypted input before deciding whether the pending HTTP response completed. */
+  endInput(onEnd: () => void): void {
+    if (this.inputEnded) return
+    this.inputEnded = true
+    const socket = this.tlsSocket
+    if (socket == null || socket.destroyed) {
+      onEnd()
+      return
+    }
+    let ended = false
+    const finish = (): void => {
+      if (ended) return
+      ended = true
+      socket.removeListener('end', finish)
+      socket.removeListener('close', finish)
+      onEnd()
+    }
+    socket.once('end', finish)
+    socket.once('close', finish)
+    this.duplexStream.push(null)
   }
 
   close(): void {
