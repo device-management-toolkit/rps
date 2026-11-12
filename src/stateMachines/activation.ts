@@ -75,6 +75,9 @@ export interface ActivationEvent {
   friendlyName: string
 }
 
+// Thrown when the AMT password can't be stored before it could be lost (#2990)
+export class DeviceSecretWriteError extends globalThis.Error {}
+
 export class Activation {
   nodeForge: NodeForge
   certManager: CertManager
@@ -317,6 +320,36 @@ export class Activation {
     return password
   }
 
+  // Stores the AMT password the device has or is about to get, keeping the other stored fields, so a
+  // later failure can't leave the device with a password stored nowhere (#2990). The final
+  // SAVE_DEVICE_TO_SECRET_PROVIDER still writes the full entry.
+  storeAmtPassword = async (clientId: string): Promise<void> => {
+    const clientObj = devices[clientId]
+    const path = `devices/${clientObj.uuid}`
+    if (clientObj.amtPassword == null) {
+      return
+    }
+    let written: any = null
+    try {
+      const existing = (await this.configurator.secretsManager.getSecretAtPath(path)) as DeviceCredentials | null
+      const { version: _version, ...stored } = existing ?? { AMT_PASSWORD: null }
+      written = await this.configurator.secretsManager.writeSecretWithObject(
+        path,
+        { ...stored, AMT_PASSWORD: clientObj.amtPassword },
+        { hostname: clientObj.hostname }
+      )
+    } catch (err) {
+      this.logger.error(`Failed to store AMT password for device ${clientObj.uuid}: ${String(err)}`)
+    }
+    if (written == null) {
+      throw new DeviceSecretWriteError(`Failed to store AMT password for device ${clientObj.uuid}`)
+    }
+  }
+
+  // Only a device that isn't activated yet has no stored password that a pre-write could overwrite
+  private isUnactivated = (input: ActivationContext): boolean =>
+    input.isActivated !== true && input.tlsCCMComplete !== true
+
   sendAdminSetup = async ({ input }: { input: ActivationContext }): Promise<any> => {
     const ips: IPS.Messages = input.ips
     const { clientId, certChainPfx } = input
@@ -324,6 +357,9 @@ export class Activation {
     this.createSignedString(clientId, certChainPfx.hashAlgorithm)
     const clientObj = devices[clientId]
     if (clientObj.nonce != null && clientObj.signature != null) {
+      if (this.isUnactivated(input)) {
+        await this.storeAmtPassword(clientId)
+      }
       input.xmlMessage = ips.HostBasedSetupService.AdminSetup(
         2,
         password,
@@ -363,6 +399,9 @@ export class Activation {
   sendClientSetup = async ({ input }: { input: ActivationContext }): Promise<any> => {
     const ips: IPS.Messages = input.ips
     const password = await this.getPassword(input)
+    if (this.isUnactivated(input)) {
+      await this.storeAmtPassword(input.clientId)
+    }
     input.xmlMessage = ips.HostBasedSetupService.Setup(2, password)
     return await invokeWsmanCall(input)
   }
@@ -383,6 +422,8 @@ export class Activation {
     const amt = new AMT.Messages()
     const mebxPassword = devices[input.clientId].mebxPassword
     if (mebxPassword != null) {
+      // The device already has the new AMT password (e.g. after CHANGE_AMT_PASSWORD); store it first
+      await this.storeAmtPassword(input.clientId)
       input.xmlMessage = amt.SetupAndConfigurationService.SetMEBXPassword(mebxPassword)
       return await invokeWsmanCall(input)
     }
@@ -1790,6 +1831,10 @@ export class Activation {
           },
           onError: [
             {
+              guard: ({ event }) => event.error instanceof DeviceSecretWriteError,
+              target: 'SAVE_DEVICE_TO_SECRET_PROVIDER_FAILURE'
+            },
+            {
               guard: ({ context, event }) =>
                 event.error instanceof GATEWAY_TIMEOUT_ERROR &&
                 context.tlsCCMComplete === true &&
@@ -1960,6 +2005,10 @@ export class Activation {
             }
           ],
           onError: [
+            {
+              guard: ({ event }) => event.error instanceof DeviceSecretWriteError,
+              target: 'SAVE_DEVICE_TO_SECRET_PROVIDER_FAILURE'
+            },
             {
               guard: ({ event }) => event.error instanceof GATEWAY_TIMEOUT_ERROR,
               target: 'CHECK_ACTIVATION_ON_AMT'
@@ -2142,6 +2191,10 @@ export class Activation {
             }
           ],
           onError: [
+            {
+              guard: ({ event }) => event.error instanceof DeviceSecretWriteError,
+              target: 'SAVE_DEVICE_TO_SECRET_PROVIDER_FAILURE'
+            },
             {
               guard: 'isTlsACMPhase',
               actions: assign({

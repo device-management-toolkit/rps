@@ -23,6 +23,7 @@ import got from 'got'
 import { vi, type MockInstance } from 'vitest'
 import { HttpResponseError, coalesceMessage, isDigestRealmValid } from './common.js'
 import {
+  DeviceSecretWriteError,
   type ActivationEvent,
   type ActivationContext as ActivationContextType,
   type Activation as ActivationType
@@ -530,6 +531,80 @@ describe('Activation State Machine', () => {
       devices[context.clientId].mebxPassword = null
       const result = await activation.setMEBxPassword({ input: context })
       expect(result).toBe(null)
+    })
+  })
+
+  describe('store the AMT password before a later failure can lose it', () => {
+    let writeSpy: MockInstance
+    beforeEach(async () => {
+      await activation.configurator.ready
+      const clientObj = devices[clientId]
+      clientObj.uuid = 'test-uuid'
+      clientObj.hostname = 'host1'
+      clientObj.amtPassword = 'newAMTpw'
+      clientObj.mebxPassword = 'newMEBXpw'
+      vi.spyOn(activation.configurator.secretsManager, 'getSecretAtPath').mockResolvedValue({
+        AMT_PASSWORD: 'oldAMTpw',
+        MEBX_PASSWORD: 'oldMEBXpw',
+        TLS_ISSUED_CERTIFICATE: 'cert',
+        version: '3'
+      } as any)
+      writeSpy = vi.spyOn(activation.configurator.secretsManager, 'writeSecretWithObject').mockResolvedValue({})
+    })
+    const expectedWrite = (): void => {
+      expect(writeSpy).toHaveBeenCalledWith(
+        'devices/test-uuid',
+        { AMT_PASSWORD: 'newAMTpw', MEBX_PASSWORD: 'oldMEBXpw', TLS_ISSUED_CERTIFICATE: 'cert' },
+        { hostname: 'host1' }
+      )
+      expect(writeSpy.mock.invocationCallOrder[0]).toBeLessThan(invokeWsmanCallSpy.mock.invocationCallOrder.at(-1)!)
+    }
+
+    it('should store the AMT password before Setup sends it to the device', async () => {
+      invokeWsmanCallSpy.mockClear()
+      await activation.sendClientSetup({ input: context })
+      expectedWrite()
+    })
+    it('should store the AMT password before AdminSetup sends it to the device', async () => {
+      invokeWsmanCallSpy.mockClear()
+      vi.spyOn(activation, 'createSignedString').mockImplementation((id: string): boolean => {
+        devices[id].signature = 'abcdefgh'
+        return true
+      })
+      devices[clientId].nonce = PasswordHelper.generateNonce()
+      context.certChainPfx = { hashAlgorithm: 'sha256' } as any
+      await activation.sendAdminSetup({ input: context })
+      expectedWrite()
+    })
+    it('should store the AMT password set on the device before setting the MEBx password', async () => {
+      invokeWsmanCallSpy.mockClear()
+      await activation.setMEBxPassword({ input: context })
+      expectedWrite()
+    })
+    it('should not touch the device when the AMT password cannot be stored', async () => {
+      invokeWsmanCallSpy.mockClear()
+      writeSpy.mockResolvedValue(null)
+      await expect(activation.sendClientSetup({ input: context })).rejects.toBeInstanceOf(DeviceSecretWriteError)
+      await expect(activation.setMEBxPassword({ input: context })).rejects.toBeInstanceOf(DeviceSecretWriteError)
+      expect(invokeWsmanCallSpy).not.toHaveBeenCalled()
+    })
+    it('should not store the password before Setup when the device is already activated', async () => {
+      invokeWsmanCallSpy.mockClear()
+      context.isActivated = true
+      await activation.sendClientSetup({ input: context })
+      expect(writeSpy).not.toHaveBeenCalled()
+      expect(invokeWsmanCallSpy).toHaveBeenCalled()
+    })
+    it.each([
+      'SETUP',
+      'ADMIN_SETUP',
+      'SET_MEBX_PASSWORD'
+    ])('should go to SAVE_DEVICE_TO_SECRET_PROVIDER_FAILURE when %s cannot store the password', (state) => {
+      const onError = (activation.machine.config.states as any)[state].invoke.onError
+      const first = Array.isArray(onError) ? onError[0] : onError
+      expect(first.target).toBe('SAVE_DEVICE_TO_SECRET_PROVIDER_FAILURE')
+      expect(first.guard({ context, event: { error: new DeviceSecretWriteError('x') } })).toBe(true)
+      expect(first.guard({ context, event: { error: new Error('wsman') } })).toBe(false)
     })
   })
 
