@@ -260,7 +260,24 @@ export interface ClientMsg {
   tenantId: string
 }
 
-export interface Payload {
+// Host inventory reported by rpc-go on activation and syncdeviceinfo. Every field is optional:
+// older rpc-go builds omit them all, and newer builds omit a value the platform cannot provide.
+export interface HostInventory {
+  osName?: string
+  osVersion?: string
+  osDistro?: string
+  serialNumber?: string
+  upid?: UPIDInfo
+}
+
+// Intel Unique Platform ID as reported by rpc-go (IDs are uppercase hex).
+export interface UPIDInfo {
+  csmeId?: string
+  oemId?: string
+  oemPlatformIdType?: string
+}
+
+export interface Payload extends HostInventory {
   ver: string
   build: string
   modes?: any
