@@ -745,6 +745,16 @@ describe('Activation State Machine', () => {
       vi.spyOn(activation.configurator.secretsManager, 'writeSecretWithObject').mockRejectedValueOnce(err)
       await expect(activation.saveDeviceInfoToSecretProvider({ input: context })).rejects.toBe(err)
     })
+    it('should throw if the secret provider write fails and returns null', async () => {
+      const clientObj: any = devices[clientId]
+      clientObj.amtPassword = 'testPw'
+      clientObj.mebxPassword = 'testPw'
+      vi.spyOn(activation.configurator.secretsManager, 'getSecretAtPath').mockResolvedValueOnce(null)
+      vi.spyOn(activation.configurator.secretsManager, 'writeSecretWithObject').mockResolvedValueOnce(null)
+      await expect(activation.saveDeviceInfoToSecretProvider({ input: context })).rejects.toThrow(
+        'Failed to save device credentials to secret provider'
+      )
+    })
     it('should return false if amtPassword is nul', async () => {
       const clientObj: any = devices[clientId]
       clientObj.amtPassword = null
@@ -1036,6 +1046,68 @@ describe('Activation State Machine', () => {
             expect(sendProgressToDeviceSpy).toHaveBeenCalledWith(clientId, 'Configuring AMT features')
             expect(timeSyncInputSpy).toHaveBeenCalledWith(true)
             resolve()
+          }
+        })
+
+        ccmActivationService.start()
+        ccmActivationService.send({ type: 'ACTIVATION', clientId, tenantId: '', friendlyName: null as any })
+        vi.runAllTicks()
+      }))
+
+    it('should fail, not reach SAVE_DEVICE_TO_MPS, when the device secret write returns null', () =>
+      new Promise<void>((resolve, reject) => {
+        vi.useFakeTimers()
+
+        context.profile.activation = 'ccmactivate'
+        devices[clientId].ClientData.payload.ver = '12.0.92'
+        devices[clientId].ClientData.payload.action = ClientAction.CLIENTCTLMODE
+        devices[clientId].amtPassword = 'Intel123!'
+
+        config.guards = {
+          isAdminMode: () => false,
+          isTlsActivation: () => false,
+          isDeviceClientModeActivated: () => true,
+          hasCIRAProfile: () => false,
+          isDigestRealmInvalid: () => false,
+          canActivate: () => true,
+          isActivated: () => false,
+          isAMT19OrNewer: () => false,
+          isTLSEnforced: () => false
+        }
+        config.actors!.getAMTProfile = fromPromise(
+          async ({ input }) =>
+            await Promise.resolve({
+              clientId,
+              profile: { profileName: 'ccm-profile', activation: 'ccmactivate', amtPassword: 'Intel123!' }
+            })
+        )
+        vi.spyOn(activation.configurator.secretsManager, 'getSecretAtPath').mockResolvedValue(null)
+        vi.spyOn(activation.configurator.secretsManager, 'writeSecretWithObject').mockResolvedValue(null)
+        config.actors!.saveDeviceInfoToSecretProvider = fromPromise(activation.saveDeviceInfoToSecretProvider)
+        const saveToMpsSpy = vi.fn(async () => await Promise.resolve(true))
+        config.actors!.saveDeviceInfoToMPS = fromPromise(saveToMpsSpy)
+
+        const mockActivationMachine = activation.machine.provide(config)
+        const visited: string[] = []
+        const ccmActivationService = createActor(mockActivationMachine, { input: context })
+        ccmActivationService.subscribe((state) => {
+          visited.push(JSON.stringify(state.value))
+          if (state.matches('DELAYED_TRANSITION')) {
+            vi.advanceTimersByTime(10000)
+          } else if (state.matches('FINAL')) {
+            // FAILED is transient (always -> FINAL), so assert on the final snapshot
+            try {
+              expect(visited).toContain('"SETUP"')
+              expect(visited).toContain('"SAVE_DEVICE_TO_SECRET_PROVIDER"')
+              expect(visited).not.toContain('"SAVE_DEVICE_TO_MPS"')
+              expect(state.context.errorMessage).toBe('Failed to save device information to Secret Provider')
+              expect(saveToMpsSpy).not.toHaveBeenCalled()
+              resolve()
+            } catch (err) {
+              reject(err)
+            }
+          } else if (state.matches('PROVISIONED')) {
+            reject(new Error(`reached PROVISIONED: ${visited.join(' > ')}`))
           }
         })
 
@@ -2987,6 +3059,17 @@ describe('Activation State Machine', () => {
             TLS_ISSUED_CERTIFICATE: 'issuedCert'
           },
           expect.any(Object)
+        )
+      })
+
+      it('should throw if the secret provider write fails and returns null', async () => {
+        const clientObj = devices[clientId]
+        clientObj.amtPassword = 'testAMTpw'
+        clientObj.tls = { issuedCertPEM: 'issuedCert' } as any
+        vi.spyOn(activation.configurator.secretsManager, 'getSecretAtPath').mockResolvedValueOnce(null)
+        vi.spyOn(activation.configurator.secretsManager, 'writeSecretWithObject').mockResolvedValueOnce(null)
+        await expect(activation.saveTlsTunnelCerts({ input: context } as any)).rejects.toThrow(
+          'Failed to save device credentials to secret provider'
         )
       })
 
