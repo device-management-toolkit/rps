@@ -33,6 +33,14 @@ vi.mock('./common.js', async () => {
     sendProgressToDevice: sendProgressToDeviceSpy,
     recordComponentResult: actual.recordComponentResult,
     updateNetworkStatus: actual.updateNetworkStatus,
+    failAt: actual.failAt,
+    buildFailure: actual.buildFailure,
+
+    stepFailure: actual.stepFailure,
+
+    failureAfterErrorMachine: actual.failureAfterErrorMachine,
+    returnValueOf: actual.returnValueOf,
+    componentFailureResult: actual.componentFailureResult,
     HttpResponseError,
     isDigestRealmValid,
     coalesceMessage
@@ -425,6 +433,17 @@ describe('WiFi Network Configuration', () => {
               if (state.matches('FAILED') && currentStateIndex === flowStates.length) {
                 const status = devices[clientId].status.Network
                 expect(status).toEqual('Wired Network Configured. Failed to get wifi profile from DB')
+                // DB lookup failure: the structured failure names the step and carries the catalog code.
+                expect(devices[clientId].status.Components?.WirelessNetwork).toMatchObject({
+                  Result: 'Failure',
+                  Code: 'RPS_DB_WIFI_PROFILE_READ_FAILED',
+                  Step: 'GET_WIFI_PROFILE'
+                })
+                expect(state.context.failure).toMatchObject({
+                  Code: 'RPS_DB_WIFI_PROFILE_READ_FAILED',
+                  Component: 'WirelessNetwork',
+                  Step: 'GET_WIFI_PROFILE'
+                })
                 resolve()
               }
             } catch (err) {
@@ -1144,6 +1163,59 @@ describe('WiFi Network Configuration', () => {
                 expect(sendProgressToDeviceSpy).toHaveBeenCalledWith(
                   clientId,
                   'Wireless network configuration failed: Failed to add profile5'
+                )
+                resolve()
+              }
+            } catch (err) {
+              reject(err)
+            }
+          },
+          error: (err) => {
+            reject(err)
+          }
+        })
+        service.start()
+        service.send({ type: 'WIFICONFIG', clientId } as any)
+      }))
+    it('maps a non-zero AddWiFiSettings ReturnValue to a structured failure', () =>
+      new Promise<void>((resolve, reject) => {
+        context.wifiSettings = {
+          ElementName: 'Intel(r) AMT Ethernet Port Settings',
+          InstanceID: 'Intel(r) AMT Ethernet Port Settings 1',
+          MACAddress: '00-00-00-00-00-00'
+        }
+        config.actors!.addWifiConfigs = fromPromise(
+          async () => await Promise.resolve({ Envelope: { Body: { AddWiFiSettings_OUTPUT: { ReturnValue: 2066 } } } })
+        )
+        context.wifiProfileName = 'profile6'
+        context.wifiProfileCount = 1
+        config.guards = {
+          is8021xProfileAssociated: () => false,
+          isMoreWiFiProfiles: () => false
+        }
+        const service = createActor(wifiConfiguration.machine.provide(config), { input: context })
+        service.subscribe({
+          next: (state) => {
+            try {
+              if (state.matches('SUCCESS')) {
+                expect(state.context.failure).toEqual({
+                  Code: 'AMT_METHOD_FAILED',
+                  Component: 'WirelessNetwork',
+                  Step: 'ADD_WIFI_SETTINGS',
+                  Reason: 'AMT answered the request with a non-zero return value',
+                  AmtReturnValue: 2066
+                })
+                expect(devices[clientId].status.Components?.WirelessNetwork).toEqual({
+                  Result: 'Failure',
+                  Details: 'Failed to add profile6',
+                  Code: 'AMT_METHOD_FAILED',
+                  Step: 'ADD_WIFI_SETTINGS',
+                  AmtReturnValue: 2066,
+                  Reason: 'AMT answered the request with a non-zero return value'
+                })
+                expect(sendProgressToDeviceSpy).toHaveBeenCalledWith(
+                  clientId,
+                  'Failed to add wireless profile profile6 (ReturnValue 2066)'
                 )
                 resolve()
               }

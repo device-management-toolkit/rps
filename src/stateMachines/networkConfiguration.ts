@@ -11,7 +11,15 @@ import { devices } from '../devices.js'
 import { Error } from './error.js'
 import { Configurator } from '../Configurator.js'
 import { DbCreatorFactory } from '../factories/DbCreatorFactory.js'
-import { type CommonContext, invokeWsmanCall } from './common.js'
+import {
+  type CommonContext,
+  invokeWsmanCall,
+  failAt,
+  buildFailure,
+  recordComponentResult,
+  componentFailureResult
+} from './common.js'
+import { type ComponentResults } from '../models/RCS.Config.js'
 import { UNEXPECTED_PARSE_ERROR } from '../utils/constants.js'
 import { WiredConfiguration } from './wiredNetworkConfiguration.js'
 import { WiFiConfiguration } from './wifiNetworkConfiguration.js'
@@ -147,6 +155,17 @@ export class NetworkConfiguration {
       'Increment Retry Count': assign({ retryCount: ({ context }) => context.retryCount + 1 }),
       'Update Configuration Status': ({ context }) => {
         devices[context.clientId].status.Network = context.errorMessage
+        // The general-settings / ethernet-port steps run before the wired and wifi child machines, and
+        // before the device's interfaces are known: their failure is reported as Network, not blamed
+        // on a wired or wireless component the profile may never have configured.
+        if (context.failure != null) {
+          recordComponentResult(
+            context.clientId,
+            context.failure.Component as keyof ComponentResults,
+            componentFailureResult(context.failure, context.errorMessage),
+            context.failure
+          )
+        }
       }
     }
   }).createMachine({
@@ -201,7 +220,12 @@ export class NetworkConfiguration {
             target: 'ENUMERATE_ETHERNET_PORT_SETTINGS'
           },
           onError: {
-            actions: assign({ errorMessage: () => 'Failed to update amt general settings on device' }),
+            actions: assign(
+              failAt('PUT_GENERAL_SETTINGS', 'Network', {
+                message: 'Failed to update amt general settings on device',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -216,7 +240,12 @@ export class NetworkConfiguration {
             target: 'PULL_ETHERNET_PORT_SETTINGS'
           },
           onError: {
-            actions: assign({ errorMessage: () => 'Failed to get enumeration number to ethernet port settings' }),
+            actions: assign(
+              failAt('ENUMERATE_ETHERNET_PORT_SETTINGS', 'Network', {
+                message: 'Failed to get enumeration number to ethernet port settings',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -237,7 +266,12 @@ export class NetworkConfiguration {
               target: 'ENUMERATE_ETHERNET_PORT_SETTINGS'
             },
             {
-              actions: assign({ errorMessage: () => 'Failed to pull ethernet port settings' }),
+              actions: assign(
+                failAt('PULL_ETHERNET_PORT_SETTINGS', 'Network', {
+                  message: 'Failed to pull ethernet port settings',
+                  error: ({ event }) => event.error
+                })
+              ),
               target: 'FAILED'
             }
           ]
@@ -342,7 +376,23 @@ export class NetworkConfiguration {
           onDone: 'CHECK_GENERAL_SETTINGS' // To do: Need to test as it might not require anymore.
         },
         on: {
-          ONFAILED: 'FAILED'
+          ONFAILED: {
+            // Keep the legacy text untouched; only attach the structured failure derived from the
+            // HTTP response the error machine parsed.
+            actions: assign({
+              failure: ({ context, event }) =>
+                buildFailure(
+                  'ERROR',
+                  'Network',
+                  { error: () => context.message, message: event.output },
+                  {
+                    context,
+                    event
+                  }
+                ).failure
+            }),
+            target: 'FAILED'
+          }
         }
       },
       FAILED: {

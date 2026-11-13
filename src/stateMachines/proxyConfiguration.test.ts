@@ -100,6 +100,16 @@ describe('Proxy Configuration State Machine', () => {
                 const status = devices[clientId].status.Network
                 expect(status).toContain('Failed to get proxy config from DB')
                 expect(devices[clientId].status.Components?.CIRAProxy?.Result).toEqual('Failure')
+                expect(devices[clientId].status.Components?.CIRAProxy).toMatchObject({
+                  Code: 'RPS_DB_PROXY_CONFIG_READ_FAILED',
+                  Step: 'GET_PROXY_CONFIG'
+                })
+                expect(state.context.failure).toMatchObject({
+                  Code: 'RPS_DB_PROXY_CONFIG_READ_FAILED',
+                  Component: 'CIRAProxy',
+                  Step: 'GET_PROXY_CONFIG',
+                  Reason: 'Proxy configuration could not be read from the database'
+                })
                 service.stop()
                 resolve()
               }
@@ -223,6 +233,64 @@ describe('Proxy Configuration State Machine', () => {
         service.send({ type: 'PROXYCONFIG', clientId })
       }))
 
+    it('maps a non-zero AddProxyAccessPoint ReturnValue to a structured failure', () =>
+      new Promise<void>((resolve, reject) => {
+        const progressSpy = vi.spyOn(common, 'sendProgressToDevice').mockImplementation(() => {})
+        context.proxyConfig = {
+          proxyName: 'proxy1',
+          address: 'www.vprodemo.com',
+          infoFormat: 201,
+          port: 900,
+          networkDnsSuffix: 'intel.com'
+        }
+        config.actors!.addProxyConfigs = fromPromise(
+          async () =>
+            await Promise.resolve({ Envelope: { Body: { AddProxyAccessPoint_OUTPUT: { ReturnValue: 2066 } } } })
+        )
+        context.proxyConfigName = 'proxy1'
+        context.proxyConfigsCount = 1
+        config.guards = { isMoreProxyConfigs: () => false, isProxyConfigsExist: () => true }
+
+        const service = createActor(proxyConfiguration.machine.provide(config), { input: context })
+        service.subscribe({
+          next: (state) => {
+            try {
+              if (state.matches('SUCCESS')) {
+                expect(state.context.failure).toEqual({
+                  Code: 'AMT_METHOD_FAILED',
+                  Component: 'CIRAProxy',
+                  Step: 'ADD_PROXY_CONFIGS',
+                  Reason: 'AMT answered the request with a non-zero return value',
+                  AmtReturnValue: 2066
+                })
+                expect(devices[clientId].status.Components?.CIRAProxy).toEqual({
+                  Result: 'Failure',
+                  Details: 'Failed to add proxy1',
+                  Code: 'AMT_METHOD_FAILED',
+                  Step: 'ADD_PROXY_CONFIGS',
+                  AmtReturnValue: 2066,
+                  Reason: 'AMT answered the request with a non-zero return value'
+                })
+                expect(progressSpy).toHaveBeenCalledWith(
+                  clientId,
+                  'Failed to add proxy configuration proxy1 (ReturnValue 2066)'
+                )
+                progressSpy.mockRestore()
+                service.stop()
+                resolve()
+              }
+            } catch (err) {
+              reject(err)
+            }
+          },
+          error: (err) => {
+            reject(err)
+          }
+        })
+        service.start()
+        service.send({ type: 'PROXYCONFIG', clientId })
+      }))
+
     it('should fail and report the detail message with added and failed configs.', () =>
       new Promise<void>((resolve, reject) => {
         context.proxyConfig = {
@@ -257,9 +325,13 @@ describe('Proxy Configuration State Machine', () => {
                 const status = devices[clientId].status.Network
                 expect(status).toEqual('Initial. Failed to add proxy1')
                 // Partial failure (some configs failed) is reported as a CIRAProxy Failure.
+                // AddProxyAccessPoint threw: the structured failure names the step and the error class.
                 expect(devices[clientId].status.Components?.CIRAProxy).toEqual({
                   Result: 'Failure',
-                  Details: 'Failed to add proxy1'
+                  Details: 'Failed to add proxy1',
+                  Code: 'RPS_UNEXPECTED_ERROR',
+                  Step: 'ADD_PROXY_CONFIGS',
+                  Reason: 'An unexpected error occurred'
                 })
                 resolve()
               }
@@ -305,9 +377,14 @@ describe('Proxy Configuration State Machine', () => {
                 const status = devices[clientId].status.Network
                 expect(status).toEqual('Initial. Failed to add proxy1')
                 // Partial failure (some configs failed) is reported as a CIRAProxy Failure.
+                // AMT rejected the proxy: the structured failure carries the raw ReturnValue.
                 expect(devices[clientId].status.Components?.CIRAProxy).toEqual({
                   Result: 'Failure',
-                  Details: 'Failed to add proxy1'
+                  Details: 'Failed to add proxy1',
+                  Code: 'AMT_METHOD_FAILED',
+                  Step: 'ADD_PROXY_CONFIGS',
+                  AmtReturnValue: 1,
+                  Reason: 'AMT answered the request with a non-zero return value'
                 })
                 resolve()
               }
