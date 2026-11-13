@@ -109,6 +109,14 @@ export interface ComponentResult {
   Step?: string
   /** Raw method ReturnValue when the failure came from a method response. */
   AmtReturnValue?: number
+  /** Human-readable description of Code. Present only on Failure. */
+  Reason?: string
+  /** HTTP status when the failure came from an HTTP-level WSMAN response. */
+  HttpStatus?: number
+  /** WSMAN call the device was answering, as Class.Method. Present when the device is what failed. */
+  WsmanCall?: string
+  /** Underlying error text; sent only for device-origin codes (see toWireFailure). */
+  Detail?: string
 }
 
 export interface ComponentResults {
@@ -118,6 +126,15 @@ export interface ComponentResults {
   TLS?: ComponentResult
   CIRAProxy?: ComponentResult
   CIRAConnection?: ComponentResult
+  /**
+   * Shared network setup (general settings, ethernet port discovery) that runs before RPS knows
+   * which interfaces the device has. Present only when the step failed.
+   */
+  Network?: ComponentResult
+  /** AMT features (KVM / SOL / IDER / user consent). Present only when the step failed. */
+  Features?: ComponentResult
+  /** Removal of the previous configuration. Present only when the step failed. */
+  Unconfiguration?: ComponentResult
 }
 
 /**

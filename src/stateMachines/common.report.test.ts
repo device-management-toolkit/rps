@@ -12,7 +12,8 @@ import {
   componentFailureResult,
   recordComponentResult,
   reportProvisioningFailure,
-  resolveStatusError
+  resolveStatusError,
+  toWireFailure
 } from './common.js'
 import { type ProvisioningFailure } from '../models/RCS.Config.js'
 
@@ -24,6 +25,33 @@ const wifiFailure: ProvisioningFailure = {
   AmtReturnValue: 2066
 }
 
+describe('toWireFailure', () => {
+  it('keeps the HTTP status and detail of a device-origin failure', () => {
+    const failure: ProvisioningFailure = {
+      Code: 'WSMAN_BAD_REQUEST',
+      Component: 'TLS',
+      Step: 'ADD_CERTIFICATE',
+      Reason: 'AMT rejected the WSMAN request as malformed (HTTP 400)',
+      HttpStatus: 400,
+      Detail: 'Bad Request'
+    }
+    expect(toWireFailure(failure)).toEqual(failure)
+  })
+
+  it('drops the HTTP status and detail of an RPS-side failure, which came from an internal service', () => {
+    const wire = toWireFailure({
+      Code: 'RPS_UNEXPECTED_ERROR',
+      Component: 'Maintenance',
+      Step: 'GET_DEVICE_FROM_MPS',
+      Reason: 'An unexpected error occurred',
+      HttpStatus: 404,
+      Detail: 'http://mps:3000/api/v1/devices/abc'
+    })
+    expect(wire).not.toHaveProperty('HttpStatus')
+    expect(wire).not.toHaveProperty('Detail')
+  })
+})
+
 describe('componentFailureResult', () => {
   it('carries code, step and return value with the legacy details text', () => {
     expect(componentFailureResult(wifiFailure, 'Failed to add corp-wifi')).toEqual({
@@ -31,7 +59,8 @@ describe('componentFailureResult', () => {
       Details: 'Failed to add corp-wifi',
       Code: 'AMT_METHOD_FAILED',
       Step: 'ADD_WIFI_SETTINGS',
-      AmtReturnValue: 2066
+      AmtReturnValue: 2066,
+      Reason: 'AMT answered the request with a non-zero return value'
     })
   })
 
@@ -41,7 +70,8 @@ describe('componentFailureResult', () => {
       Result: 'Failure',
       Details: wifiFailure.Reason,
       Code: 'AMT_METHOD_FAILED',
-      Step: 'ADD_WIFI_SETTINGS'
+      Step: 'ADD_WIFI_SETTINGS',
+      Reason: 'AMT answered the request with a non-zero return value'
     })
   })
 
@@ -64,8 +94,73 @@ describe('recordComponentResult with failure codes', () => {
       Details: 'Failed to add corp-wifi',
       Code: 'AMT_METHOD_FAILED',
       Step: 'ADD_WIFI_SETTINGS',
-      AmtReturnValue: 2066
+      AmtReturnValue: 2066,
+      Reason: 'AMT answered the request with a non-zero return value'
     })
+  })
+
+  it('carries the same fields as Status.Error: reason, HTTP status, WSMAN call and wire-safe detail', () => {
+    const timeout: ProvisioningFailure = {
+      Code: 'WSMAN_BAD_REQUEST',
+      Component: 'TLS',
+      Step: 'ADD_CERTIFICATE',
+      Reason: 'AMT rejected the WSMAN request as malformed (HTTP 400)',
+      HttpStatus: 400,
+      WsmanCall: 'AMT_PublicKeyManagementService.AddCertificate',
+      Detail: 'Bad Request'
+    }
+    recordComponentResult(clientId, 'TLS', componentFailureResult(timeout, 'Failed to add certificate'))
+    expect(devices[clientId].status.Components?.TLS).toEqual({
+      Result: 'Failure',
+      Details: 'Failed to add certificate',
+      Code: 'WSMAN_BAD_REQUEST',
+      Step: 'ADD_CERTIFICATE',
+      Reason: 'AMT rejected the WSMAN request as malformed (HTTP 400)',
+      HttpStatus: 400,
+      WsmanCall: 'AMT_PublicKeyManagementService.AddCertificate',
+      Detail: 'Bad Request'
+    })
+  })
+
+  it('keeps RPS-internal detail off the component, as it does for Status.Error', () => {
+    const dbFailure: ProvisioningFailure = {
+      Code: 'RPS_DB_PROFILE_NOT_FOUND',
+      Component: 'WiredNetwork',
+      Step: 'GET_8021X_PROFILE',
+      Reason: 'Profile could not be read from the database',
+      Detail: 'connect ECONNREFUSED 10.0.0.5:5432'
+    }
+    expect(componentFailureResult(dbFailure, 'Failed')).not.toHaveProperty('Detail')
+  })
+
+  it('emits the structured log line and MQTT event for a failed component without setting Status.Error', () => {
+    const errorSpy = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => {})
+    const mqttSpy = vi.spyOn(MqttProvider, 'publishEvent').mockImplementation((() => {}) as any)
+    recordComponentResult(
+      clientId,
+      'WirelessNetwork',
+      componentFailureResult(wifiFailure, 'Failed to add corp-wifi'),
+      wifiFailure
+    )
+    expect(errorSpy).toHaveBeenCalledTimes(1)
+    expect(errorSpy.mock.calls[0][0]).toContain('Provisioning failure: ')
+    expect(errorSpy.mock.calls[0][0]).toContain('"Component":"WirelessNetwork"')
+    expect(mqttSpy).toHaveBeenCalledTimes(1)
+    expect(mqttSpy.mock.calls[0][0]).toBe('fail')
+    expect(devices[clientId].status.Error).toBeUndefined()
+    errorSpy.mockRestore()
+    mqttSpy.mockRestore()
+  })
+
+  it('emits nothing for a component result recorded without its failure, or for a Success', () => {
+    const errorSpy = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => {})
+    const mqttSpy = vi.spyOn(MqttProvider, 'publishEvent').mockImplementation((() => {}) as any)
+    recordComponentResult(clientId, 'Activation', componentFailureResult(wifiFailure, 'Failed'))
+    recordComponentResult(clientId, 'TLS', { Result: 'Success', Details: 'ok' }, wifiFailure)
+    expect(errorSpy).not.toHaveBeenCalled()
+    expect(mqttSpy).not.toHaveBeenCalled()
+    errorSpy.mockRestore()
+    mqttSpy.mockRestore()
   })
 
   it('drops failure fields on a Success so they cannot leak from a retry', () => {

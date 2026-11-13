@@ -12,7 +12,14 @@ import {
   mapAMTUserConsent,
   AMTUserConsent
 } from '../models/index.js'
-import { type CommonContext, invokeWsmanCall, sendProgressToDevice } from './common.js'
+import {
+  type CommonContext,
+  componentFailureResult,
+  failAt,
+  invokeWsmanCall,
+  recordComponentResult,
+  sendProgressToDevice
+} from './common.js'
 
 export interface FeatureContext extends CommonContext {
   isRedirectionChanged: boolean
@@ -212,7 +219,13 @@ export class FeaturesConfiguration {
             target: 'GET_IPS_OPT_IN_SERVICE'
           },
           onError: {
-            actions: assign({ statusMessage: () => 'Failed to get AMT redirection service' }),
+            actions: assign(
+              failAt('GET_AMT_REDIRECTION_SERVICE', 'Features', {
+                message: 'Failed to get AMT redirection service',
+                error: ({ event }) => event.error,
+                assignTo: 'statusMessage'
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -227,7 +240,13 @@ export class FeaturesConfiguration {
             target: 'GET_CIM_KVM_REDIRECTION_SAP'
           },
           onError: {
-            actions: assign({ statusMessage: () => 'Failed to get ips opt in service' }),
+            actions: assign(
+              failAt('GET_IPS_OPT_IN_SERVICE', 'Features', {
+                message: 'Failed to get ips opt in service',
+                error: ({ event }) => event.error,
+                assignTo: 'statusMessage'
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -242,7 +261,13 @@ export class FeaturesConfiguration {
             target: 'COMPUTE_UPDATES'
           },
           onError: {
-            actions: assign({ statusMessage: () => 'Failed to get cim kvm redirection sap' }),
+            actions: assign(
+              failAt('GET_CIM_KVM_REDIRECTION_SAP', 'Features', {
+                message: 'Failed to get cim kvm redirection sap',
+                error: ({ event }) => event.error,
+                assignTo: 'statusMessage'
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -264,7 +289,13 @@ export class FeaturesConfiguration {
           input: ({ context }) => context,
           onDone: 'SET_KVM_REDIRECTION_SAP',
           onError: {
-            actions: assign({ statusMessage: () => 'Failed to set redirection service' }),
+            actions: assign(
+              failAt('SET_REDIRECTION_SERVICE', 'Features', {
+                message: 'Failed to set redirection service',
+                error: ({ event }) => event.error,
+                assignTo: 'statusMessage'
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -276,7 +307,13 @@ export class FeaturesConfiguration {
           input: ({ context }) => context,
           onDone: 'PUT_REDIRECTION_SERVICE',
           onError: {
-            actions: assign({ statusMessage: () => 'Failed to set kvm redirection sap' }),
+            actions: assign(
+              failAt('SET_KVM_REDIRECTION_SAP', 'Features', {
+                message: 'Failed to set kvm redirection sap',
+                error: ({ event }) => event.error,
+                assignTo: 'statusMessage'
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -291,7 +328,13 @@ export class FeaturesConfiguration {
             { target: 'SUCCESS' }
           ],
           onError: {
-            actions: assign({ statusMessage: () => 'Failed to put redirection service' }),
+            actions: assign(
+              failAt('PUT_REDIRECTION_SERVICE', 'Features', {
+                message: 'Failed to put redirection service',
+                error: ({ event }) => event.error,
+                assignTo: 'statusMessage'
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -303,7 +346,13 @@ export class FeaturesConfiguration {
           input: ({ context }) => context,
           onDone: 'SUCCESS',
           onError: {
-            actions: assign({ statusMessage: () => 'Failed to put ips opt in service' }),
+            actions: assign(
+              failAt('PUT_IPS_OPT_IN_SERVICE', 'Features', {
+                message: 'Failed to put ips opt in service',
+                error: ({ event }) => event.error,
+                assignTo: 'statusMessage'
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -328,6 +377,14 @@ export class FeaturesConfiguration {
         entry: ({ context }) => {
           this.logger.error(`AMT Features Configuration failed: ${context.statusMessage}`)
           sendProgressToDevice(context.clientId, `AMT features configuration failed: ${context.statusMessage}`)
+          // A features failure does not end the flow: report it as its own component so it reaches
+          // the device, the structured log and MQTT.
+          recordComponentResult(
+            context.clientId,
+            'Features',
+            componentFailureResult(context.failure, context.statusMessage),
+            context.failure
+          )
         },
         type: 'final'
       }

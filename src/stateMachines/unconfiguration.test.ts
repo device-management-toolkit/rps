@@ -14,7 +14,7 @@ import {
 } from './unconfiguration.js'
 import { config } from '../test/helper/Config.js'
 import { HttpHandler } from '../HttpHandler.js'
-import { type MachineImplementationsSimplified, createActor, fromPromise } from 'xstate'
+import { type MachineImplementationsSimplified, createActor, fromCallback, fromPromise, waitFor } from 'xstate'
 import { AMT, CIM, IPS } from '@device-management-toolkit/wsman-messages'
 
 import { HttpResponseError, coalesceMessage, isDigestRealmValid } from './common.js'
@@ -28,6 +28,15 @@ vi.mock('./common.js', async () => {
     invokeWsmanCall: invokeWsmanCallSpy,
     invokeEnterpriseAssistantCall: invokeEnterpriseAssistantCallSpy,
     processTLSTunnelResponse: vi.fn(),
+    failAt: actual.failAt,
+    returnValueOf: actual.returnValueOf,
+    buildFailure: actual.buildFailure,
+
+    stepFailure: actual.stepFailure,
+
+    failureAfterErrorMachine: actual.failureAfterErrorMachine,
+    recordComponentResult: actual.recordComponentResult,
+    componentFailureResult: actual.componentFailureResult,
     HttpResponseError,
     isDigestRealmValid,
     coalesceMessage
@@ -198,6 +207,79 @@ describe('Unconfiguration State Machine', () => {
       delays: {}
     }
     loggerSpy = vi.spyOn(unconfiguration.logger, 'error')
+  })
+
+  it('records a structured failure with the failing step and HTTP status', async () => {
+    configuration.actors!.pullEthernetPortSettings = fromPromise(
+      async ({ input }) => await Promise.reject({ statusCode: 400, statusMessage: 'Bad Request' })
+    )
+    const service = createActor(unconfiguration.machine.provide(configuration), { input: unconfigContext })
+    service.start()
+    service.send({ type: 'REMOVECONFIG', clientId, output: null })
+    const snapshot = await waitFor(service, (s) => s.status === 'done')
+    expect(snapshot.value).toBe('FAILURE')
+    expect(snapshot.context.errorMessage).toBe('Failed to pull ethernet port settings')
+    expect(snapshot.context.failure).toEqual({
+      Code: 'WSMAN_BAD_REQUEST',
+      Component: 'Unconfiguration',
+      Step: 'PULL_ETHERNET_PORT_SETTINGS',
+      Reason: 'AMT rejected the WSMAN request as malformed (HTTP 400)',
+      HttpStatus: 400,
+      Detail: 'Bad Request'
+    })
+    // Unconfiguration does not end the flow, so the failure is reported as its own component.
+    expect(devices[clientId].status.Components?.Unconfiguration).toEqual({
+      Result: 'Failure',
+      Details: 'Failed to pull ethernet port settings',
+      Code: 'WSMAN_BAD_REQUEST',
+      Step: 'PULL_ETHERNET_PORT_SETTINGS',
+      Reason: 'AMT rejected the WSMAN request as malformed (HTTP 400)',
+      HttpStatus: 400,
+      Detail: 'Bad Request'
+    })
+  })
+
+  it('reports the Unconfiguration component when the TLS settings response is not the expected one', async () => {
+    configuration.guards!.tlsSettingDataEnabled = () => true
+    const service = createActor(unconfiguration.machine.provide(configuration), { input: unconfigContext })
+    service.start()
+    service.send({ type: 'REMOVECONFIG', clientId, output: null })
+    const snapshot = await waitFor(service, (s) => s.status === 'done')
+    expect(snapshot.value).toBe('FAILURE')
+    expect(snapshot.context.failure).toEqual({
+      Code: 'WSMAN_REQUEST_FAILED',
+      Component: 'Unconfiguration',
+      Step: 'DISABLE_TLS_SETTING_DATA_RESPONSE',
+      Reason: 'WSMAN request to AMT failed'
+    })
+    expect(devices[clientId].status.Components?.Unconfiguration).toMatchObject({
+      Result: 'Failure',
+      Code: 'WSMAN_REQUEST_FAILED',
+      Step: 'DISABLE_TLS_SETTING_DATA_RESPONSE'
+    })
+  })
+
+  it('reaches FAILURE and reports the failed step when the error machine gives up', async () => {
+    configuration.actors!.enumerateEthernetPortSettings = fromPromise(
+      async ({ input }) => await Promise.reject({ statusCode: 400, statusMessage: 'Bad Request' })
+    )
+    // Stand-in for the error machine: it answers PARSE the way the real one does when it gives up.
+    configuration.actors!.errorMachine = fromCallback(({ sendBack, receive }) => {
+      receive(() => {
+        sendBack({ type: 'ONFAILED', output: 'Bad Request' })
+      })
+    }) as any
+    const service = createActor(unconfiguration.machine.provide(configuration), { input: unconfigContext })
+    service.start()
+    service.send({ type: 'REMOVECONFIG', clientId, output: null })
+    const snapshot = await waitFor(service, (s) => s.status === 'done')
+    expect(snapshot.value).toBe('FAILURE')
+    expect(devices[clientId].status.Components?.Unconfiguration).toMatchObject({
+      Result: 'Failure',
+      Code: 'WSMAN_BAD_REQUEST',
+      Step: 'ENUMERATE_ETHERNET_PORT_SETTINGS',
+      HttpStatus: 400
+    })
   })
 
   it('should eventually reach FAILURE after ENUMERATE_WIFI_ENDPOINT_SETTINGS', () =>

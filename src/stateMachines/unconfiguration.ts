@@ -17,7 +17,15 @@ import { UNEXPECTED_PARSE_ERROR } from '../utils/constants.js'
 import { devices } from '../devices.js'
 import { type AMTConfiguration } from '../models/index.js'
 import { Error } from './error.js'
-import { type CommonContext, invokeWsmanCall } from './common.js'
+import {
+  type CommonContext,
+  componentFailureResult,
+  failAt,
+  failureAfterErrorMachine,
+  invokeWsmanCall,
+  recordComponentResult,
+  stepFailure
+} from './common.js'
 import { Environment } from '../utils/Environment.js'
 
 export interface UnconfigContext extends CommonContext {
@@ -38,7 +46,7 @@ export interface UnconfigContext extends CommonContext {
   cim?: CIM.Messages
 }
 export interface UnconfigEvent {
-  type: 'REMOVECONFIG' | 'ONFAILURE'
+  type: 'REMOVECONFIG' | 'ONFAILED'
   clientId: string
   output?: any
   error?: any
@@ -545,6 +553,16 @@ export class Unconfiguration {
         device.status.TLSConfiguration = ''
         device.status.CIRAConnection = ''
         device.status.Status = context.statusMessage
+        // An unconfiguration failure does not end the flow: report it as its own component so it
+        // reaches the device, the structured log and MQTT.
+        if (context.failure != null) {
+          recordComponentResult(
+            context.clientId,
+            'Unconfiguration',
+            componentFailureResult(context.failure, context.statusMessage || context.errorMessage || undefined),
+            context.failure
+          )
+        }
       },
       'Reset Unauth Count': ({ context }) => {
         devices[context.clientId].unauthCount = 0
@@ -589,10 +607,15 @@ export class Unconfiguration {
             message: event.error,
             clientId: context.clientId
           }),
-          onDone: 'ENUMERATE_ETHERNET_PORT_SETTINGS'
+          // The error machine recovered (e.g. digest retry): the recorded failure no longer applies.
+          onDone: { actions: assign({ failure: undefined }), target: 'ENUMERATE_ETHERNET_PORT_SETTINGS' }
         },
         on: {
-          ONFAILURE: 'FAILURE'
+          // The error machine reports giving up with ONFAILED, like every other machine expects.
+          ONFAILED: {
+            actions: assign({ failure: (args) => failureAfterErrorMachine('Unconfiguration', args) }),
+            target: 'FAILURE'
+          }
         }
       },
       ENUMERATE_ETHERNET_PORT_SETTINGS: {
@@ -605,6 +628,7 @@ export class Unconfiguration {
             target: 'PULL_ETHERNET_PORT_SETTINGS'
           },
           onError: {
+            actions: assign({ failure: stepFailure('ENUMERATE_ETHERNET_PORT_SETTINGS', 'Unconfiguration') }),
             target: 'ERROR'
           }
         }
@@ -625,7 +649,12 @@ export class Unconfiguration {
               target: 'ENUMERATE_ETHERNET_PORT_SETTINGS'
             },
             {
-              actions: assign({ errorMessage: () => 'Failed to pull ethernet port settings' }),
+              actions: assign(
+                failAt('PULL_ETHERNET_PORT_SETTINGS', 'Unconfiguration', {
+                  message: 'Failed to pull ethernet port settings',
+                  error: ({ event }) => event.error
+                })
+              ),
               target: 'FAILURE'
             }
           ]
@@ -654,7 +683,12 @@ export class Unconfiguration {
             target: 'CHECK_GET_8021X_PROFILE_RESPONSE'
           },
           onError: {
-            actions: assign({ errorMessage: () => 'Failed to get 8021x profile' }),
+            actions: assign(
+              failAt('GET_8021X_PROFILE', 'Unconfiguration', {
+                message: 'Failed to get 8021x profile',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILURE'
           }
         }
@@ -690,7 +724,12 @@ export class Unconfiguration {
             }
           ],
           onError: {
-            actions: assign({ errorMessage: () => 'Failed to disable 8021x profile' }),
+            actions: assign(
+              failAt('DISABLE_IEEE8021X_WIRED', 'Unconfiguration', {
+                message: 'Failed to disable 8021x profile',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILURE'
           }
         }
@@ -707,7 +746,12 @@ export class Unconfiguration {
             target: 'PULL_WIFI_ENDPOINT_SETTINGS'
           },
           onError: {
-            actions: assign({ errorMessage: () => 'Failed to get enumeration number for wifi endpoint settings' }),
+            actions: assign(
+              failAt('ENUMERATE_WIFI_ENDPOINT_SETTINGS', 'Unconfiguration', {
+                message: 'Failed to get enumeration number for wifi endpoint settings',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILURE'
           }
         }
@@ -728,7 +772,12 @@ export class Unconfiguration {
               target: 'ENUMERATE_WIFI_ENDPOINT_SETTINGS'
             },
             {
-              actions: assign({ errorMessage: () => 'Failed to pull wifi endpoint settings' }),
+              actions: assign(
+                failAt('PULL_WIFI_ENDPOINT_SETTINGS', 'Unconfiguration', {
+                  message: 'Failed to pull wifi endpoint settings',
+                  error: ({ event }) => event.error
+                })
+              ),
               target: 'FAILURE'
             }
           ]
@@ -756,7 +805,12 @@ export class Unconfiguration {
             target: 'CHECK_WIFI_ENDPOINT_SETTINGS_DELETE_RESPONSE'
           },
           onError: {
-            actions: assign({ errorMessage: () => 'Failed to delete wifi endpoint settings' }),
+            actions: assign(
+              failAt('DELETE_WIFI_ENDPOINT_SETTINGS', 'Unconfiguration', {
+                message: 'Failed to delete wifi endpoint settings',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILURE'
           }
         }
@@ -786,7 +840,12 @@ export class Unconfiguration {
             target: 'PULL_HTTP_PROXY_ACCESS_POINT'
           },
           onError: {
-            actions: assign({ errorMessage: () => 'Failed to enumerate HTTP Proxy Access Point' }),
+            actions: assign(
+              failAt('ENUMERATE_HTTP_PROXY_ACCESS_POINT', 'Unconfiguration', {
+                message: 'Failed to enumerate HTTP Proxy Access Point',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILURE'
           }
         }
@@ -807,7 +866,12 @@ export class Unconfiguration {
               target: 'ENUMERATE_HTTP_PROXY_ACCESS_POINT'
             },
             {
-              actions: assign({ errorMessage: () => 'Failed to pull HTTP Proxy Access Point' }),
+              actions: assign(
+                failAt('PULL_HTTP_PROXY_ACCESS_POINT', 'Unconfiguration', {
+                  message: 'Failed to pull HTTP Proxy Access Point',
+                  error: ({ event }) => event.error
+                })
+              ),
               target: 'FAILURE'
             }
           ]
@@ -839,7 +903,12 @@ export class Unconfiguration {
             target: 'CHECK_HTTP_PROXY_ACCESS_POINT_DELETE_RESPONSE'
           },
           onError: {
-            actions: assign({ errorMessage: () => 'Failed to delete HTTP Proxy Access Point' }),
+            actions: assign(
+              failAt('DELETE_HTTP_PROXY_ACCESS_POINT', 'Unconfiguration', {
+                message: 'Failed to delete HTTP Proxy Access Point',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILURE'
           }
         }
@@ -867,6 +936,9 @@ export class Unconfiguration {
               target: 'REMOVE_REMOTE_ACCESS_POLICY_RULE_ALERT'
             },
             {
+              actions: assign({
+                failure: stepFailure('REMOVE_REMOTE_ACCESS_POLICY_RULE_USER_INITIATED', 'Unconfiguration')
+              }),
               target: 'ERROR'
             }
           ]
@@ -900,7 +972,13 @@ export class Unconfiguration {
             target: 'PULL_MANAGEMENT_PRESENCE_REMOTE_SAP'
           },
           onError: {
-            actions: assign({ statusMessage: () => 'Failed to enumerate Management Presence Remote SAP' }),
+            actions: assign(
+              failAt('ENUMERATE_MANAGEMENT_PRESENCE_REMOTE_SAP', 'Unconfiguration', {
+                message: 'Failed to enumerate Management Presence Remote SAP',
+                error: ({ event }) => event.error,
+                assignTo: 'statusMessage'
+              })
+            ),
             target: 'FAILURE'
           }
         }
@@ -915,7 +993,13 @@ export class Unconfiguration {
             target: 'PULL_MANAGEMENT_PRESENCE_REMOTE_SAP_RESPONSE'
           },
           onError: {
-            actions: assign({ statusMessage: () => 'Failed to Pull Management Presence Remote SAP' }),
+            actions: assign(
+              failAt('PULL_MANAGEMENT_PRESENCE_REMOTE_SAP', 'Unconfiguration', {
+                message: 'Failed to Pull Management Presence Remote SAP',
+                error: ({ event }) => event.error,
+                assignTo: 'statusMessage'
+              })
+            ),
             target: 'FAILURE'
           }
         }
@@ -941,7 +1025,13 @@ export class Unconfiguration {
             target: 'ENUMERATE_TLS_SETTING_DATA'
           },
           onError: {
-            actions: assign({ statusMessage: () => 'Failed to delete Management Presence Remote SAP' }),
+            actions: assign(
+              failAt('DELETE_MANAGEMENT_PRESENCE_REMOTE_SAP', 'Unconfiguration', {
+                message: 'Failed to delete Management Presence Remote SAP',
+                error: ({ event }) => event.error,
+                assignTo: 'statusMessage'
+              })
+            ),
             target: 'FAILURE'
           }
         }
@@ -953,7 +1043,13 @@ export class Unconfiguration {
           id: 'enumerate-tls-setting-data',
           onDone: { actions: assign({ message: ({ event }) => event.output }), target: 'PULL_TLS_SETTING_DATA' },
           onError: {
-            actions: assign({ statusMessage: () => 'Failed to enumerate TLS Setting Data' }),
+            actions: assign(
+              failAt('ENUMERATE_TLS_SETTING_DATA', 'Unconfiguration', {
+                message: 'Failed to enumerate TLS Setting Data',
+                error: ({ event }) => event.error,
+                assignTo: 'statusMessage'
+              })
+            ),
             target: 'FAILURE'
           }
         }
@@ -968,7 +1064,13 @@ export class Unconfiguration {
             target: 'PULL_TLS_SETTING_DATA_RESPONSE'
           },
           onError: {
-            actions: assign({ statusMessage: () => 'Failed to pull TLS Setting Data' }),
+            actions: assign(
+              failAt('PULL_TLS_SETTING_DATA', 'Unconfiguration', {
+                message: 'Failed to pull TLS Setting Data',
+                error: ({ event }) => event.error,
+                assignTo: 'statusMessage'
+              })
+            ),
             target: 'FAILURE'
           }
         }
@@ -1014,7 +1116,16 @@ export class Unconfiguration {
         always: [
           { guard: 'is8023TLS', target: 'DISABLE_TLS_SETTING_DATA_2' },
           { guard: 'isLMSTLSSettings', target: 'SETUP_AND_CONFIGURATION_SERVICE_COMMIT_CHANGES' },
-          { target: 'FAILURE' }
+          {
+            // The Put was answered, but not with the TLS settings instance it was sent for.
+            actions: assign({
+              failure: stepFailure('DISABLE_TLS_SETTING_DATA_RESPONSE', 'Unconfiguration', {
+                code: 'WSMAN_REQUEST_FAILED',
+                error: () => undefined
+              })
+            }),
+            target: 'FAILURE'
+          }
         ]
       },
       SETUP_AND_CONFIGURATION_SERVICE_COMMIT_CHANGES: {
@@ -1027,7 +1138,13 @@ export class Unconfiguration {
             target: 'SETUP_AND_CONFIGURATION_SERVICE_COMMIT_CHANGES_RESPONSE'
           },
           onError: {
-            actions: assign({ statusMessage: () => 'Failed at setup and configuration service commit changes' }),
+            actions: assign(
+              failAt('SETUP_AND_CONFIGURATION_SERVICE_COMMIT_CHANGES', 'Unconfiguration', {
+                message: 'Failed at setup and configuration service commit changes',
+                error: ({ event }) => event.error,
+                assignTo: 'statusMessage'
+              })
+            ),
             target: 'FAILURE'
           }
         }
@@ -1042,7 +1159,13 @@ export class Unconfiguration {
           id: 'enumerate-tls-credential-context',
           onDone: { actions: assign({ message: ({ event }) => event.output }), target: 'PULL_TLS_CREDENTIAL_CONTEXT' },
           onError: {
-            actions: assign({ statusMessage: () => 'Failed to enumerate TLS Credential context' }),
+            actions: assign(
+              failAt('ENUMERATE_TLS_CREDENTIAL_CONTEXT', 'Unconfiguration', {
+                message: 'Failed to enumerate TLS Credential context',
+                error: ({ event }) => event.error,
+                assignTo: 'statusMessage'
+              })
+            ),
             target: 'FAILURE'
           }
         }
@@ -1057,7 +1180,13 @@ export class Unconfiguration {
             target: 'PULL_TLS_CREDENTIAL_CONTEXT_RESPONSE'
           },
           onError: {
-            actions: assign({ statusMessage: () => 'Failed to pull TLS Credential context' }),
+            actions: assign(
+              failAt('PULL_TLS_CREDENTIAL_CONTEXT', 'Unconfiguration', {
+                message: 'Failed to pull TLS Credential context',
+                error: ({ event }) => event.error,
+                assignTo: 'statusMessage'
+              })
+            ),
             target: 'FAILURE'
           }
         }
@@ -1086,7 +1215,13 @@ export class Unconfiguration {
           id: 'enumerate-public-private-key-pair',
           onDone: { actions: assign({ message: ({ event }) => event.output }), target: 'PULL_PUBLIC_PRIVATE_KEY_PAIR' },
           onError: {
-            actions: assign({ statusMessage: () => 'Failed to enumerate public private key pair' }),
+            actions: assign(
+              failAt('ENUMERATE_PUBLIC_PRIVATE_KEY_PAIR', 'Unconfiguration', {
+                message: 'Failed to enumerate public private key pair',
+                error: ({ event }) => event.error,
+                assignTo: 'statusMessage'
+              })
+            ),
             target: 'FAILURE'
           }
         }
@@ -1110,7 +1245,13 @@ export class Unconfiguration {
             target: 'PULL_PUBLIC_PRIVATE_KEY_PAIR_RESPONSE'
           },
           onError: {
-            actions: assign({ statusMessage: () => 'Failed to pull public private key pair' }),
+            actions: assign(
+              failAt('PULL_PUBLIC_PRIVATE_KEY_PAIR', 'Unconfiguration', {
+                message: 'Failed to pull public private key pair',
+                error: ({ event }) => event.error,
+                assignTo: 'statusMessage'
+              })
+            ),
             target: 'FAILURE'
           }
         }
@@ -1142,7 +1283,13 @@ export class Unconfiguration {
           id: 'enumerate-public-key-certificate',
           onDone: { actions: assign({ message: ({ event }) => event.output }), target: 'PULL_PUBLIC_KEY_CERTIFICATE' },
           onError: {
-            actions: assign({ statusMessage: () => 'Failed to enumerate public key certificate' }),
+            actions: assign(
+              failAt('ENUMERATE_PUBLIC_KEY_CERTIFICATE', 'Unconfiguration', {
+                message: 'Failed to enumerate public key certificate',
+                error: ({ event }) => event.error,
+                assignTo: 'statusMessage'
+              })
+            ),
             target: 'FAILURE'
           }
         }
@@ -1166,7 +1313,13 @@ export class Unconfiguration {
             target: 'PULL_PUBLIC_KEY_CERTIFICATE_RESPONSE'
           },
           onError: {
-            actions: assign({ statusMessage: () => 'Failed to pull public key certificate' }),
+            actions: assign(
+              failAt('PULL_PUBLIC_KEY_CERTIFICATE', 'Unconfiguration', {
+                message: 'Failed to pull public key certificate',
+                error: ({ event }) => event.error,
+                assignTo: 'statusMessage'
+              })
+            ),
             target: 'FAILURE'
           }
         }
@@ -1201,7 +1354,13 @@ export class Unconfiguration {
             target: 'GET_ENVIRONMENT_DETECTION_SETTINGS_RESPONSE'
           },
           onError: {
-            actions: assign({ statusMessage: () => 'Failed to get environment detection settings' }),
+            actions: assign(
+              failAt('GET_ENVIRONMENT_DETECTION_SETTINGS', 'Unconfiguration', {
+                message: 'Failed to get environment detection settings',
+                error: ({ event }) => event.error,
+                assignTo: 'statusMessage'
+              })
+            ),
             target: 'FAILURE'
           }
         }
@@ -1226,7 +1385,13 @@ export class Unconfiguration {
             target: 'SUCCESS'
           },
           onError: {
-            actions: assign({ statusMessage: () => 'Failed to put environment detection settings' }),
+            actions: assign(
+              failAt('CLEAR_ENVIRONMENT_DETECTION_SETTINGS', 'Unconfiguration', {
+                message: 'Failed to put environment detection settings',
+                error: ({ event }) => event.error,
+                assignTo: 'statusMessage'
+              })
+            ),
             target: 'FAILURE'
           }
         }
