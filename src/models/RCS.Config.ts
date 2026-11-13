@@ -103,6 +103,12 @@ export interface ComponentResult {
   Mode?: ComponentMode
   /** Human-readable, sentence-case note (no trailing period). On failure this carries the reason. */
   Details?: string
+  /** Failure code from the error catalog (utils/errorCatalog.ts). Present only on Failure. */
+  Code?: string
+  /** State machine step that failed. Present only on Failure. */
+  Step?: string
+  /** Raw AMT / CIM method ReturnValue when the failure came from a method response. */
+  AmtReturnValue?: number
 }
 
 export interface ComponentResults {
@@ -114,6 +120,44 @@ export interface ComponentResults {
   CIRAConnection?: ComponentResult
 }
 
+/**
+ * Which part of the flow a failure belongs to. Mirrors the ComponentResults keys and adds the
+ * phases that have no component entry of their own.
+ */
+export type FailureComponent =
+  | keyof ComponentResults
+  | 'Features'
+  | 'Unconfiguration'
+  | 'Deactivation'
+  | 'Maintenance'
+  | 'TimeSync'
+
+/**
+ * Structured description of a provisioning failure. Built by `failAt` in stateMachines/common.ts
+ * from the error catalog (utils/errorCatalog.ts) and carried on machine context as `failure`.
+ * Additive wire shape: serialized alongside the legacy flat status strings.
+ */
+export interface ProvisioningFailure {
+  /** Stable machine-readable code, e.g. AMT_PT_UNSUPPORTED, WSMAN_TIMEOUT, RPS_DB_PROFILE_NOT_FOUND */
+  Code: string
+  Component: FailureComponent
+  /** State machine step (state name) that failed, e.g. ADD_WIFI_SETTINGS */
+  Step: string
+  /** Human-readable description of the code */
+  Reason: string
+  /** Raw AMT / CIM method ReturnValue when the failure came from a method response */
+  AmtReturnValue?: number
+  /** HTTP status when the failure came from an HTTP-level WSMAN response */
+  HttpStatus?: number
+  /** WSMAN call the device was answering, as Class.Method, e.g. AMT_WiFiPortConfigurationService.AddWiFiSettings */
+  WsmanCall?: string
+  /**
+   * Underlying error text when it adds information beyond Reason. Sent to the device only for
+   * device-origin codes; for RPS-side codes it stays in the RPS logs (see toWireFailure).
+   */
+  Detail?: string
+}
+
 export interface Status {
   Status?: string
   Network?: string
@@ -122,6 +166,21 @@ export interface Status {
   // Additive structured per-component results (issue #2665). The legacy flat fields above are
   // always populated for backwards compatibility; Components carries the granular per-component breakdown.
   Components?: ComponentResults
+  // Additive structured description of the failure that ended the flow: code, component, step and
+  // reason. Present only when the flow failed. Older clients ignore it.
+  Error?: ProvisioningFailure
+}
+
+/** Transport-level diagnostics captured when a WSMAN call exhausts its attempts. */
+export interface WsmanDiagnostics {
+  attempts: number
+  retriesUsed: number
+  errorType: string
+  errorMessage?: string
+  tunnelState: 'present' | 'none'
+  sessionId: string
+  tunnelNeedsReset: boolean
+  amtReconfiguring: boolean
 }
 export interface ClientObject {
   ClientId: string
@@ -167,6 +226,9 @@ export interface ClientObject {
   tunnelResetPromise?: Promise<void>
   resolveTunnelReset?: () => void
   tlsResponseBuffer?: Buffer // Buffer for accumulating HTTP response data across TLS records
+  wsmanDiagnostics?: WsmanDiagnostics // WSMAN attempt-exhaustion context of the call that just failed; cleared by the next successful call
+  lastWsmanCall?: string // Most recent WSMAN call sent to the device, as Class.Method
+  wsmanCallFailed?: boolean // True while the most recent WSMAN call is the one that failed; reset by the next call
 }
 
 export interface CIRAConfigFlow {
