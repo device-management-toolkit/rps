@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { type MachineImplementationsSimplified, createActor, fromPromise, type StateValue } from 'xstate'
+import { type MachineImplementationsSimplified, createActor, fromPromise, type StateValue, waitFor } from 'xstate'
 import { randomUUID } from 'node:crypto'
 import { devices } from '../devices.js'
 import { config } from '../test/helper/Config.js'
@@ -31,6 +31,15 @@ vi.mock('./common.js', async () => {
     invokeWsmanCall: invokeWsmanCallSpy,
     invokeEnterpriseAssistantCall: vi.fn(),
     processTLSTunnelResponse: vi.fn(),
+    resolveStatusError: actual.resolveStatusError,
+    reportProvisioningFailure: actual.reportProvisioningFailure,
+    failAt: actual.failAt,
+    returnValueOf: actual.returnValueOf,
+    buildFailure: actual.buildFailure,
+
+    stepFailure: actual.stepFailure,
+
+    failureAfterErrorMachine: actual.failureAfterErrorMachine,
     HttpResponseError,
     isDigestRealmValid,
     coalesceMessage
@@ -325,4 +334,23 @@ describe('Deactivation State Machine', () => {
       service.start()
       service.send({ type: 'UNPROVISION', clientId, tenantId, output: null, error: null })
     }))
+  it('records a structured failure when the secret provider delete fails', async () => {
+    config.actors!.removeDeviceFromSecretProvider = fromPromise(
+      async () => await Promise.reject(new Error('vault down'))
+    )
+    config.guards = { ...config.guards, isNotFound: () => false }
+    const service = createActor(deactivation.machine.provide(config), { input: deactivationContext })
+    service.start()
+    service.send({ type: 'UNPROVISION', clientId, tenantId, output: null, error: null })
+    const snapshot = await waitFor(service, (s) => s.status === 'done')
+    expect(snapshot.value).toBe('FAILED')
+    expect(snapshot.context.errorMessage).toBe('Failed to remove device from secret provider')
+    expect(snapshot.context.failure).toEqual({
+      Code: 'RPS_SECRETS_DELETE_FAILED',
+      Component: 'Deactivation',
+      Step: 'REMOVE_DEVICE_FROM_SECRET_PROVIDER',
+      Reason: 'Secret could not be deleted from the secret provider',
+      Detail: 'vault down'
+    })
+  })
 })

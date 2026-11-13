@@ -13,7 +13,15 @@ import { Environment } from '../utils/Environment.js'
 import { devices } from '../devices.js'
 import { Error } from './error.js'
 import got, { type Got } from 'got'
-import { type CommonContext, invokeWsmanCall } from './common.js'
+import {
+  type CommonContext,
+  failAt,
+  invokeWsmanCall,
+  reportProvisioningFailure,
+  resolveStatusError,
+  failureAfterErrorMachine,
+  stepFailure
+} from './common.js'
 
 export interface DeactivationContext extends CommonContext {
   unauthCount: number
@@ -60,9 +68,17 @@ export class Deactivation {
     if (status === 'success') {
       clientObj.status.Status = context.statusMessage !== '' ? context.statusMessage : 'Deactivated'
       method = 'success'
+      // The status object lives as long as the connection: drop the failure of an earlier attempt.
+      delete clientObj.status.Error
     } else if (status === 'error') {
       clientObj.status.Status = context.errorMessage !== '' ? context.errorMessage : 'Failed'
       method = 'failed'
+      const failure = resolveStatusError(clientId, context.failure, {
+        component: 'Deactivation',
+        code: 'RPS_DEACTIVATION_FAILED',
+        message: clientObj.status.Status
+      })
+      reportProvisioningFailure(this.logger, clientId, failure, 'deactivation')
     }
 
     const responseMessage = ClientResponseMsg.get(clientId, null, status, method, JSON.stringify(clientObj.status))
@@ -137,7 +153,7 @@ export class Deactivation {
           input: ({ context }) => context,
           id: 'send-unprovision-message',
           onDone: 'REMOVE_DEVICE_FROM_SECRET_PROVIDER',
-          onError: 'ERROR'
+          onError: { actions: assign({ failure: stepFailure('UNPROVISIONING', 'Deactivation') }), target: 'ERROR' }
         }
       },
       REMOVE_DEVICE_FROM_SECRET_PROVIDER: {
@@ -159,7 +175,13 @@ export class Deactivation {
             target: 'REMOVE_DEVICE_FROM_MPS'
           },
           {
-            actions: assign({ errorMessage: () => 'Failed to remove device from secret provider' }),
+            actions: assign(
+              failAt('REMOVE_DEVICE_FROM_SECRET_PROVIDER', 'Deactivation', {
+                code: 'RPS_SECRETS_DELETE_FAILED',
+                message: 'Failed to remove device from secret provider',
+                error: ({ context }) => context.message
+              })
+            ),
             target: 'FAILED'
           }
         ]
@@ -200,13 +222,17 @@ export class Deactivation {
             message: event.error,
             clientId: context.clientId
           }),
-          onDone: 'UNPROVISIONING',
+          // The error machine recovered (e.g. digest retry): the recorded failure no longer applies.
+          onDone: { actions: assign({ failure: undefined }), target: 'UNPROVISIONING' },
           onError: 'FAILED'
         },
         entry: sendTo('error-machine', { type: 'PARSE' }),
         on: {
           ONFAILED: {
-            actions: assign({ errorMessage: ({ event }) => event.output }),
+            actions: assign({
+              errorMessage: ({ event }) => event.output,
+              failure: (args) => failureAfterErrorMachine('Deactivation', args)
+            }),
             target: 'FAILED'
           }
         }
