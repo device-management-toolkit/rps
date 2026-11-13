@@ -17,8 +17,13 @@ import {
   invokeWsmanCall,
   sendProgressToDevice,
   recordComponentResult,
-  updateNetworkStatus
+  updateNetworkStatus,
+  failAt,
+  buildFailure,
+  returnValueOf,
+  componentFailureResult
 } from './common.js'
+import { fromReturnValue } from '../utils/errorCatalog.js'
 import { addUnique, removeItem, addFailure } from '../utils/statusList.js'
 import { type WifiCredentials } from '../interfaces/ISecretManagerService.js'
 import { UNEXPECTED_PARSE_ERROR, DEFAULT_MAX_TCP_RETRANSMISSIONS } from '../utils/constants.js'
@@ -356,24 +361,32 @@ export class WiFiConfiguration {
           sendProgressToDevice(clientId, 'Wireless network configuration completed')
         }
         const isLocalSync = !failed && message === WIRELESS_LOCAL_PROFILE_SYNC_STATUS
-        recordComponentResult(clientId, 'WirelessNetwork', {
-          Result: failed ? 'Failure' : 'Success',
-          Mode: isLocalSync ? 'LocalProfileSync' : undefined,
-          Details: isLocalSync ? LOCAL_PROFILE_SYNC_DETAILS : message
-        })
+        recordComponentResult(
+          clientId,
+          'WirelessNetwork',
+          failed
+            ? componentFailureResult(context.failure, message)
+            : {
+                Result: 'Success',
+                Mode: isLocalSync ? 'LocalProfileSync' : undefined,
+                Details: isLocalSync ? LOCAL_PROFILE_SYNC_DETAILS : message
+              }
+        )
       },
       'Send WiFi Profile Progress': ({ context, event }) => {
         // mirror 'Check Return Value' — keep in sync
-        const returnValue = event.output?.Envelope?.Body?.AddWiFiSettings_OUTPUT?.ReturnValue
+        const returnValue = returnValueOf(event.output, 'AddWiFiSettings')
         // Note 802.1x per profile (wifi can mix PSK and 802.1x profiles).
         // Truthy check, not != null — an empty profile name must not be labeled 802.1x.
         const suffix = context.wifiProfile?.ieee8021xProfileName ? ' (802.1x)' : ''
         if (returnValue === 0) {
           sendProgressToDevice(context.clientId, `Added wireless profile ${context.wifiProfileName}${suffix}`)
         } else {
+          // Name the AMT status so the edge sees the meaning, not just the number.
+          const status = fromReturnValue('WIFI', returnValue).name
           sendProgressToDevice(
             context.clientId,
-            `Failed to add wireless profile ${context.wifiProfileName}${suffix} (ReturnValue ${returnValue})`
+            `Failed to add wireless profile ${context.wifiProfileName}${suffix} (${status}, ReturnValue ${returnValue})`
           )
         }
       },
@@ -387,7 +400,25 @@ export class WiFiConfiguration {
         profilesFailed: ({ context, event }) =>
           event.output.Envelope?.Body?.AddWiFiSettings_OUTPUT?.ReturnValue === 0
             ? removeItem(context.profilesFailed, context.wifiProfileName)
-            : addFailure(context.profilesFailed, context.profilesAdded, context.wifiProfileName)
+            : addFailure(context.profilesFailed, context.profilesAdded, context.wifiProfileName),
+        // Structured failure for the last profile AMT rejected (code, step, return value). A
+        // success leaves any earlier failure in place so partial failures stay reportable.
+        failure: ({ context, event }) => {
+          const returnValue = returnValueOf(event.output, 'AddWiFiSettings')
+          if (returnValue == null || returnValue === 0) {
+            return context.failure
+          }
+          return buildFailure(
+            'ADD_WIFI_SETTINGS',
+            'WirelessNetwork',
+            {
+              returnValue: () => returnValue,
+              namespace: 'WIFI',
+              message: `Failed to add wireless profile ${context.wifiProfileName}`
+            },
+            { context, event }
+          ).failure
+        }
       })
     }
   }).createMachine({
@@ -428,7 +459,12 @@ export class WiFiConfiguration {
             target: 'GET_WIFI_PORT_CONFIGURATION_SERVICE'
           },
           onError: {
-            actions: assign({ errorMessage: () => 'Failed to put Max Retransmissions to ethernet port settings' }),
+            actions: assign(
+              failAt('PUT_MAX_RETRAN_SETTING', 'WirelessNetwork', {
+                message: 'Failed to put Max Retransmissions to ethernet port settings',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -443,7 +479,12 @@ export class WiFiConfiguration {
             target: 'CHECK_WIFI_PORT_CONFIGURATION_SERVICE'
           },
           onError: {
-            actions: assign({ errorMessage: () => 'Failed to get WiFi Port Configuration Service' }),
+            actions: assign(
+              failAt('GET_WIFI_PORT_CONFIGURATION_SERVICE', 'WirelessNetwork', {
+                message: 'Failed to get WiFi Port Configuration Service',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -471,7 +512,12 @@ export class WiFiConfiguration {
             target: 'PUT_WIFI_PORT_CONFIGURATION_SERVICE'
           },
           onError: {
-            actions: assign({ errorMessage: () => 'Failed to get AMT Boot Capabilities' }),
+            actions: assign(
+              failAt('GET_AMT_BOOTCAPABILITIES', 'WirelessNetwork', {
+                message: 'Failed to get AMT Boot Capabilities',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -486,7 +532,12 @@ export class WiFiConfiguration {
             target: 'REQUEST_STATE_CHANGE_FOR_WIFI_PORT'
           },
           onError: {
-            actions: assign({ errorMessage: () => 'Failed to put WiFi Port Configuration Service' }),
+            actions: assign(
+              failAt('PUT_WIFI_PORT_CONFIGURATION_SERVICE', 'WirelessNetwork', {
+                message: 'Failed to put WiFi Port Configuration Service',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -501,7 +552,12 @@ export class WiFiConfiguration {
             target: 'CHECK_FOR_WIFI_PROFILES'
           },
           onError: {
-            actions: assign({ errorMessage: () => 'Failed to update state change for wifi port' }),
+            actions: assign(
+              failAt('REQUEST_STATE_CHANGE_FOR_WIFI_PORT', 'WirelessNetwork', {
+                message: 'Failed to update state change for wifi port',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -526,7 +582,13 @@ export class WiFiConfiguration {
             target: 'CHECK_TO_ADD_WIFI_SETTINGS'
           },
           onError: {
-            actions: assign({ errorMessage: 'Failed to get wifi profile from DB' }),
+            actions: assign(
+              failAt('GET_WIFI_PROFILE', 'WirelessNetwork', {
+                message: 'Failed to get wifi profile from DB',
+                code: 'RPS_DB_WIFI_PROFILE_NOT_FOUND',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -559,7 +621,13 @@ export class WiFiConfiguration {
             }
           ],
           onError: {
-            actions: assign({ errorMessage: 'Failed to initiate cert request with enterprise assistant in 802.1x' }),
+            actions: assign(
+              failAt('ENTERPRISE_ASSISTANT_REQUEST', 'WirelessNetwork', {
+                message: 'Failed to initiate cert request with enterprise assistant in 802.1x',
+                code: 'RPS_EA_REQUEST_FAILED',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -574,7 +642,13 @@ export class WiFiConfiguration {
             target: 'ENUMERATE_PUBLIC_PRIVATE_KEY_PAIR'
           },
           onError: {
-            actions: assign({ errorMessage: 'Failed to generate key pair in 802.1x' }),
+            actions: assign(
+              failAt('GENERATE_KEY_PAIR', 'WirelessNetwork', {
+                message: 'Failed to generate key pair in 802.1x',
+                code: 'RPS_CERT_GENERATION_FAILED',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -589,7 +663,12 @@ export class WiFiConfiguration {
             target: 'PULL_PUBLIC_PRIVATE_KEY_PAIR'
           },
           onError: {
-            actions: assign({ errorMessage: 'Failed to enumerate public private key pair in 802.1x' }),
+            actions: assign(
+              failAt('ENUMERATE_PUBLIC_PRIVATE_KEY_PAIR', 'WirelessNetwork', {
+                message: 'Failed to enumerate public private key pair in 802.1x',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -610,7 +689,12 @@ export class WiFiConfiguration {
               target: 'ENUMERATE_PUBLIC_PRIVATE_KEY_PAIR'
             },
             {
-              actions: assign({ errorMessage: 'Failed to pull public private key pair in 802.1x' }),
+              actions: assign(
+                failAt('PULL_PUBLIC_PRIVATE_KEY_PAIR', 'WirelessNetwork', {
+                  message: 'Failed to pull public private key pair in 802.1x',
+                  error: ({ event }) => event.error
+                })
+              ),
               target: 'FAILED'
             }
           ]
@@ -626,7 +710,13 @@ export class WiFiConfiguration {
             target: 'SIGN_CSR'
           },
           onError: {
-            actions: assign({ errorMessage: 'Failed to send key pair to enterprise assistant in 802.1x' }),
+            actions: assign(
+              failAt('ENTERPRISE_ASSISTANT_RESPONSE', 'WirelessNetwork', {
+                message: 'Failed to send key pair to enterprise assistant in 802.1x',
+                code: 'RPS_EA_REQUEST_FAILED',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -641,7 +731,13 @@ export class WiFiConfiguration {
             target: 'GET_CERT_FROM_ENTERPRISE_ASSISTANT'
           },
           onError: {
-            actions: assign({ errorMessage: 'Failed to have AMT sign CSR in 802.1x' }),
+            actions: assign(
+              failAt('SIGN_CSR', 'WirelessNetwork', {
+                message: 'Failed to have AMT sign CSR in 802.1x',
+                code: 'RPS_CERT_GENERATION_FAILED',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -656,7 +752,13 @@ export class WiFiConfiguration {
             target: 'ADD_CERTIFICATE'
           },
           onError: {
-            actions: assign({ errorMessage: 'Failed to get cert from Microsoft CA in 802.1x' }),
+            actions: assign(
+              failAt('GET_CERT_FROM_ENTERPRISE_ASSISTANT', 'WirelessNetwork', {
+                message: 'Failed to get cert from Microsoft CA in 802.1x',
+                code: 'RPS_EA_REQUEST_FAILED',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -671,7 +773,12 @@ export class WiFiConfiguration {
             target: 'CHECK_RADIUS_SERVER_ROOT_CERTIFICATE'
           },
           onError: {
-            actions: assign({ errorMessage: 'Failed to add certificate in 802.1x' }),
+            actions: assign(
+              failAt('ADD_CERTIFICATE', 'WirelessNetwork', {
+                message: 'Failed to add certificate in 802.1x',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -697,7 +804,12 @@ export class WiFiConfiguration {
             target: 'ADD_WIFI_SETTINGS'
           },
           onError: {
-            actions: assign({ errorMessage: 'Failed to add radius server root certificate in 802.1x' }),
+            actions: assign(
+              failAt('ADD_RADIUS_SERVER_ROOT_CERTIFICATE', 'WirelessNetwork', {
+                message: 'Failed to add radius server root certificate in 802.1x',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -715,7 +827,17 @@ export class WiFiConfiguration {
             actions: [
               assign({
                 profilesFailed: ({ context }) =>
-                  addFailure(context.profilesFailed, context.profilesAdded, context.wifiProfileName)
+                  addFailure(context.profilesFailed, context.profilesAdded, context.wifiProfileName),
+                failure: ({ context, event }) =>
+                  buildFailure(
+                    'ADD_WIFI_SETTINGS',
+                    'WirelessNetwork',
+                    {
+                      error: () => event.error,
+                      message: `Failed to add wireless profile ${context.wifiProfileName}`
+                    },
+                    { context, event }
+                  ).failure
               }),
               ({ context }) =>
                 sendProgressToDevice(context.clientId, `Failed to add wireless profile ${context.wifiProfileName}`)
@@ -746,7 +868,23 @@ export class WiFiConfiguration {
           })
         },
         on: {
-          ONFAILED: 'FAILED'
+          ONFAILED: {
+            // Keep the legacy text untouched; only attach the structured failure derived from the
+            // HTTP response the error machine parsed.
+            actions: assign({
+              failure: ({ context, event }) =>
+                buildFailure(
+                  'ERROR',
+                  'WirelessNetwork',
+                  { error: () => context.message, message: event.output },
+                  {
+                    context,
+                    event
+                  }
+                ).failure
+            }),
+            target: 'FAILED'
+          }
         }
       },
       FAILED: {

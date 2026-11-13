@@ -22,7 +22,16 @@ import {
   sendEnterpriseAssistantKeyPairResponse
 } from './enterpriseAssistant.js'
 import { getAMTCertificatePolicy } from '../utils/amtCertificatePolicy.js'
-import { type CommonContext, invokeWsmanCall, sendProgressToDevice, recordComponentResult } from './common.js'
+import {
+  type CommonContext,
+  invokeWsmanCall,
+  sendProgressToDevice,
+  recordComponentResult,
+  componentFailureResult,
+  failAt,
+  failureAfterErrorMachine,
+  stepFailure
+} from './common.js'
 
 export interface TLSContext extends CommonContext {
   amtProfile: AMTConfiguration | null
@@ -243,10 +252,7 @@ export class TLS {
       const details = context.errorMessage !== '' ? context.errorMessage : 'Failed'
       devices[context.clientId].status.TLSConfiguration = details
       sendProgressToDevice(context.clientId, `TLS configuration failed: ${details}`)
-      recordComponentResult(context.clientId, 'TLS', {
-        Result: 'Failure',
-        Details: details
-      })
+      recordComponentResult(context.clientId, 'TLS', componentFailureResult(context.failure, details))
     }
   }
 
@@ -366,7 +372,7 @@ export class TLS {
       amt: input.amt,
       tlsSettingData: input.tlsSettingData
     }),
-    output: ({ context }) => ({ status: context.status, errorMessage: context.errorMessage }),
+    output: ({ context }) => ({ status: context.status, errorMessage: context.errorMessage, failure: context.failure }),
     states: {
       PROVISIONED: {
         on: {
@@ -391,13 +397,19 @@ export class TLS {
             {
               // Handle 401 auth errors (stale nonce) through ERROR machine for retry
               guard: ({ event }) => (event.error as any)?.statusCode === 401,
-              actions: assign({ message: ({ event }) => event.error }),
+              actions: assign({
+                message: ({ event }) => event.error,
+                failure: stepFailure('ENUMERATE_PUBLIC_KEY_CERTIFICATE', 'TLS')
+              }),
               target: 'ERROR'
             },
             {
-              actions: assign({
-                errorMessage: 'Failed to enumerate public key certificates'
-              }),
+              actions: assign(
+                failAt('ENUMERATE_PUBLIC_KEY_CERTIFICATE', 'TLS', {
+                  message: 'Failed to enumerate public key certificates',
+                  error: ({ event }) => event.error
+                })
+              ),
               target: 'FAILED'
             }
           ]
@@ -422,7 +434,12 @@ export class TLS {
               target: 'ENUMERATE_PUBLIC_KEY_CERTIFICATE'
             },
             {
-              actions: assign({ errorMessage: 'Failed to pull public key certificates' }),
+              actions: assign(
+                failAt('PULL_PUBLIC_KEY_CERTIFICATE', 'TLS', {
+                  message: 'Failed to pull public key certificates',
+                  error: ({ event }) => event.error
+                })
+              ),
               target: 'FAILED'
             }
           ]
@@ -458,9 +475,12 @@ export class TLS {
             target: 'GENERATE_KEY_PAIR'
           },
           onError: {
-            actions: assign({
-              errorMessage: 'Failed to initiate cert request with enterprise assistant'
-            }),
+            actions: assign(
+              failAt('ENTERPRISE_ASSISTANT_REQUEST', 'TLS', {
+                message: 'Failed to initiate cert request with enterprise assistant',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -477,9 +497,12 @@ export class TLS {
             target: 'SIGN_CSR'
           },
           onError: {
-            actions: assign({
-              errorMessage: 'Failed to send key pair to enterprise assistant'
-            }),
+            actions: assign(
+              failAt('ENTERPRISE_ASSISTANT_RESPONSE', 'TLS', {
+                message: 'Failed to send key pair to enterprise assistant',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -496,9 +519,13 @@ export class TLS {
             target: 'GET_CERT_FROM_ENTERPRISE_ASSISTANT'
           },
           onError: {
-            actions: assign({
-              errorMessage: 'Failed to have AMT sign CSR'
-            }),
+            actions: assign(
+              failAt('SIGN_CSR', 'TLS', {
+                message: 'Failed to have AMT sign CSR',
+                code: 'RPS_CERT_GENERATION_FAILED',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -515,9 +542,12 @@ export class TLS {
             target: 'ADD_CERTIFICATE'
           },
           onError: {
-            actions: assign({
-              errorMessage: 'Failed to get cert from Microsoft CA'
-            }),
+            actions: assign(
+              failAt('GET_CERT_FROM_ENTERPRISE_ASSISTANT', 'TLS', {
+                message: 'Failed to get cert from Microsoft CA',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -534,9 +564,12 @@ export class TLS {
             target: 'GENERATE_KEY_PAIR'
           },
           onError: {
-            actions: assign({
-              errorMessage: 'Failed to add trusted root certificates'
-            }),
+            actions: assign(
+              failAt('ADD_TRUSTED_ROOT_CERTIFICATE', 'TLS', {
+                message: 'Failed to add trusted root certificates',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -553,9 +586,13 @@ export class TLS {
             target: 'ENUMERATE_PUBLIC_PRIVATE_KEY_PAIR'
           },
           onError: {
-            actions: assign({
-              errorMessage: 'Failed to generate key pair'
-            }),
+            actions: assign(
+              failAt('GENERATE_KEY_PAIR', 'TLS', {
+                message: 'Failed to generate key pair',
+                code: 'RPS_CERT_GENERATION_FAILED',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -572,9 +609,12 @@ export class TLS {
             target: 'PULL_PUBLIC_PRIVATE_KEY_PAIR'
           },
           onError: {
-            actions: assign({
-              errorMessage: 'Failed to enumerate public private key pair'
-            }),
+            actions: assign(
+              failAt('ENUMERATE_PUBLIC_PRIVATE_KEY_PAIR', 'TLS', {
+                message: 'Failed to enumerate public private key pair',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -598,7 +638,12 @@ export class TLS {
               target: 'ENUMERATE_PUBLIC_PRIVATE_KEY_PAIR'
             },
             {
-              actions: assign({ errorMessage: 'Failed to pull public private key pair' }),
+              actions: assign(
+                failAt('PULL_PUBLIC_PRIVATE_KEY_PAIR', 'TLS', {
+                  message: 'Failed to pull public private key pair',
+                  error: ({ event }) => event.error
+                })
+              ),
               target: 'FAILED'
             }
           ]
@@ -630,9 +675,12 @@ export class TLS {
             target: 'ENUMERATE_TLS_CREDENTIAL_CONTEXT'
           },
           onError: {
-            actions: assign({
-              errorMessage: 'Failed to add certificate'
-            }),
+            actions: assign(
+              failAt('ADD_CERTIFICATE', 'TLS', {
+                message: 'Failed to add certificate',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -647,7 +695,12 @@ export class TLS {
             target: 'PULL_TLS_CREDENTIAL_CONTEXT'
           },
           onError: {
-            actions: assign({ errorMessage: 'Failed to enumerate TLS credential context' }),
+            actions: assign(
+              failAt('ENUMERATE_TLS_CREDENTIAL_CONTEXT', 'TLS', {
+                message: 'Failed to enumerate TLS credential context',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -671,7 +724,12 @@ export class TLS {
               target: 'ENUMERATE_TLS_CREDENTIAL_CONTEXT'
             },
             {
-              actions: assign({ errorMessage: 'Failed to pull TLS credential context' }),
+              actions: assign(
+                failAt('PULL_TLS_CREDENTIAL_CONTEXT', 'TLS', {
+                  message: 'Failed to pull TLS credential context',
+                  error: ({ event }) => event.error
+                })
+              ),
               target: 'FAILED'
             }
           ]
@@ -705,7 +763,12 @@ export class TLS {
               target: 'ENUMERATE_TLS_DATA'
             },
             {
-              actions: assign({ errorMessage: 'Failed to put TLS credential context' }),
+              actions: assign(
+                failAt('PUT_TLS_CREDENTIAL_CONTEXT', 'TLS', {
+                  message: 'Failed to put TLS credential context',
+                  error: ({ event }) => event.error
+                })
+              ),
               target: 'FAILED'
             }
           ]
@@ -728,7 +791,12 @@ export class TLS {
               target: 'ENUMERATE_TLS_DATA'
             },
             {
-              actions: assign({ errorMessage: 'Failed to create TLS credential context' }),
+              actions: assign(
+                failAt('CREATE_TLS_CREDENTIAL_CONTEXT', 'TLS', {
+                  message: 'Failed to create TLS credential context',
+                  error: ({ event }) => event.error
+                })
+              ),
               target: 'FAILED'
             }
           ]
@@ -746,9 +814,12 @@ export class TLS {
             target: 'PULL_TLS_DATA'
           },
           onError: {
-            actions: assign({
-              errorMessage: 'Failed to enumerate TLS data'
-            }),
+            actions: assign(
+              failAt('ENUMERATE_TLS_DATA', 'TLS', {
+                message: 'Failed to enumerate TLS data',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -775,7 +846,12 @@ export class TLS {
               target: 'ENUMERATE_TLS_DATA'
             },
             {
-              actions: assign({ errorMessage: 'Failed to pull TLS data' }),
+              actions: assign(
+                failAt('PULL_TLS_DATA', 'TLS', {
+                  message: 'Failed to pull TLS data',
+                  error: ({ event }) => event.error
+                })
+              ),
               target: 'FAILED'
             }
           ]
@@ -795,9 +871,12 @@ export class TLS {
             target: 'WAIT_A_BIT' // should this be commit_changes? and then circle back to setting local tls data
           },
           onError: {
-            actions: assign({
-              errorMessage: 'Failed to update remote TLS data'
-            }),
+            actions: assign(
+              failAt('PUT_REMOTE_TLS_DATA', 'TLS', {
+                message: 'Failed to update remote TLS data',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -819,9 +898,12 @@ export class TLS {
             target: 'COMMIT_CHANGES'
           },
           onError: {
-            actions: assign({
-              errorMessage: 'Failed to update local TLS data'
-            }),
+            actions: assign(
+              failAt('PUT_LOCAL_TLS_DATA', 'TLS', {
+                message: 'Failed to update local TLS data',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -838,9 +920,12 @@ export class TLS {
             target: 'SUCCESS'
           },
           onError: {
-            actions: assign({
-              errorMessage: 'Failed to commit changes'
-            }),
+            actions: assign(
+              failAt('COMMIT_CHANGES', 'TLS', {
+                message: 'Failed to commit changes',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -854,10 +939,14 @@ export class TLS {
             message: context.message,
             clientId: context.clientId
           }),
-          onDone: 'ENUMERATE_PUBLIC_KEY_CERTIFICATE'
+          // The error machine recovered (e.g. digest retry): the recorded failure no longer applies.
+          onDone: { actions: assign({ failure: undefined }), target: 'ENUMERATE_PUBLIC_KEY_CERTIFICATE' }
         },
         on: {
-          ONFAILED: 'FAILED'
+          ONFAILED: {
+            actions: assign({ failure: (args) => failureAfterErrorMachine('TLS', args) }),
+            target: 'FAILED'
+          }
         }
       },
       FAILED: {

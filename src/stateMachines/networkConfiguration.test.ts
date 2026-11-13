@@ -32,6 +32,15 @@ vi.mock('./common.js', async () => {
     // wired/wifi/proxy machines call this during their flows; mock it so the
     // partial common.js mock still provides the export they import.
     sendProgressToDevice: vi.fn(),
+    recordComponentResult: actual.recordComponentResult,
+    failAt: actual.failAt,
+    buildFailure: actual.buildFailure,
+
+    stepFailure: actual.stepFailure,
+
+    failureAfterErrorMachine: actual.failureAfterErrorMachine,
+    returnValueOf: actual.returnValueOf,
+    componentFailureResult: actual.componentFailureResult,
     HttpResponseError,
     isDigestRealmValid,
     coalesceMessage

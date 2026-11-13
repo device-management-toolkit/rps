@@ -22,7 +22,15 @@ import { type DeviceCredentials } from '../interfaces/ISecretManagerService.js'
 import { type AMTConfiguration } from '../models/index.js'
 import { randomUUID } from 'node:crypto'
 import { Error } from './error.js'
-import { type CommonContext, invokeWsmanCall, sendProgressToDevice, recordComponentResult } from './common.js'
+import {
+  type CommonContext,
+  invokeWsmanCall,
+  sendProgressToDevice,
+  recordComponentResult,
+  componentFailureResult,
+  failAt,
+  returnValueOf
+} from './common.js'
 
 /** Status string marking a successful CIRA configuration; shared by producer and consumer. */
 const CIRA_CONFIGURED_STATUS = 'Configured'
@@ -324,10 +332,13 @@ export class CIRAConfiguration {
         } else {
           sendProgressToDevice(context.clientId, `CIRA configuration failed: ${context.statusMessage}`)
         }
-        recordComponentResult(context.clientId, 'CIRAConnection', {
-          Result: success ? 'Success' : 'Failure',
-          Details: context.statusMessage
-        })
+        recordComponentResult(
+          context.clientId,
+          'CIRAConnection',
+          success
+            ? { Result: 'Success', Details: context.statusMessage }
+            : componentFailureResult(context.failure, context.statusMessage)
+        )
       },
       'Reset Unauth Count': ({ context, event }) => {
         devices[context.clientId].unauthCount = 0
@@ -388,7 +399,18 @@ export class CIRAConfiguration {
             actions: assign({ ciraConfig: ({ event }) => (event as any).output }),
             target: 'SET_MPS_PASSWORD'
           },
-          onError: 'FAILURE'
+          onError: {
+            // Legacy statusMessage is left as-is; only the structured failure is recorded.
+            actions: assign(
+              failAt('GET_CIRA_CONFIG', 'CIRAConnection', {
+                code: 'RPS_DB_CIRA_CONFIG_NOT_FOUND',
+                message: ({ context }) => context.statusMessage as string,
+                assignTo: 'statusMessage',
+                error: ({ event }) => event.error
+              })
+            ),
+            target: 'FAILURE'
+          }
         }
       },
       SET_MPS_PASSWORD: {
@@ -420,7 +442,14 @@ export class CIRAConfiguration {
             target: 'ADD_TRUSTED_ROOT_CERTIFICATE'
           },
           onError: {
-            actions: assign({ statusMessage: () => 'Failed getSecretAtPath' }),
+            actions: assign(
+              failAt('SET_MPS_PASSWORD', 'CIRAConnection', {
+                message: 'Failed getSecretAtPath',
+                assignTo: 'statusMessage',
+                code: 'RPS_SECRETS_READ_FAILED',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILURE'
           }
         }
@@ -448,7 +477,13 @@ export class CIRAConfiguration {
             target: 'SAVE_MPS_PASSWORD_TO_SECRET_PROVIDER'
           },
           onError: {
-            actions: assign({ statusMessage: () => 'Failed to add trusted root certificate' }),
+            actions: assign(
+              failAt('ADD_TRUSTED_ROOT_CERTIFICATE', 'CIRAConnection', {
+                message: 'Failed to add trusted root certificate',
+                assignTo: 'statusMessage',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILURE'
           }
         }
@@ -470,7 +505,14 @@ export class CIRAConfiguration {
           id: 'save-mps-password-to-secret-provider',
           onDone: 'SAVE_DEVICE_TO_MPS',
           onError: {
-            actions: assign({ statusMessage: () => 'Failed to save mps password to secret provider' }),
+            actions: assign(
+              failAt('SAVE_MPS_PASSWORD_TO_SECRET_PROVIDER', 'CIRAConnection', {
+                message: 'Failed to save mps password to secret provider',
+                assignTo: 'statusMessage',
+                code: 'RPS_SECRETS_WRITE_FAILED',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILURE'
           }
         }
@@ -492,7 +534,14 @@ export class CIRAConfiguration {
           id: 'save-device-to-mps',
           onDone: 'ADD_MPS',
           onError: {
-            actions: assign({ statusMessage: () => 'Failed to save device to mps' }),
+            actions: assign(
+              failAt('SAVE_DEVICE_TO_MPS', 'CIRAConnection', {
+                message: 'Failed to save device to mps',
+                assignTo: 'statusMessage',
+                code: 'RPS_MPS_SAVE_DEVICE_FAILED',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILURE'
           }
         }
@@ -520,7 +569,13 @@ export class CIRAConfiguration {
             target: 'ENUMERATE_MANAGEMENT_PRESENCE_REMOTE_SAP'
           },
           onError: {
-            actions: assign({ statusMessage: () => 'Failed to add mps' }),
+            actions: assign(
+              failAt('ADD_MPS', 'CIRAConnection', {
+                message: 'Failed to add mps',
+                assignTo: 'statusMessage',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILURE'
           }
         }
@@ -548,7 +603,13 @@ export class CIRAConfiguration {
             target: 'PULL_MANAGEMENT_PRESENCE_REMOTE_SAP'
           },
           onError: {
-            actions: assign({ statusMessage: () => 'Failed to enumerate Management Presence Remote SAP' }),
+            actions: assign(
+              failAt('ENUMERATE_MANAGEMENT_PRESENCE_REMOTE_SAP', 'CIRAConnection', {
+                message: 'Failed to enumerate Management Presence Remote SAP',
+                assignTo: 'statusMessage',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILURE'
           }
         }
@@ -582,7 +643,13 @@ export class CIRAConfiguration {
               target: 'ENUMERATE_MANAGEMENT_PRESENCE_REMOTE_SAP'
             },
             {
-              actions: assign({ statusMessage: () => 'Failed to Pull Management Presence Remote SAP' }),
+              actions: assign(
+                failAt('PULL_MANAGEMENT_PRESENCE_REMOTE_SAP', 'CIRAConnection', {
+                  message: 'Failed to Pull Management Presence Remote SAP',
+                  assignTo: 'statusMessage',
+                  error: ({ event }) => event.error
+                })
+              ),
               target: 'FAILURE'
             }
           ]
@@ -608,7 +675,13 @@ export class CIRAConfiguration {
           id: 'add-remote-policy-access-rule',
           onDone: 'ADD_USER_INITIATED_REMOTE_ACCESS_POLICY_RULE',
           onError: {
-            actions: assign({ statusMessage: () => 'Failed to add remote policy access rule' }),
+            actions: assign(
+              failAt('ADD_REMOTE_ACCESS_POLICY_RULE', 'CIRAConnection', {
+                message: 'Failed to add remote policy access rule',
+                assignTo: 'statusMessage',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILURE'
           }
         }
@@ -633,7 +706,13 @@ export class CIRAConfiguration {
           id: 'add-user-initiated-remote-policy-access-rule',
           onDone: 'ENUMERATE_REMOTE_ACCESS_POLICY_APPLIESTOMPS',
           onError: {
-            actions: assign({ statusMessage: () => 'Failed to add User Initiated remote policy access rule' }),
+            actions: assign(
+              failAt('ADD_USER_INITIATED_REMOTE_ACCESS_POLICY_RULE', 'CIRAConnection', {
+                message: 'Failed to add User Initiated remote policy access rule',
+                assignTo: 'statusMessage',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILURE'
           }
         }
@@ -661,7 +740,13 @@ export class CIRAConfiguration {
             target: 'PULL_REMOTE_ACCESS_POLICY_APPLIESTOMPS'
           },
           onError: {
-            actions: assign({ statusMessage: () => 'Failed to enumerate remote access policy rule' }),
+            actions: assign(
+              failAt('ENUMERATE_REMOTE_ACCESS_POLICY_APPLIESTOMPS', 'CIRAConnection', {
+                message: 'Failed to enumerate remote access policy rule',
+                assignTo: 'statusMessage',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILURE'
           }
         }
@@ -702,7 +787,13 @@ export class CIRAConfiguration {
               target: 'ENUMERATE_REMOTE_ACCESS_POLICY_APPLIESTOMPS'
             },
             {
-              actions: assign({ statusMessage: () => 'Failed to pull AMT_RemoteAccessPolicyAppliesToMPS' }),
+              actions: assign(
+                failAt('PULL_REMOTE_ACCESS_POLICY_APPLIESTOMPS', 'CIRAConnection', {
+                  message: 'Failed to pull AMT_RemoteAccessPolicyAppliesToMPS',
+                  assignTo: 'statusMessage',
+                  error: ({ event }) => event.error
+                })
+              ),
               target: 'FAILURE'
             }
           ]
@@ -733,7 +824,13 @@ export class CIRAConfiguration {
             }
           ],
           onError: {
-            actions: assign({ statusMessage: () => 'Failed to put AMT_RemoteAccessPolicyAppliesToMPS' }),
+            actions: assign(
+              failAt('PUT_REMOTE_ACCESS_POLICY_APPLIESTOMPS', 'CIRAConnection', {
+                message: 'Failed to put AMT_RemoteAccessPolicyAppliesToMPS',
+                assignTo: 'statusMessage',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILURE'
           }
         }
@@ -774,12 +871,25 @@ export class CIRAConfiguration {
               target: 'GET_ENVIRONMENT_DETECTION_SETTINGS'
             },
             {
-              actions: assign({ statusMessage: () => 'Failed to set user initiated connection service' }),
+              actions: assign(
+                failAt('USER_INITIATED_CONNECTION_SERVICE', 'CIRAConnection', {
+                  message: 'Failed to set user initiated connection service',
+                  assignTo: 'statusMessage',
+                  returnValue: ({ event }) => returnValueOf(event.output, 'RequestStateChange'),
+                  namespace: 'CIM'
+                })
+              ),
               target: 'FAILURE'
             }
           ],
           onError: {
-            actions: assign({ statusMessage: () => 'Failed to set user initiated connection service' }),
+            actions: assign(
+              failAt('USER_INITIATED_CONNECTION_SERVICE', 'CIRAConnection', {
+                message: 'Failed to set user initiated connection service',
+                assignTo: 'statusMessage',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILURE'
           }
         }
@@ -807,7 +917,13 @@ export class CIRAConfiguration {
             target: 'PUT_ENVIRONMENT_DETECTION_SETTINGS'
           },
           onError: {
-            actions: assign({ statusMessage: () => 'Failed to get user initiated connection service' }),
+            actions: assign(
+              failAt('GET_ENVIRONMENT_DETECTION_SETTINGS', 'CIRAConnection', {
+                message: 'Failed to get user initiated connection service',
+                assignTo: 'statusMessage',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILURE'
           }
         }
@@ -834,7 +950,13 @@ export class CIRAConfiguration {
             target: 'SUCCESS'
           },
           onError: {
-            actions: assign({ statusMessage: () => 'Failed to set user initiated connection service' }),
+            actions: assign(
+              failAt('PUT_ENVIRONMENT_DETECTION_SETTINGS', 'CIRAConnection', {
+                message: 'Failed to set user initiated connection service',
+                assignTo: 'statusMessage',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILURE'
           }
         }

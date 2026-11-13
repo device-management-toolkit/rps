@@ -11,7 +11,15 @@ import { devices } from '../devices.js'
 import { Error } from './error.js'
 import { Configurator } from '../Configurator.js'
 import { DbCreatorFactory } from '../factories/DbCreatorFactory.js'
-import { type CommonContext, invokeWsmanCall, sendProgressToDevice, recordComponentResult } from './common.js'
+import {
+  type CommonContext,
+  invokeWsmanCall,
+  sendProgressToDevice,
+  recordComponentResult,
+  failAt,
+  buildFailure,
+  componentFailureResult
+} from './common.js'
 import { UNEXPECTED_PARSE_ERROR } from '../utils/constants.js'
 import { Environment } from '../utils/Environment.js'
 import {
@@ -262,7 +270,7 @@ export class WiredConfiguration {
           context.clientId,
           'WiredNetwork',
           context.errorMessage
-            ? { Result: 'Failure', Details: context.errorMessage }
+            ? componentFailureResult(context.failure, context.errorMessage)
             : { Result: 'Success', Details: context.statusMessage }
         )
       }
@@ -361,7 +369,12 @@ export class WiredConfiguration {
               target: 'WAIT_AFTER_ETHERNET_PUT'
             },
             {
-              actions: assign({ errorMessage: ({ event }) => (event.error as any).message }),
+              actions: assign(
+                failAt('PUT_ETHERNET_PORT_SETTINGS', 'WiredNetwork', {
+                  message: ({ event }) => (event.error as any).message,
+                  error: ({ event }) => event.error
+                })
+              ),
               target: 'FAILED'
             }
           ]
@@ -399,7 +412,12 @@ export class WiredConfiguration {
         always: [
           {
             guard: 'isNotEthernetSettingsUpdated',
-            actions: assign({ errorMessage: () => 'Failed to put to ethernet port settings' }),
+            actions: assign(
+              failAt('CHECK_ETHERNET_PORT_SETTINGS_PUT_RESPONSE', 'WiredNetwork', {
+                message: 'Failed to put to ethernet port settings',
+                code: 'WSMAN_REQUEST_FAILED'
+              })
+            ),
             target: 'FAILED'
           },
           {
@@ -421,7 +439,13 @@ export class WiredConfiguration {
             target: 'ENTERPRISE_ASSISTANT_REQUEST'
           },
           onError: {
-            actions: assign({ errorMessage: 'Failed to get 8021x wired profile' }),
+            actions: assign(
+              failAt('GET_8021X_PROFILE', 'WiredNetwork', {
+                message: 'Failed to get 8021x wired profile',
+                code: 'RPS_DB_IEEE8021X_PROFILE_NOT_FOUND',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -443,7 +467,13 @@ export class WiredConfiguration {
             }
           ],
           onError: {
-            actions: assign({ errorMessage: 'Failed to initiate cert request with enterprise assistant in 802.1x' }),
+            actions: assign(
+              failAt('ENTERPRISE_ASSISTANT_REQUEST', 'WiredNetwork', {
+                message: 'Failed to initiate cert request with enterprise assistant in 802.1x',
+                code: 'RPS_EA_REQUEST_FAILED',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -458,7 +488,13 @@ export class WiredConfiguration {
             target: 'ENUMERATE_PUBLIC_PRIVATE_KEY_PAIR'
           },
           onError: {
-            actions: assign({ errorMessage: 'Failed to generate key pair in 802.1x' }),
+            actions: assign(
+              failAt('GENERATE_KEY_PAIR', 'WiredNetwork', {
+                message: 'Failed to generate key pair in 802.1x',
+                code: 'RPS_CERT_GENERATION_FAILED',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -473,7 +509,12 @@ export class WiredConfiguration {
             target: 'PULL_PUBLIC_PRIVATE_KEY_PAIR'
           },
           onError: {
-            actions: assign({ errorMessage: 'Failed to enumerate public private key pair in 802.1x' }),
+            actions: assign(
+              failAt('ENUMERATE_PUBLIC_PRIVATE_KEY_PAIR', 'WiredNetwork', {
+                message: 'Failed to enumerate public private key pair in 802.1x',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -494,7 +535,12 @@ export class WiredConfiguration {
               target: 'ENUMERATE_PUBLIC_PRIVATE_KEY_PAIR'
             },
             {
-              actions: assign({ errorMessage: 'Failed to pull public private key pair in 802.1x' }),
+              actions: assign(
+                failAt('PULL_PUBLIC_PRIVATE_KEY_PAIR', 'WiredNetwork', {
+                  message: 'Failed to pull public private key pair in 802.1x',
+                  error: ({ event }) => event.error
+                })
+              ),
               target: 'FAILED'
             }
           ]
@@ -510,7 +556,13 @@ export class WiredConfiguration {
             target: 'SIGN_CSR'
           },
           onError: {
-            actions: assign({ errorMessage: 'Failed to send key pair to enterprise assistant in 802.1x' }),
+            actions: assign(
+              failAt('ENTERPRISE_ASSISTANT_RESPONSE', 'WiredNetwork', {
+                message: 'Failed to send key pair to enterprise assistant in 802.1x',
+                code: 'RPS_EA_REQUEST_FAILED',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -525,7 +577,13 @@ export class WiredConfiguration {
             target: 'GET_CERT_FROM_ENTERPRISE_ASSISTANT'
           },
           onError: {
-            actions: assign({ errorMessage: 'Failed to have AMT sign CSR in 802.1x' }),
+            actions: assign(
+              failAt('SIGN_CSR', 'WiredNetwork', {
+                message: 'Failed to have AMT sign CSR in 802.1x',
+                code: 'RPS_CERT_GENERATION_FAILED',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -540,7 +598,13 @@ export class WiredConfiguration {
             target: 'ADD_CERTIFICATE'
           },
           onError: {
-            actions: assign({ errorMessage: 'Failed to get cert from Microsoft CA in 802.1x' }),
+            actions: assign(
+              failAt('GET_CERT_FROM_ENTERPRISE_ASSISTANT', 'WiredNetwork', {
+                message: 'Failed to get cert from Microsoft CA in 802.1x',
+                code: 'RPS_EA_REQUEST_FAILED',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -555,7 +619,12 @@ export class WiredConfiguration {
             target: 'ADD_RADIUS_SERVER_ROOT_CERTIFICATE'
           },
           onError: {
-            actions: assign({ errorMessage: 'Failed to add certificate in 802.1x' }),
+            actions: assign(
+              failAt('ADD_CERTIFICATE', 'WiredNetwork', {
+                message: 'Failed to add certificate in 802.1x',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -570,7 +639,12 @@ export class WiredConfiguration {
             target: 'PUT_8021X_PROFILE'
           },
           onError: {
-            actions: assign({ errorMessage: 'Failed to add radius server root certificate in 802.1x' }),
+            actions: assign(
+              failAt('ADD_RADIUS_SERVER_ROOT_CERTIFICATE', 'WiredNetwork', {
+                message: 'Failed to add radius server root certificate in 802.1x',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -592,7 +666,12 @@ export class WiredConfiguration {
             }
           ],
           onError: {
-            actions: assign({ errorMessage: 'Failed to put 802.1x profile' }),
+            actions: assign(
+              failAt('PUT_8021X_PROFILE', 'WiredNetwork', {
+                message: 'Failed to put 802.1x profile',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -607,7 +686,12 @@ export class WiredConfiguration {
             target: 'SUCCESS'
           },
           onError: {
-            actions: assign({ errorMessage: 'Failed to set certificate in 802.1x' }),
+            actions: assign(
+              failAt('SET_CERTIFICATES', 'WiredNetwork', {
+                message: 'Failed to set certificate in 802.1x',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -623,7 +707,23 @@ export class WiredConfiguration {
           })
         },
         on: {
-          ONFAILED: 'FAILED'
+          ONFAILED: {
+            // Keep the legacy text untouched; only attach the structured failure derived from the
+            // HTTP response the error machine parsed.
+            actions: assign({
+              failure: ({ context, event }) =>
+                buildFailure(
+                  'ERROR',
+                  'WiredNetwork',
+                  { error: () => context.message, message: event.output },
+                  {
+                    context,
+                    event
+                  }
+                ).failure
+            }),
+            target: 'FAILED'
+          }
         }
       },
       FAILED: {

@@ -9,7 +9,7 @@ import { devices } from '../devices.js'
 import { type TLS as TLSType, type TLSContext, type TLSEvent } from './tls.js'
 import forge from 'node-forge'
 import { AMT } from '@device-management-toolkit/wsman-messages'
-import { UNEXPECTED_PARSE_ERROR } from '../utils/constants.js'
+import { GATEWAY_TIMEOUT_ERROR, UNEXPECTED_PARSE_ERROR } from '../utils/constants.js'
 import { wsmanAlreadyExistsAllChunks } from '../test/helper/AMTMessages.js'
 import { config } from '../test/helper/Config.js'
 import { Environment } from '../utils/Environment.js'
@@ -23,7 +23,15 @@ vi.mock('./common.js', async () => {
     invokeWsmanCall: invokeWsmanCallSpy,
     invokeEnterpriseAssistantCall: invokeEnterpriseAssistantCallSpy,
     sendProgressToDevice: vi.fn(),
-    recordComponentResult: actual.recordComponentResult
+    recordComponentResult: actual.recordComponentResult,
+    componentFailureResult: actual.componentFailureResult,
+    failAt: actual.failAt,
+    returnValueOf: actual.returnValueOf,
+    buildFailure: actual.buildFailure,
+
+    stepFailure: actual.stepFailure,
+
+    failureAfterErrorMachine: actual.failureAfterErrorMachine
   }
 })
 
@@ -173,6 +181,52 @@ describe('TLS State Machine', () => {
       vi.runAllTicks()
     }))
 
+  it('should fail with a structured WSMAN_TIMEOUT failure and expose it in the machine output', () =>
+    new Promise<void>((resolve, reject) => {
+      config.actors.enumeratePublicKeyCertificate = fromPromise(
+        async () => await Promise.reject(new GATEWAY_TIMEOUT_ERROR())
+      )
+      const tlsService = createActor(tls.machine.provide(config), { input: context })
+      tlsService.subscribe({
+        next: (state) => {
+          try {
+            if (state.matches('FAILED')) {
+              // Legacy flat text is unchanged.
+              expect(state.context.errorMessage).toEqual('Failed to enumerate public key certificates')
+              expect(devices[clientId].status.TLSConfiguration).toEqual('Failed to enumerate public key certificates')
+              const expectedFailure = {
+                Code: 'WSMAN_TIMEOUT',
+                Component: 'TLS',
+                Step: 'ENUMERATE_PUBLIC_KEY_CERTIFICATE',
+                Reason: 'Timed out waiting for a WSMAN response from AMT',
+                Detail: 'Gateway Timeout'
+              }
+              expect(state.context.failure).toEqual(expectedFailure)
+              expect(devices[clientId].status.Components?.TLS).toEqual({
+                Result: 'Failure',
+                Details: 'Failed to enumerate public key certificates',
+                Code: 'WSMAN_TIMEOUT',
+                Step: 'ENUMERATE_PUBLIC_KEY_CERTIFICATE'
+              })
+              // The parent (activation) reads the failure from the child output.
+              expect(state.output).toEqual({
+                status: 'error',
+                errorMessage: 'Failed to enumerate public key certificates',
+                failure: expectedFailure
+              })
+              resolve()
+            }
+          } catch (err) {
+            reject(err)
+          }
+        },
+        error: (err) => {
+          reject(err)
+        }
+      })
+      tlsService.start()
+      tlsService.send({ type: 'CONFIGURE_TLS', clientId })
+    }))
   it('should PUT TLS credential context when one already exists', () =>
     new Promise<void>((resolve, reject) => {
       vi.useFakeTimers()
@@ -430,6 +484,26 @@ describe('TLS State Machine', () => {
       Details: 'Error status message'
     })
     expect(invokeWsmanCallSpy).not.toHaveBeenCalled()
+  })
+  it('should updateConfigurationStatus with code, step and return value when a structured failure is present', async () => {
+    context.status = 'error'
+    context.errorMessage = 'Failed to add certificate'
+    context.failure = {
+      Code: 'AMT_PT_INVALID_CERT',
+      Component: 'TLS',
+      Step: 'ADD_CERTIFICATE',
+      Reason: 'Certificate is invalid',
+      AmtReturnValue: 2063
+    }
+    tls.updateConfigurationStatus({ context })
+    expect(devices[context.clientId].status.TLSConfiguration).toEqual('Failed to add certificate')
+    expect(devices[context.clientId].status.Components?.TLS).toEqual({
+      Result: 'Failure',
+      Details: 'Failed to add certificate',
+      Code: 'AMT_PT_INVALID_CERT',
+      Step: 'ADD_CERTIFICATE',
+      AmtReturnValue: 2063
+    })
   })
   it('should enumerateTLSData', async () => {
     await tls.enumerateTLSData({ input: context })

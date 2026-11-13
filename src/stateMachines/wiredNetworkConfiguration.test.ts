@@ -9,6 +9,7 @@ import { Environment } from '../utils/Environment.js'
 import { config } from '../test/helper/Config.js'
 import { ClientAction } from '../models/RCS.Config.js'
 import { type MachineImplementationsSimplified, createActor, fromPromise } from 'xstate'
+import { GATEWAY_TIMEOUT_ERROR } from '../utils/constants.js'
 import {
   type WiredConfigContext,
   type WiredConfigEvent,
@@ -32,6 +33,14 @@ vi.mock('./common.js', async () => {
     processTLSTunnelResponse: vi.fn(),
     sendProgressToDevice: vi.fn(),
     recordComponentResult: actual.recordComponentResult,
+    failAt: actual.failAt,
+    buildFailure: actual.buildFailure,
+
+    stepFailure: actual.stepFailure,
+
+    failureAfterErrorMachine: actual.failureAfterErrorMachine,
+    returnValueOf: actual.returnValueOf,
+    componentFailureResult: actual.componentFailureResult,
     coalesceMessage,
     isDigestRealmValid,
     HttpResponseError
@@ -500,6 +509,44 @@ describe('Wired Network Configuration', () => {
         service.start()
         service.send({ type: 'WIREDCONFIG', clientId })
       }))
+    it('maps a WSMAN timeout on PUT_ETHERNET_PORT_SETTINGS to WSMAN_TIMEOUT', () =>
+      new Promise<void>((resolve, reject) => {
+        config.actors!.putEthernetPortSettings = fromPromise(
+          async () => await Promise.reject(new GATEWAY_TIMEOUT_ERROR())
+        )
+        config.guards = { ...(config.guards ?? {}), isTLSEnforced: () => false }
+        const service = createActor(wiredConfig.machine.provide(config), { input: context })
+        service.subscribe({
+          next: (state) => {
+            try {
+              if (state.matches('FAILED')) {
+                expect(state.context.errorMessage).toEqual('Gateway Timeout')
+                expect(state.context.failure).toEqual({
+                  Code: 'WSMAN_TIMEOUT',
+                  Component: 'WiredNetwork',
+                  Step: 'PUT_ETHERNET_PORT_SETTINGS',
+                  Reason: 'Timed out waiting for a WSMAN response from AMT',
+                  Detail: 'Gateway Timeout'
+                })
+                expect(devices[clientId].status.Components?.WiredNetwork).toEqual({
+                  Result: 'Failure',
+                  Details: 'Gateway Timeout',
+                  Code: 'WSMAN_TIMEOUT',
+                  Step: 'PUT_ETHERNET_PORT_SETTINGS'
+                })
+                resolve()
+              }
+            } catch (err) {
+              reject(err)
+            }
+          },
+          error: (err) => {
+            reject(err)
+          }
+        })
+        service.start()
+        service.send({ type: 'WIREDCONFIG', clientId })
+      }))
     it('should eventually reach "FAILED" state', () =>
       new Promise<void>((resolve, reject) => {
         config.actors!.get8021xProfile = fromPromise(async ({ input }) => await Promise.reject(new Error()))
@@ -517,9 +564,17 @@ describe('Wired Network Configuration', () => {
               const expectedState: any = flowStates[currentStateIndex++]
               expect(state.matches(expectedState)).toBe(true)
               if (state.matches('FAILED') && currentStateIndex === flowStates.length) {
+                // DB lookup failure: the structured failure names the step and carries the catalog code.
                 expect(devices[clientId].status.Components?.WiredNetwork).toEqual({
                   Result: 'Failure',
-                  Details: 'Failed to get 8021x wired profile'
+                  Details: 'Failed to get 8021x wired profile',
+                  Code: 'RPS_DB_IEEE8021X_PROFILE_NOT_FOUND',
+                  Step: 'GET_8021X_PROFILE'
+                })
+                expect(state.context.failure).toMatchObject({
+                  Code: 'RPS_DB_IEEE8021X_PROFILE_NOT_FOUND',
+                  Component: 'WiredNetwork',
+                  Step: 'GET_8021X_PROFILE'
                 })
                 resolve()
               }

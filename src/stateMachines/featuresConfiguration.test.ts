@@ -19,15 +19,26 @@ import {
 import { randomUUID } from 'node:crypto'
 import { devices } from '../devices.js'
 import { HttpHandler } from '../HttpHandler.js'
-import { type MachineImplementationsSimplified, createActor, fromPromise } from 'xstate'
+import { type MachineImplementationsSimplified, createActor, fromPromise, waitFor } from 'xstate'
+import { GATEWAY_TIMEOUT_ERROR } from '../utils/constants.js'
 import { AMT, CIM, IPS } from '@device-management-toolkit/wsman-messages'
 import { sendProgressToDevice } from './common.js'
 
 const invokeWsmanCallSpy = vi.hoisted(() => vi.fn<any>())
-vi.mock('./common.js', () => ({
-  invokeWsmanCall: invokeWsmanCallSpy,
-  sendProgressToDevice: vi.fn()
-}))
+vi.mock('./common.js', async () => {
+  const actual = await vi.importActual<typeof import('./common.js')>('./common.js')
+  return {
+    invokeWsmanCall: invokeWsmanCallSpy,
+    sendProgressToDevice: vi.fn(),
+    failAt: actual.failAt,
+    returnValueOf: actual.returnValueOf,
+    buildFailure: actual.buildFailure,
+
+    stepFailure: actual.stepFailure,
+
+    failureAfterErrorMachine: actual.failureAfterErrorMachine
+  }
+})
 
 const { FeaturesConfiguration } = await import('./featuresConfiguration.js')
 
@@ -236,6 +247,27 @@ describe('Features State Machine', () => {
       featuresService.start()
       featuresService.send({ type: 'CONFIGURE_FEATURES', clientId })
     }))
+
+  it('records a structured failure with the failing step when a WSMAN call times out', async () => {
+    machineConfig.actors!.getAmtRedirectionService = fromPromise(
+      async ({ input }) => await Promise.reject(new GATEWAY_TIMEOUT_ERROR())
+    )
+    const featuresService = createActor(featuresConfiguration.machine.provide(machineConfig), { input: context })
+    featuresService.start()
+    featuresService.send({ type: 'CONFIGURE_FEATURES', clientId })
+    const snapshot = await waitFor(featuresService, (s) => s.status === 'done')
+    expect(snapshot.value).toBe('FAILED')
+    // Legacy text is unchanged ...
+    expect(snapshot.context.statusMessage).toBe('Failed to get AMT redirection service')
+    // ... and the structured failure identifies the step and the transport cause.
+    expect(snapshot.context.failure).toEqual({
+      Code: 'WSMAN_TIMEOUT',
+      Component: 'Features',
+      Step: 'GET_AMT_REDIRECTION_SERVICE',
+      Reason: 'Timed out waiting for a WSMAN response from AMT',
+      Detail: 'Gateway Timeout'
+    })
+  })
 
   it('Should NOT configure AMT features when failure', () =>
     new Promise<void>((resolve, reject) => {

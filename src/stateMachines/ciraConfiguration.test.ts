@@ -16,6 +16,7 @@ import { Environment } from '../utils/Environment.js'
 import { config } from '../test/helper/Config.js'
 import { type CIRAConfig } from '../models/RCS.Config.js'
 import { HttpHandler } from '../HttpHandler.js'
+import { GATEWAY_TIMEOUT_ERROR } from '../utils/constants.js'
 import { type MachineImplementationsSimplified, createActor, fromPromise } from 'xstate'
 import { HttpResponseError, coalesceMessage, isDigestRealmValid } from './common.js'
 
@@ -37,6 +38,14 @@ vi.mock('./common.js', async () => {
     processTLSTunnelResponse: vi.fn(),
     sendProgressToDevice: vi.fn(),
     recordComponentResult: actual.recordComponentResult,
+    componentFailureResult: actual.componentFailureResult,
+    failAt: actual.failAt,
+    returnValueOf: actual.returnValueOf,
+    buildFailure: actual.buildFailure,
+
+    stepFailure: actual.stepFailure,
+
+    failureAfterErrorMachine: actual.failureAfterErrorMachine,
     HttpResponseError,
     isDigestRealmValid,
     coalesceMessage
@@ -213,6 +222,10 @@ describe('CIRA Configuration State Machine', () => {
   it('should fail on error response for user-initiated-connection-service', () =>
     new Promise<void>((resolve, reject) => {
       const failedResponse = { Envelope: { Body: { RequestStateChange_OUTPUT: { ReturnValue: 1 } } } }
+      // Mock the preceding policy-rule step so the flow actually reaches USER_INITIATED_CONNECTION_SERVICE.
+      machineConfig.actors!.addUserInitiatedRemoteAccessPolicyRule = fromPromise(
+        async () => await Promise.resolve({ clientId })
+      )
       machineConfig.actors!.userInitiatedConnectionService = fromPromise(
         async ({ input }) => await Promise.resolve(failedResponse)
       )
@@ -225,6 +238,20 @@ describe('CIRA Configuration State Machine', () => {
             if (state.matches('SUCCESS') || state.matches('FAILURE')) {
               expect(state.matches('FAILURE')).toBeTruthy()
               expect(devices[clientId].status.Components?.CIRAConnection?.Result).toEqual('Failure')
+              // Non-zero CIM ReturnValue is mapped, not dropped.
+              expect(state.context.statusMessage).toEqual('Failed to set user initiated connection service')
+              expect(state.context.failure).toEqual({
+                Code: 'CIM_RV_NOT_SUPPORTED',
+                Component: 'CIRAConnection',
+                Step: 'USER_INITIATED_CONNECTION_SERVICE',
+                Reason: 'Operation is not supported by this device',
+                AmtReturnValue: 1
+              })
+              expect(devices[clientId].status.Components?.CIRAConnection).toMatchObject({
+                Code: 'CIM_RV_NOT_SUPPORTED',
+                Step: 'USER_INITIATED_CONNECTION_SERVICE',
+                AmtReturnValue: 1
+              })
               resolve()
             }
           } catch (err) {
@@ -239,6 +266,79 @@ describe('CIRA Configuration State Machine', () => {
       ciraConfigurationService.send(initialEvent)
     }))
 
+  it('should record a structured failure with step and code when adding the MPS server fails', () =>
+    new Promise<void>((resolve, reject) => {
+      machineConfig.actors!.addMPS = fromPromise(async () => await Promise.reject(new GATEWAY_TIMEOUT_ERROR()))
+      const mockCiraConfigurationMachine = ciraStateMachineImpl.machine.provide(machineConfig)
+      const ciraConfigurationService = createActor(mockCiraConfigurationMachine, { input: machineContext })
+      ciraConfigurationService.subscribe({
+        next: (state) => {
+          try {
+            if (state.matches('SUCCESS') || state.matches('FAILURE')) {
+              expect(state.matches('FAILURE')).toBeTruthy()
+              // Legacy flat text is unchanged.
+              expect(state.context.statusMessage).toEqual('Failed to add mps')
+              expect(devices[clientId].status.CIRAConnection).toEqual('Failed to add mps')
+              // Structured failure identifies the step and the transport cause.
+              expect(state.context.failure).toEqual({
+                Code: 'WSMAN_TIMEOUT',
+                Component: 'CIRAConnection',
+                Step: 'ADD_MPS',
+                Reason: 'Timed out waiting for a WSMAN response from AMT',
+                Detail: 'Gateway Timeout'
+              })
+              expect(devices[clientId].status.Components?.CIRAConnection).toEqual({
+                Result: 'Failure',
+                Details: 'Failed to add mps',
+                Code: 'WSMAN_TIMEOUT',
+                Step: 'ADD_MPS'
+              })
+              resolve()
+            }
+          } catch (err) {
+            reject(err)
+          }
+        },
+        error: (err) => {
+          reject(err)
+        }
+      })
+      ciraConfigurationService.start()
+      ciraConfigurationService.send(initialEvent)
+    }))
+
+  it('should record a secrets failure code when the MPS password cannot be read', () =>
+    new Promise<void>((resolve, reject) => {
+      machineConfig.actors!.getMPSPassword = fromPromise(async () => await Promise.reject(new Error('vault sealed')))
+      const ciraConfigurationService = createActor(ciraStateMachineImpl.machine.provide(machineConfig), {
+        input: machineContext
+      })
+      ciraConfigurationService.subscribe({
+        next: (state) => {
+          try {
+            if (state.matches('SUCCESS') || state.matches('FAILURE')) {
+              expect(state.matches('FAILURE')).toBeTruthy()
+              expect(state.context.statusMessage).toEqual('Failed getSecretAtPath')
+              expect(state.context.failure).toEqual({
+                Code: 'RPS_SECRETS_READ_FAILED',
+                Component: 'CIRAConnection',
+                Step: 'SET_MPS_PASSWORD',
+                Reason: 'Secret could not be read from the secret provider',
+                Detail: 'vault sealed'
+              })
+              resolve()
+            }
+          } catch (err) {
+            reject(err)
+          }
+        },
+        error: (err) => {
+          reject(err)
+        }
+      })
+      ciraConfigurationService.start()
+      ciraConfigurationService.send(initialEvent)
+    }))
   describe('send wsman message with Management Presence Remote SAP', () => {
     it('should send wsman message to enumerate ManagementPresenceRemoteSAP', async () => {
       await ciraStateMachineImpl.enumerateManagementPresenceRemoteSAP({ input: machineContext })
