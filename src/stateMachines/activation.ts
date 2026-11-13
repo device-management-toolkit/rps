@@ -34,12 +34,19 @@ import {
   recordComponentResult,
   deriveControlMode,
   finalizeComponentResults,
-  applicableComponents
+  applicableComponents,
+  componentFailureResult,
+  resolveStatusError,
+  reportProvisioningFailure,
+  failAt,
+  failureAfterErrorMachine,
+  returnValueOf,
+  stepFailure
 } from './common.js'
 import ClientResponseMsg from '../utils/ClientResponseMsg.js'
 import { Unconfiguration } from './unconfiguration.js'
 import { type DeviceCredentials } from '../interfaces/ISecretManagerService.js'
-import { type ClientObject } from '../models/RCS.Config.js'
+import { type ClientObject, type ProvisioningFailure } from '../models/RCS.Config.js'
 import { NetworkConfiguration } from './networkConfiguration.js'
 import { error } from 'console'
 import { TLSTunnelManager } from '../TLSTunnelManager.js'
@@ -71,6 +78,8 @@ export interface ActivationEvent {
   type: 'ACTIVATION' | 'ACTIVATED' | 'ONFAILED'
   clientId: string
   output?: any
+  /** Structured failure forwarded by the error machine alongside the legacy `output` text. */
+  failure?: ProvisioningFailure
   tenantId: string
   friendlyName: string
 }
@@ -161,6 +170,8 @@ export class Activation {
     let method: 'failed' | 'success' | 'ok' | 'heartbeat' | null
     if (status === 'success') {
       method = 'success'
+      // The status object lives as long as the connection: drop the failure of an earlier attempt.
+      delete clientObj.status.Error
     } else {
       // errorMessage is optional/untyped — guard against undefined, not just '' (issue #2665).
       clientObj.status.Status = context.errorMessage ? context.errorMessage : 'Failed'
@@ -169,13 +180,19 @@ export class Activation {
       // activated control mode (issue #2665). If it activated but a later component failed,
       // 'Set activation status' already recorded Activation as a success — don't overwrite it.
       if (clientObj.activationStatus !== true) {
-        recordComponentResult(clientId, 'Activation', {
-          Result: 'Failure',
-          Details: clientObj.status.Status
-        })
+        recordComponentResult(clientId, 'Activation', componentFailureResult(context.failure, clientObj.status.Status))
       }
     }
     finalizeComponentResults(clientId, status === 'success')
+    if (status !== 'success') {
+      // Structured failure (code, component, step, reason) for rpc-go, the logs and MQTT.
+      const failure = resolveStatusError(clientId, context.failure, {
+        component: 'Activation',
+        code: 'RPS_ACTIVATION_FAILED',
+        message: clientObj.status.Status
+      })
+      reportProvisioningFailure(this.logger, clientId, failure, 'activation')
+    }
     // Full status to RPC for backwards compatibility.
     const responseMessage = ClientResponseMsg.get(clientId, null, status, method, JSON.stringify(clientObj.status))
     // Log the final per-component provisioning status (only the components that ran).
@@ -1495,7 +1512,13 @@ export class Activation {
             target: 'EVALUATE_LEGACY_LMS_NON_TLS_OVERRIDE'
           },
           onError: {
-            actions: assign({ errorMessage: 'Failed to get amt profile from database' }),
+            actions: assign(
+              failAt('GET_AMT_PROFILE', 'Activation', {
+                code: 'RPS_DB_PROFILE_NOT_FOUND',
+                message: 'Failed to get amt profile from database',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -1564,9 +1587,12 @@ export class Activation {
             target: 'INIT_TLS_TUNNEL'
           },
           {
-            actions: assign({
-              errorMessage: 'Device belongs to another tenant. Please unprovision and re-activate device.'
-            }),
+            actions: assign(
+              failAt('CHECK_TENANT_ACCESS', 'Activation', {
+                code: 'RPS_MPS_TENANT_MISMATCH',
+                message: 'Device belongs to another tenant. Please unprovision and re-activate device.'
+              })
+            ),
             target: 'FAILED'
           }
         ]
@@ -1581,7 +1607,13 @@ export class Activation {
             target: 'EXTRACT_DOMAIN_CERT'
           },
           onError: {
-            actions: assign({ errorMessage: 'Failed to get amt domain certificate from database' }),
+            actions: assign(
+              failAt('GET_AMT_DOMAIN_CERT', 'Activation', {
+                code: 'RPS_DB_DOMAIN_NOT_FOUND',
+                message: 'Failed to get amt domain certificate from database',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -1597,18 +1629,23 @@ export class Activation {
             target: 'COMPARE_DEVICE_HASHES'
           },
           {
-            actions: assign(({ context }) => {
+            actions: assign((args) => {
+              const { context } = args
               const device = devices[context.clientId]
               const deviceId = device?.uuid ?? context.clientId
 
               if (context.amtDomain == null) {
                 const suffix = device?.ClientData?.payload?.fqdn ?? 'unknown'
-                return {
-                  errorMessage: `Device ${deviceId} activation failed. Specified AMT domain suffix: ${suffix} does not match list of available AMT domain suffixes`
-                }
+                return failAt('EXTRACT_DOMAIN_CERT', 'Activation', {
+                  code: 'RPS_CERT_DOMAIN_SUFFIX_MISMATCH',
+                  message: `Device ${deviceId} activation failed. Specified AMT domain suffix: ${suffix} does not match list of available AMT domain suffixes`
+                })(args)
               }
 
-              return { errorMessage: 'Failed to extract domain certificate' }
+              return failAt('EXTRACT_DOMAIN_CERT', 'Activation', {
+                code: 'RPS_CERT_EXTRACT_FAILED',
+                message: 'Failed to extract domain certificate'
+              })(args)
             }),
             target: 'FAILED'
           }
@@ -1625,10 +1662,12 @@ export class Activation {
             target: 'INIT_TLS_TUNNEL'
           },
           {
-            actions: assign({
-              errorMessage:
-                'Invalid domain certificate, hash does not exists in list of trusted root certificates on AMT'
-            }),
+            actions: assign(
+              failAt('COMPARE_DEVICE_HASHES', 'Activation', {
+                code: 'RPS_CERT_INVALID',
+                message: 'Invalid domain certificate, hash does not exists in list of trusted root certificates on AMT'
+              })
+            ),
             target: 'FAILED'
           }
         ]
@@ -1642,7 +1681,13 @@ export class Activation {
             target: 'GET_GENERAL_SETTINGS'
           },
           onError: {
-            actions: assign({ errorMessage: 'Failed to initialize TLS tunnel' }),
+            actions: assign(
+              failAt('INIT_TLS_TUNNEL', 'Activation', {
+                code: 'RPS_TLS_TUNNEL_INIT_FAILED',
+                message: 'Failed to initialize TLS tunnel',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -1659,7 +1704,8 @@ export class Activation {
           onError: {
             actions: assign({
               message: ({ event }) => event.error,
-              targetAfterError: ({ event }) => 'GET_GENERAL_SETTINGS'
+              targetAfterError: ({ event }) => 'GET_GENERAL_SETTINGS',
+              failure: stepFailure('GET_GENERAL_SETTINGS', 'Activation')
             }),
             target: 'ERROR'
           }
@@ -1731,6 +1777,7 @@ export class Activation {
             }
           ],
           onError: {
+            actions: assign({ failure: stepFailure('IPS_HOST_BASED_SETUP_SERVICE', 'Activation') }),
             target: 'ERROR'
           }
         }
@@ -1745,6 +1792,7 @@ export class Activation {
             target: 'CHECK_CERT_CHAIN_RESPONSE'
           },
           onError: {
+            actions: assign({ failure: stepFailure('ADD_NEXT_CERT_IN_CHAIN', 'Activation') }),
             target: 'ERROR'
           }
         }
@@ -1753,10 +1801,16 @@ export class Activation {
         always: [
           {
             guard: 'isCertNotAdded',
-            actions: assign({
-              errorMessage: ({ context }) =>
-                `Device ${devices[context.clientId].uuid} activation failed. Error while adding the certificates to AMT.`
-            }),
+            actions: assign(
+              failAt('CHECK_CERT_CHAIN_RESPONSE', 'Activation', {
+                code: 'RPS_CERT_INVALID',
+                message: ({ context }) =>
+                  `Device ${devices[context.clientId].uuid} activation failed. Error while adding the certificates to AMT.`,
+                // The published tables for this method disagree, so the number is carried undecoded.
+                returnValue: ({ context }) => returnValueOf(context.message, 'AddNextCertInChain'),
+                namespace: 'UNMAPPED'
+              })
+            ),
             target: 'FAILED'
           },
           {
@@ -1792,9 +1846,13 @@ export class Activation {
             },
             {
               guard: 'isTlsACMPhase',
-              actions: assign({
-                errorMessage: ({ context }) => `TLS ACM setup failed for device ${devices[context.clientId].uuid}`
-              }),
+              actions: assign(
+                failAt('ADMIN_SETUP', 'Activation', {
+                  code: 'RPS_ACTIVATION_FAILED',
+                  message: ({ context }) => `TLS ACM setup failed for device ${devices[context.clientId].uuid}`,
+                  error: ({ event }) => event.error
+                })
+              ),
               target: 'DEACTIVATION'
             },
             {
@@ -1802,6 +1860,7 @@ export class Activation {
               target: 'CHECK_ACTIVATION_ON_AMT'
             },
             {
+              actions: assign({ failure: stepFailure('ADMIN_SETUP', 'Activation') }),
               target: 'ERROR'
             }
           ]
@@ -1842,10 +1901,26 @@ export class Activation {
           },
           {
             guard: 'shouldDeactivate',
+            // Record why setup failed before deactivating; DEACTIVATION reports it as the cause.
+            actions: assign({
+              failure: stepFailure('CHECK_ADMIN_SETUP', 'Activation', {
+                code: 'RPS_ACTIVATION_FAILED',
+                error: () => undefined,
+                returnValue: ({ context }) => returnValueOf(context.message, 'AdminSetup'),
+                namespace: 'IPS'
+              })
+            }),
             target: 'DEACTIVATION'
           },
           {
-            actions: assign({ errorMessage: 'Failed to activate in admin control mode.' }),
+            actions: assign(
+              failAt('CHECK_ADMIN_SETUP', 'Activation', {
+                code: 'RPS_ACTIVATION_FAILED',
+                message: 'Failed to activate in admin control mode.',
+                returnValue: ({ context }) => returnValueOf(context.message, 'AdminSetup'),
+                namespace: 'IPS'
+              })
+            ),
             target: 'FAILED'
           }
         ]
@@ -1872,9 +1947,13 @@ export class Activation {
             },
             {
               guard: 'isTlsACMPhase',
-              actions: assign({
-                errorMessage: ({ context }) => `TLS ACM setup failed for device ${devices[context.clientId].uuid}`
-              }),
+              actions: assign(
+                failAt('UPGRADE_TO_ADMIN_SETUP', 'Activation', {
+                  code: 'RPS_ACTIVATION_FAILED',
+                  message: ({ context }) => `TLS ACM setup failed for device ${devices[context.clientId].uuid}`,
+                  error: ({ event }) => event.error
+                })
+              ),
               target: 'DEACTIVATION'
             },
             {
@@ -1882,6 +1961,7 @@ export class Activation {
               target: 'CHECK_ACTIVATION_ON_AMT'
             },
             {
+              actions: assign({ failure: stepFailure('UPGRADE_TO_ADMIN_SETUP', 'Activation') }),
               target: 'ERROR'
             }
           ]
@@ -1923,10 +2003,26 @@ export class Activation {
           },
           {
             guard: 'shouldDeactivate',
+            // Record why setup failed before deactivating; DEACTIVATION reports it as the cause.
+            actions: assign({
+              failure: stepFailure('CHECK_UPGRADE', 'Activation', {
+                code: 'RPS_ACTIVATION_FAILED',
+                error: () => undefined,
+                returnValue: ({ context }) => returnValueOf(context.message, 'UpgradeClientToAdmin'),
+                namespace: 'IPS'
+              })
+            }),
             target: 'DEACTIVATION'
           },
           {
-            actions: assign({ errorMessage: 'Failed to upgrade to admin control mode.' }),
+            actions: assign(
+              failAt('CHECK_UPGRADE', 'Activation', {
+                code: 'RPS_ACTIVATION_FAILED',
+                message: 'Failed to upgrade to admin control mode.',
+                returnValue: ({ context }) => returnValueOf(context.message, 'UpgradeClientToAdmin'),
+                namespace: 'IPS'
+              })
+            ),
             target: 'FAILED'
           }
         ]
@@ -1958,6 +2054,7 @@ export class Activation {
               target: 'CHECK_ACTIVATION_ON_AMT'
             },
             {
+              actions: assign({ failure: stepFailure('SETUP', 'Activation') }),
               target: 'ERROR'
             }
           ]
@@ -1991,6 +2088,7 @@ export class Activation {
               target: 'CHECK_ACTIVATION_ON_AMT'
             },
             {
+              actions: assign({ failure: stepFailure('COMMIT_CHANGES', 'Activation') }),
               target: 'ERROR'
             }
           ]
@@ -2050,7 +2148,14 @@ export class Activation {
             target: 'DELAYED_TRANSITION'
           },
           {
-            actions: assign({ errorMessage: 'Failed to activate in client control mode.' }),
+            actions: assign(
+              failAt('CHECK_CLIENT_SETUP', 'Activation', {
+                code: 'RPS_ACTIVATION_FAILED',
+                message: 'Failed to activate in client control mode.',
+                returnValue: ({ context }) => returnValueOf(context.message, 'Setup'),
+                namespace: 'IPS'
+              })
+            ),
             target: 'FAILED'
           }
         ]
@@ -2080,7 +2185,8 @@ export class Activation {
             {
               actions: assign({
                 message: ({ event }) => event.error,
-                targetAfterError: () => 'CHECK_ACTIVATION_ON_AMT'
+                targetAfterError: () => 'CHECK_ACTIVATION_ON_AMT',
+                failure: stepFailure('CHECK_ACTIVATION_ON_AMT', 'Activation')
               }),
               target: 'ERROR'
             }
@@ -2137,15 +2243,20 @@ export class Activation {
           onError: [
             {
               guard: 'isTlsACMPhase',
-              actions: assign({
-                errorMessage: ({ context }) => `TLS ACM setup failed for device ${devices[context.clientId].uuid}`
-              }),
+              actions: assign(
+                failAt('SET_MEBX_PASSWORD', 'Activation', {
+                  code: 'RPS_ACTIVATION_FAILED',
+                  message: ({ context }) => `TLS ACM setup failed for device ${devices[context.clientId].uuid}`,
+                  error: ({ event }) => event.error
+                })
+              ),
               target: 'DEACTIVATION'
             },
             {
               actions: assign({
                 message: ({ event }) => event.error,
-                targetAfterError: () => 'SET_MEBX_PASSWORD'
+                targetAfterError: () => 'SET_MEBX_PASSWORD',
+                failure: stepFailure('SET_MEBX_PASSWORD', 'Activation')
               }),
               target: 'ERROR'
             }
@@ -2187,11 +2298,21 @@ export class Activation {
         }
       },
       SAVE_DEVICE_TO_SECRET_PROVIDER_FAILURE: {
-        entry: assign({ errorMessage: 'Failed to save device information to Secret Provider' }),
+        entry: assign(
+          failAt('SAVE_DEVICE_TO_SECRET_PROVIDER', 'Activation', {
+            code: 'RPS_SECRETS_WRITE_FAILED',
+            message: 'Failed to save device information to Secret Provider'
+          })
+        ),
         always: 'FAILED'
       },
       SAVE_DEVICE_TO_MPS_FAILURE: {
-        entry: assign({ errorMessage: 'Failed to save device information to MPS' }),
+        entry: assign(
+          failAt('SAVE_DEVICE_TO_MPS', 'Activation', {
+            code: 'RPS_MPS_SAVE_DEVICE_FAILED',
+            message: 'Failed to save device information to MPS'
+          })
+        ),
         always: 'FAILED'
       },
       CHECK_AMT_TLS_STATE: {
@@ -2365,7 +2486,13 @@ export class Activation {
           id: 'fetch-mps-root-key',
           onDone: 'VALIDATE_DEVICE_TLS_CERT',
           onError: {
-            actions: assign({ errorMessage: 'Failed to fetch MPS root key from vault' }),
+            actions: assign(
+              failAt('FETCH_MPS_ROOT_KEY', 'Activation', {
+                code: 'RPS_SECRETS_MPS_ROOT_KEY',
+                message: 'Failed to fetch MPS root key from vault',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -2414,15 +2541,27 @@ export class Activation {
               target: 'CHECK_TLS_TUNNEL_RESULT'
             },
             {
-              actions: assign({
-                errorMessage: ({ event }) =>
-                  `TLS provisioning failed: ${(event.output as any)?.errorMessage ?? 'unknown error'}`
+              actions: assign((args) => {
+                const output = args.event.output as any
+                const childFailure: ProvisioningFailure | undefined = output?.failure
+                const result = failAt('TLS_TUNNEL_PROVISIONING', 'TLS', {
+                  code: 'RPS_CERT_GENERATION_FAILED',
+                  message: `TLS provisioning failed: ${output?.errorMessage ?? 'unknown error'}`
+                })(args)
+                // Prefer the child machine's own structured failure when it reported one.
+                return childFailure != null ? { ...result, failure: childFailure } : result
               }),
               target: 'FAILED'
             }
           ],
           onError: {
-            actions: assign({ errorMessage: 'Failed to provision TLS certificates for TLS tunnel activation' }),
+            actions: assign(
+              failAt('TLS_TUNNEL_PROVISIONING', 'TLS', {
+                code: 'RPS_CERT_GENERATION_FAILED',
+                message: 'Failed to provision TLS certificates for TLS tunnel activation',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -2437,7 +2576,12 @@ export class Activation {
             target: 'SAVE_TLS_TUNNEL_CERTS'
           },
           {
-            actions: assign({ errorMessage: 'TLS provisioning failed - no certificates were generated' }),
+            actions: assign(
+              failAt('CHECK_TLS_TUNNEL_RESULT', 'TLS', {
+                code: 'RPS_CERT_GENERATION_FAILED',
+                message: 'TLS provisioning failed - no certificates were generated'
+              })
+            ),
             target: 'FAILED'
           }
         ]
@@ -2449,7 +2593,13 @@ export class Activation {
           id: 'save-tls-tunnel-certs',
           onDone: 'SIGNAL_PORT_SWITCH',
           onError: {
-            actions: assign({ errorMessage: 'Failed to save TLS certificates to vault' }),
+            actions: assign(
+              failAt('SAVE_TLS_TUNNEL_CERTS', 'TLS', {
+                code: 'RPS_SECRETS_WRITE_FAILED',
+                message: 'Failed to save TLS certificates to vault',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -2461,7 +2611,13 @@ export class Activation {
           id: 'signal-port-switch',
           onDone: 'INIT_TLS_TUNNEL_CONNECTION',
           onError: {
-            actions: assign({ errorMessage: 'Failed to complete port switch to TLS' }),
+            actions: assign(
+              failAt('SIGNAL_PORT_SWITCH', 'Activation', {
+                code: 'RPS_TLS_PORT_SWITCH_FAILED',
+                message: 'Failed to complete port switch to TLS',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -2496,7 +2652,13 @@ export class Activation {
             }
           ],
           onError: {
-            actions: assign({ errorMessage: 'Failed to establish TLS tunnel connection' }),
+            actions: assign(
+              failAt('INIT_TLS_TUNNEL_CONNECTION', 'Activation', {
+                code: 'RPS_TLS_TUNNEL_INIT_FAILED',
+                message: 'Failed to establish TLS tunnel connection',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -2513,13 +2675,20 @@ export class Activation {
           onError: [
             {
               guard: 'isTlsACMPhase',
-              actions: assign({
-                errorMessage: ({ context }) => `TLS ACM setup failed for device ${devices[context.clientId].uuid}`
-              }),
+              actions: assign(
+                failAt('CHANGE_AMT_PASSWORD', 'Activation', {
+                  code: 'RPS_ACTIVATION_FAILED',
+                  message: ({ context }) => `TLS ACM setup failed for device ${devices[context.clientId].uuid}`,
+                  error: ({ event }) => event.error
+                })
+              ),
               target: 'DEACTIVATION'
             },
             {
-              actions: assign({ message: ({ event }) => event.error }),
+              actions: assign({
+                message: ({ event }) => event.error,
+                failure: stepFailure('CHANGE_AMT_PASSWORD', 'Activation')
+              }),
               target: 'ERROR'
             }
           ]
@@ -2637,7 +2806,13 @@ export class Activation {
           id: 'fetch-post-prov-root-key',
           onDone: 'TLS',
           onError: {
-            actions: assign({ errorMessage: 'Failed to fetch MPS root key for post-provisioning TLS' }),
+            actions: assign(
+              failAt('FETCH_POST_PROVISIONING_ROOT_KEY', 'Activation', {
+                code: 'RPS_SECRETS_MPS_ROOT_KEY',
+                message: 'Failed to fetch MPS root key for post-provisioning TLS',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -2711,15 +2886,26 @@ export class Activation {
           input: ({ context }) => context,
           id: 'send-unprovision-message',
           onDone: {
-            actions: assign({
-              status: () => 'error',
-              errorMessage: ({ context }) => `${context.errorMessage}.ACM activation failed.`
+            actions: assign((args) => {
+              const { context } = args
+              // Keep the original failure (the reason we are deactivating) when one was recorded.
+              const result = failAt('DEACTIVATION', 'Activation', {
+                code: 'RPS_ACTIVATION_DEACTIVATED_AFTER_FAILURE',
+                message: `${context.errorMessage}.ACM activation failed.`
+              })(args)
+              return { ...result, status: 'error', failure: context.failure ?? (result.failure as ProvisioningFailure) }
             }),
             target: 'FINAL'
           },
           onError: {
-            actions: assign({
-              errorMessage: ({ context }) => `Failed to deactivate device after ACM failure: ${context.errorMessage}`
+            actions: assign((args) => {
+              const { context } = args
+              const result = failAt('DEACTIVATION', 'Activation', {
+                code: 'RPS_DEACTIVATION_FAILED',
+                message: `Failed to deactivate device after ACM failure: ${context.errorMessage}`,
+                error: ({ event }) => event.error
+              })(args)
+              return { ...result, failure: context.failure ?? (result.failure as ProvisioningFailure) }
             }),
             target: 'FINAL'
           }
@@ -2740,15 +2926,25 @@ export class Activation {
               target: 'PROVISIONED'
             },
             {
-              actions: assign({
-                errorMessage: ({ event }) =>
-                  `Time synchronization failed: ${(event.output as any)?.errorMessage ?? 'unknown error'}`
+              actions: assign((args) => {
+                const output = args.event.output as any
+                const childFailure: ProvisioningFailure | undefined = output?.failure
+                const result = failAt('SYNC_ACTIVATION_TIME', 'TimeSync', {
+                  code: 'WSMAN_REQUEST_FAILED',
+                  message: `Time synchronization failed: ${output?.errorMessage ?? 'unknown error'}`
+                })(args)
+                return childFailure != null ? { ...result, failure: childFailure } : result
               }),
               target: 'FAILED'
             }
           ],
           onError: {
-            actions: assign({ errorMessage: ({ event }) => `Time synchronization failed: ${String(event.error)}` }),
+            actions: assign(
+              failAt('SYNC_ACTIVATION_TIME', 'TimeSync', {
+                message: ({ event }) => `Time synchronization failed: ${String(event.error)}`,
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         },
@@ -2772,16 +2968,22 @@ export class Activation {
             message: context.message,
             clientId: context.clientId
           }),
-          onDone: 'NEXT_STATE'
+          // The error machine recovered (e.g. digest retry): the recorded failure no longer applies.
+          onDone: { actions: assign({ failure: undefined }), target: 'NEXT_STATE' }
         },
         on: {
           ONFAILED: [
             {
               guard: 'shouldDeactivate',
+              // Keep why we are deactivating; DEACTIVATION reports it as the cause.
+              actions: assign({ failure: (args) => failureAfterErrorMachine('Activation', args) }),
               target: 'DEACTIVATION'
             },
             {
-              actions: assign({ errorMessage: ({ event }) => event.output }),
+              actions: assign({
+                errorMessage: ({ event }) => event.output,
+                failure: (args) => failureAfterErrorMachine('Activation', args)
+              }),
               target: 'FAILED'
             }
           ]
@@ -2806,13 +3008,20 @@ export class Activation {
             target: 'CHECK_ACTIVATION_ON_AMT'
           },
           {
-            actions: assign({ errorMessage: ({ context }) => 'No valid next state' }),
+            actions: assign(
+              failAt('NEXT_STATE', 'Activation', { code: 'RPS_NO_VALID_NEXT_STATE', message: 'No valid next state' })
+            ),
             target: 'FAILED'
           }
         ]
       },
       INVALID_DIGEST_REALM: {
-        entry: assign({ errorMessage: 'Not a valid digest realm.' }),
+        entry: assign(
+          failAt('INVALID_DIGEST_REALM', 'Activation', {
+            code: 'RPS_CONFIG_INVALID_DIGEST_REALM',
+            message: 'Not a valid digest realm.'
+          })
+        ),
         always: {
           target: 'FAILED'
         }
