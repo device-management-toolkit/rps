@@ -19,7 +19,7 @@ export interface DeviceInfo extends HostInventory {
   sku: string
   currentMode: string
   features: string
-  ipConfiguration: { ipAddress: string }
+  ipConfiguration?: { ipAddress: string }
 }
 
 export const SyncDeviceInfoEventType = 'SYNC_DEVICE_INFO'
@@ -81,7 +81,7 @@ export class SyncDeviceInfo {
       fwSku: input.deviceInfo?.sku,
       currentMode: input.deviceInfo?.currentMode?.toString(),
       features: input.deviceInfo?.features,
-      ipAddress: input.deviceInfo?.ipConfiguration.ipAddress
+      ipAddress: input.deviceInfo?.ipConfiguration?.ipAddress
     }
     // Stored fields this sync does not report (status, activatedAt, ...) are kept as they are. The
     // host inventory is left out here because getHostInventory decides what is carried forward.
