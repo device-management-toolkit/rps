@@ -29,7 +29,14 @@ vi.mock('../common.js', async () => {
   return {
     invokeWsmanCall: invokeWsmanCallSpy,
     coalesceMessage,
-    HttpResponseError
+    HttpResponseError,
+    failAt: actual.failAt,
+    returnValueOf: actual.returnValueOf,
+    buildFailure: actual.buildFailure,
+
+    stepFailure: actual.stepFailure,
+
+    failureAfterErrorMachine: actual.failureAfterErrorMachine
   }
 })
 
@@ -136,7 +143,16 @@ describe('SyncDeviceInfo State Machine', () => {
   it('should fail when the MPS device lookup fails', async () => {
     getSpy.mockRejectedValue(new Error('Device not found'))
     doneResponse.status = StatusFailed
-    await runTheTest()
+    // runTilDone checks the machine output against doneResponse, so this asserts the failure is propagated.
+    doneResponse.failure = {
+      Code: 'RPS_UNEXPECTED_ERROR',
+      Component: 'Maintenance',
+      Step: 'GET_DEVICE_FROM_MPS',
+      Reason: 'An unexpected error occurred',
+      Detail: 'Device not found'
+    }
+    const finalContext = await runTheTest()
+    expect(finalContext.failure).toEqual(doneResponse.failure)
     expect(gotSpy).not.toHaveBeenCalled()
   })
   it('should save to MPS', async () => {
@@ -236,6 +252,15 @@ describe('SyncDeviceInfo State Machine', () => {
     mpsRsp.statusCode = 404
     mpsRsp.statusMessage = 'Device not found'
     doneResponse.status = StatusFailed
-    await runTheTest()
+    doneResponse.failure = {
+      Code: 'RPS_MPS_SAVE_DEVICE_FAILED',
+      Component: 'Maintenance',
+      Step: 'SAVE_TO_MPS',
+      Reason: 'Device information could not be saved to MPS',
+      HttpStatus: 404,
+      Detail: 'Device not found'
+    }
+    const finalContext = await runTheTest()
+    expect(finalContext.failure).toEqual(doneResponse.failure)
   })
 })
