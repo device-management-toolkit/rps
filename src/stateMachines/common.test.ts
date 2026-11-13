@@ -8,7 +8,7 @@ import { HttpHandler } from '../HttpHandler.js'
 import Logger from '../Logger.js'
 import ClientResponseMsg from '../utils/ClientResponseMsg.js'
 import { devices } from '../devices.js'
-import { GATEWAY_TIMEOUT_ERROR, UNEXPECTED_PARSE_ERROR, EA_TIMEOUT_ERROR } from '../utils/constants.js'
+import { GATEWAY_TIMEOUT_ERROR, UNEXPECTED_PARSE_ERROR, EA_TIMEOUT_ERROR, hasStatusCode } from '../utils/constants.js'
 import { randomUUID } from 'node:crypto'
 import { WSEnterpriseAssistantListener, enterpriseAssistantSocket, promises } from '../WSEnterpriseAssistantListener.js'
 import { config } from '../test/helper/Config.js'
@@ -462,5 +462,72 @@ describe('Common', () => {
         applicableComponents({ TLS: { Result: 'NotApplicable' }, CIRAProxy: { Result: 'NotApplicable' } })
       ).toEqual({})
     })
+  })
+})
+
+// Retained identities must keep ordinary transport reconnects out of the bootstrap trust phase.
+describe('Retained TLS identity trust', () => {
+  it.each([
+    { verify: true, skipTlsVerification: false },
+    { verify: false, skipTlsVerification: false },
+    { verify: false, skipTlsVerification: true }
+  ])(
+    'enforces retained trust while preserving explicit deactivation override: %j',
+    async ({ verify, skipTlsVerification }) => {
+      const { TLSTunnelManager } = await import('../TLSTunnelManager.js')
+      const id = 'retained-tls-transport-test'
+      const originalConfig = Environment.Config
+      Environment.Config = { ...originalConfig, amt_post_tls_reject: verify, amt_tls_tunnel_persistent: true }
+      devices[id] = {
+        tlsEnforced: true,
+        activationStatus: true,
+        tls: { mpsRootCertPEM: 'synthetic-root', validatedCertPEM: 'synthetic-leaf' },
+        ClientSocket: { send: vi.fn() },
+        ClientData: { payload: { currentMode: 2 } },
+        connectionParams: { port: 16993 }
+      } as any
+      const connect = vi.spyOn(TLSTunnelManager.prototype, 'connect').mockResolvedValue(undefined)
+      const onData = vi.spyOn(TLSTunnelManager.prototype, 'onData').mockImplementation(() => {})
+      const send = vi.spyOn(TLSTunnelManager.prototype, 'send').mockImplementation(async () => {
+        devices[id].resolve({ success: true })
+      })
+      try {
+        const result = await invokeWsmanCall({
+          clientId: id,
+          skipTlsVerification,
+          xmlMessage: 'synthetic-test-message',
+          httpHandler: { wrapIt: () => 'synthetic-test-request' }
+        })
+        expect(result).toEqual({ success: true })
+        expect((devices[id].tlsTunnelManager as any).allowPostCcmTransitionSelfSigned).toBe(false)
+        expect((devices[id].tlsTunnelManager as any).rejectUnauthorized).toBe(!skipTlsVerification)
+        expect(devices[id].tls.issuedCertPEM).toBeUndefined()
+      } finally {
+        connect.mockRestore()
+        onData.mockRestore()
+        send.mockRestore()
+        Environment.Config = originalConfig
+        delete devices[id]
+      }
+    }
+  )
+})
+
+describe('Status code detection', () => {
+  it('recognizes both parsed HTTP responses and transport errors without classifying them as equivalent', () => {
+    expect(hasStatusCode({ statusCode: 400 })).toBe(true)
+    expect(hasStatusCode(new GATEWAY_TIMEOUT_ERROR())).toBe(true)
+    expect(hasStatusCode(Object.assign(() => {}, { statusCode: 401 }))).toBe(true)
+  })
+
+  it.each([
+    null,
+    undefined,
+    401,
+    '401',
+    {},
+    { statusCode: '401' }
+  ])('rejects values without a numeric statusCode', (value) => {
+    expect(hasStatusCode(value)).toBe(false)
   })
 })

@@ -4,7 +4,7 @@
  **********************************************************************/
 
 import { AMT, CIM, IPS } from '@device-management-toolkit/wsman-messages'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, X509Certificate } from 'node:crypto'
 // import { devices } from '../WebSocketListener.js'
 import { devices } from '../devices.js'
 import { Environment } from '../utils/Environment.js'
@@ -16,7 +16,7 @@ import { PasswordHelper } from '../utils/PasswordHelper.js'
 import { ClientAction } from '../models/RCS.Config.js'
 import { HttpHandler } from '../HttpHandler.js'
 import ClientResponseMsg from '../utils/ClientResponseMsg.js'
-import { type MachineImplementationsSimplified, createActor, fromPromise } from 'xstate'
+import { type MachineImplementationsSimplified, createActor, createMachine, fromPromise } from 'xstate'
 import { AMTUserName, GATEWAY_TIMEOUT_ERROR } from '../utils/constants.js'
 import got from 'got'
 
@@ -2171,7 +2171,6 @@ describe('Activation State Machine', () => {
           'GET_AMT_DOMAIN_CERT',
           'INIT_TLS_TUNNEL',
           'GET_GENERAL_SETTINGS',
-          'CHECK_AMT_TLS_STATE',
           'IPS_HOST_BASED_SETUP_SERVICE',
           'ADD_NEXT_CERT_IN_CHAIN',
           'UPGRADE_TO_ADMIN_SETUP',
@@ -3206,5 +3205,497 @@ describe('Activation State Machine', () => {
         onDataSpy.mockRestore()
       })
     })
+  })
+})
+
+// Run real SDK reads and validation actors with synthetic device responses.
+describe('TLS reconfiguration reuse optimizations', () => {
+  let activation: ActivationType
+  let input: ActivationContextType
+  let responses: any[]
+  let requests: string[]
+  const syntheticId = 'tls-reuse-test'
+  let certs: ReturnType<typeof import('../test/helper/tlsReuseCertificates.js').createTlsReuseCertificates>
+  const enumeration = { Envelope: { Body: { EnumerateResponse: { EnumerationContext: 'test' } } } }
+  const pull = (items: any): any => ({ Envelope: { Body: { PullResponse: { Items: items, EndOfSequence: '' } } } })
+  const settings = [
+    {
+      ElementName: 'Intel(r) AMT 802.3 TLS Settings',
+      Enabled: true,
+      MutualAuthentication: false,
+      AcceptNonSecureConnections: false
+    },
+    { ElementName: 'Intel(r) AMT LMS TLS Settings', Enabled: true }
+  ]
+  const credentials = [{ ElementInContext: { ReferenceParameters: { SelectorSet: { Selector: { _: 'leaf' } } } } }]
+  const queueProbe = (): void => {
+    responses.push(
+      enumeration,
+      pull({ AMT_TLSSettingData: settings }),
+      enumeration,
+      pull({ AMT_TLSCredentialContext: credentials })
+    )
+  }
+  const queueCertificates = (leaf = certs.leaf): void => {
+    responses.push(
+      enumeration,
+      pull({
+        AMT_PublicKeyCertificate: [
+          { InstanceID: 'leaf', X509Certificate: leaf, TrustedRootCertficate: false },
+          { InstanceID: 'root', X509Certificate: certs.root, TrustedRootCertficate: true }
+        ]
+      })
+    )
+  }
+
+  beforeAll(async () => {
+    const { createTlsReuseCertificates } = await import('../test/helper/tlsReuseCertificates.js')
+    certs = createTlsReuseCertificates()
+  })
+  beforeEach(() => {
+    activation = new Activation()
+    Environment.Config = { ...Environment.Config, delay_tls_timer: 5 }
+    responses = []
+    requests = []
+    devices[syntheticId] = {
+      uuid: syntheticId,
+      hostname: 'test-device',
+      tlsEnforced: true,
+      tlsTunnelSessionId: 'session-1',
+      tlsTunnelNeedsReset: false,
+      amtReconfiguring: false,
+      tls: {},
+      status: {},
+      ClientData: { payload: { currentMode: 2 } },
+      connectionParams: { port: 16993 },
+      tlsTunnelManager: { close: vi.fn() }
+    } as any
+    input = {
+      tlsIdentityValidatedSessionId: 'session-1',
+      clientId: syntheticId,
+      isActivated: true,
+      profile: { activation: ClientAction.ADMINCTLMODE, tlsMode: 1 },
+      amt: new AMT.Messages()
+    } as ActivationContextType
+    vi.spyOn(activation.configurator.secretsManager, 'getSecretAtPath').mockImplementation(async (path) =>
+      path === 'MPSCerts' ? { web_tls_config: { ca: certs.root } } : { TLS_ISSUED_CERTIFICATE: certs.leaf }
+    )
+    invokeWsmanCallSpy.mockImplementation(async (context) => {
+      requests.push(context.xmlMessage)
+      if (!responses.length) throw new Error('Unexpected WS-Man request')
+      const response = responses.shift()
+      if (response instanceof Error) throw response
+      return response
+    })
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+    delete devices[syntheticId]
+  })
+
+  async function probe(): Promise<void> {
+    queueProbe()
+    input.tlsProbeSnapshot = (await activation.checkAmtTlsState({ input })).snapshot
+  }
+
+  it.each([true, false])(
+    'verifies a retained identity on fresh connection with amt_post_tls_reject=%s',
+    async (verify) => {
+      const originalConfig = Environment.Config
+      Environment.Config = { ...originalConfig, amt_post_tls_reject: verify }
+      vi.spyOn(TLSTunnelManager.prototype, 'connect').mockResolvedValue(undefined)
+      vi.spyOn(TLSTunnelManager.prototype, 'onData').mockImplementation(() => {})
+      try {
+        await probe()
+        queueCertificates()
+        expect((await activation.validateActivatedTlsIdentity({ input })).reuseApproved).toBe(true)
+        await activation.initializeTlsTunnelConnection({ input })
+        const tunnel = devices[syntheticId].tlsTunnelManager as any
+        expect(tunnel.rejectUnauthorized).toBe(true)
+        expect(tunnel.allowPostCcmTransitionSelfSigned).toBe(false)
+        expect(tunnel.caCerts).toBe(certs.root)
+        expect(
+          tunnel.verifyPeerAgainstCustomCA({ getPeerCertificate: () => ({ raw: new X509Certificate(certs.leaf).raw }) })
+            .ok
+        ).toBe(true)
+        expect(tunnel.verifyPeerAgainstCustomCA({ getPeerCertificate: () => ({}) }).ok).toBe(false)
+      } finally {
+        Environment.Config = originalConfig
+      }
+    }
+  )
+
+  it('reuses the initial tunnel identity without a pre-seeded session ID', async () => {
+    const device = devices[syntheticId]
+    device.tlsTunnelManager = undefined
+    device.tlsTunnelSessionId = undefined
+    input.tlsIdentityValidatedSessionId = undefined
+    vi.spyOn(TLSTunnelManager.prototype, 'connect').mockResolvedValue(undefined)
+    vi.spyOn(TLSTunnelManager.prototype, 'onData').mockImplementation(() => {})
+
+    await activation.initializeTLSTunnel({ input })
+    const sessionId = device.tlsTunnelManager!.getSessionId()
+    expect(device.tlsTunnelSessionId).toBe(sessionId)
+    await probe()
+    expect(input.tlsProbeSnapshot?.sessionId).toBe(sessionId)
+    queueCertificates()
+    expect((await activation.validateActivatedTlsIdentity({ input })).reuseApproved).toBe(true)
+    expect(requests).toHaveLength(6)
+  })
+
+  it('clears the initial tunnel session ID when connection fails', async () => {
+    const device = devices[syntheticId]
+    device.tlsTunnelManager = undefined
+    device.tlsTunnelSessionId = undefined
+    vi.spyOn(TLSTunnelManager.prototype, 'connect').mockRejectedValue(new Error('handshake failed'))
+    await expect(activation.initializeTLSTunnel({ input })).rejects.toThrow('handshake failed')
+    expect(device.tlsTunnelManager).toBeUndefined()
+    expect(device.tlsTunnelSessionId).toBeUndefined()
+  })
+
+  it('reuses credential reads while retaining live certificate and current-root verification', async () => {
+    await probe()
+    queueCertificates()
+    const result = await activation.validateActivatedTlsIdentity({ input })
+    expect(result.valid).toBe(true)
+    expect(result.reuseApproved).toBe(true)
+    expect(result.fingerprint).toBeDefined()
+    expect(requests).toHaveLength(6)
+    expect(requests.filter((xml) => xml.includes('AMT_TLSCredentialContext'))).toHaveLength(2)
+    expect(devices[syntheticId].tls.issuedCertPEM).toBeUndefined()
+  })
+
+  it.each([
+    'session',
+    'reset',
+    'age'
+  ])('discards the cache after %s invalidation', async (invalidation) => {
+    await probe()
+    if (invalidation === 'session') devices[syntheticId].tlsTunnelSessionId = 'session-2'
+    if (invalidation === 'reset') devices[syntheticId].tlsTunnelNeedsReset = true
+    if (invalidation === 'age') input.tlsProbeSnapshot!.capturedAt -= 31000
+    responses.push(enumeration, pull({ AMT_TLSCredentialContext: credentials }))
+    queueCertificates()
+    const result = await activation.validateActivatedTlsIdentity({ input })
+    expect(result.valid).toBe(true)
+    expect(result.reuseApproved).toBe(false)
+    expect(requests).toHaveLength(8)
+  })
+
+  it('declines caching an incomplete credential enumeration', async () => {
+    queueProbe()
+    responses[3].Envelope.Body.PullResponse.EndOfSequence = undefined
+    responses[3].Envelope.Body.PullResponse.EnumerationContext = 'more-results'
+    input.tlsProbeSnapshot = (await activation.checkAmtTlsState({ input })).snapshot
+    expect(input.tlsProbeSnapshot).toBeUndefined()
+    responses.push(enumeration, pull({ AMT_TLSCredentialContext: credentials }))
+    queueCertificates()
+    expect((await activation.validateActivatedTlsIdentity({ input })).reuseApproved).toBe(false)
+    expect(requests).toHaveLength(8)
+  })
+
+  it('rejects reuse if the session changes during public-certificate discovery', async () => {
+    await probe()
+    queueCertificates()
+    invokeWsmanCallSpy.mockImplementation(async (context) => {
+      requests.push(context.xmlMessage)
+      if (context.xmlMessage.includes('AMT_PublicKeyCertificate')) devices[syntheticId].tlsTunnelSessionId = 'session-2'
+      return responses.shift()
+    })
+    expect((await activation.validateActivatedTlsIdentity({ input })).valid).toBe(false)
+  })
+
+  it('retains provisioning on missing or failed TLS probes', async () => {
+    responses.push(new Error('probe failed'))
+    const result = await activation.checkAmtTlsState({ input })
+    expect(result.snapshot).toBeUndefined()
+    expect(result.tlsEnabled).toBe(false)
+  })
+
+  it('retains provisioning on a mismatched live certificate', async () => {
+    await probe()
+    queueCertificates(certs.issue('other-device', 90))
+    expect(await activation.validateActivatedTlsIdentity({ input })).toEqual({ valid: false, reuseApproved: false })
+  })
+
+  it.each([
+    'tls-settings',
+    'signing-authority',
+    'hostname',
+    'upgrade',
+    'fresh-activation',
+    'root'
+  ])('retains provisioning for changed %s', async (change) => {
+    await probe()
+    queueCertificates()
+    if (change === 'tls-settings') input.profile.tlsMode = 2
+    if (change === 'signing-authority') input.profile.tlsSigningAuthority = 'MicrosoftCA' as any
+    if (change === 'hostname') devices[syntheticId].hostname = 'changed-hostname'
+    if (change === 'upgrade') devices[syntheticId].ClientData.payload.currentMode = 1
+    if (change === 'fresh-activation') input.isActivated = false
+    if (change === 'root')
+      vi.spyOn(activation.configurator.secretsManager, 'getSecretAtPath').mockImplementation(async (path) =>
+        path === 'MPSCerts' ? { web_tls_config: { ca: certs.leaf } } : { TLS_ISSUED_CERTIFICATE: certs.leaf }
+      )
+    const result = await activation.validateActivatedTlsIdentity({ input })
+    expect(result.reuseApproved).toBe(false)
+  })
+
+  it('revalidates after configuration before approving identity reuse', async () => {
+    await probe()
+    queueCertificates()
+    const validated = await activation.validateActivatedTlsIdentity({ input })
+    input.tlsIdentityReuseFingerprint = validated.fingerprint
+    requests = []
+    queueProbe()
+    queueCertificates()
+    expect(await activation.verifyReusableTlsIdentity({ input })).toBe(true)
+    expect(requests).toHaveLength(6)
+    expect(requests.join('')).not.toContain('GenerateKeyPair')
+  })
+
+  it('rejects reuse when the identity changes after configuration', async () => {
+    input.tlsIdentityReuseFingerprint = 'previous-identity'
+    queueProbe()
+    queueCertificates()
+    expect(await activation.verifyReusableTlsIdentity({ input })).toBe(false)
+  })
+
+  it.each([
+    'not-approved',
+    'fresh-activation',
+    'reset',
+    'reconfiguring',
+    'session'
+  ])('retains rollover wait for %s', async (condition) => {
+    vi.useFakeTimers()
+    input.tlsIdentityReuseApproved = true
+    input.skipTlsRolloverWait = true
+    if (condition === 'not-approved') input.tlsIdentityReuseApproved = false
+    if (condition === 'fresh-activation') input.isActivated = false
+    if (condition === 'reset') devices[syntheticId].tlsTunnelNeedsReset = true
+    if (condition === 'reconfiguring') devices[syntheticId].amtReconfiguring = true
+    if (condition === 'session') devices[syntheticId].tlsTunnelSessionId = 'session-2'
+    let finished = false
+    const result = activation.signalPortSwitch({ input }).then(() => {
+      finished = true
+    })
+    await vi.advanceTimersByTimeAsync(4999)
+    expect(finished).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    await result
+    expect(devices[syntheticId].tlsTunnelNeedsReset).toBe(true)
+  })
+
+  it('skips only the unchanged-identity wait and still closes the old tunnel', async () => {
+    vi.useFakeTimers()
+    input.tlsIdentityReuseApproved = true
+    input.skipTlsRolloverWait = true
+    const close = devices[syntheticId].tlsTunnelManager!.close
+    await expect(activation.signalPortSwitch({ input })).resolves.toBe(true)
+    expect(close).toHaveBeenCalledOnce()
+    expect(devices[syntheticId].tlsTunnelManager).toBeUndefined()
+    expect(devices[syntheticId].tlsTunnelNeedsReset).toBe(true)
+  })
+
+  it('reconnects with the retained identity without post-CCM self-signed fallback', async () => {
+    Environment.Config.amt_post_tls_reject = true
+    devices[syntheticId].activationStatus = true
+    devices[syntheticId].tls = { mpsRootCertPEM: certs.root, validatedCertPEM: certs.leaf } as any
+    vi.spyOn(TLSTunnelManager.prototype, 'connect').mockResolvedValue(undefined)
+    vi.spyOn(TLSTunnelManager.prototype, 'onData').mockImplementation(() => {})
+    await expect(activation.initializeTlsTunnelConnection({ input })).resolves.toBe(true)
+    expect((devices[syntheticId].tlsTunnelManager as any).allowPostCcmTransitionSelfSigned).toBe(false)
+    expect(devices[syntheticId].tls.issuedCertPEM).toBeUndefined()
+  })
+
+  it('executes probe, validation, and fresh-tunnel routing without a rollover wait', async () => {
+    const { createMachine, waitFor } = await import('xstate')
+    queueProbe()
+    queueCertificates()
+    const initialize = vi.fn(async () => true)
+    const machine = activation.machine.provide({
+      actors: {
+        initializeTlsTunnelConnection: fromPromise(initialize)
+      }
+    })
+    const segment = createMachine(
+      {
+        ...machine.config,
+        initial: 'CHECK_AMT_TLS_STATE',
+        context: input,
+        states: { ...machine.config.states, CHANGE_AMT_PASSWORD: { type: 'final' } }
+      },
+      machine.implementations
+    )
+    const actor = createActor(segment)
+    try {
+      actor.start()
+      const snapshot = await waitFor(actor, (state) => state.status === 'done', { timeout: 1000 })
+      expect(snapshot.value).toBe('CHANGE_AMT_PASSWORD')
+      expect(snapshot.context.tlsIdentityReuseApproved).toBe(true)
+      expect(snapshot.context.tlsProbeSnapshot).toBeUndefined()
+      expect(snapshot.context.skipTlsRolloverWait).toBe(false)
+      expect(initialize).toHaveBeenCalledOnce()
+      expect(requests).toHaveLength(6)
+    } finally {
+      actor.stop()
+    }
+  })
+
+  it.each([true, false])('keeps CIRA routing after reuse (configured=%s)', async (cira) => {
+    const { createMachine, waitFor } = await import('xstate')
+    if (cira) input.profile.ciraConfigName = 'test-cira'
+    const machine = activation.machine
+    const segment = createMachine(
+      {
+        ...machine.config,
+        initial: 'ROUTE_REUSED_TLS',
+        context: input,
+        states: { ...machine.config.states, CIRA: { type: 'final' }, SYNC_ACTIVATION_TIME: { type: 'final' } }
+      },
+      machine.implementations
+    )
+    const actor = createActor(segment)
+    try {
+      actor.start()
+      const snapshot = await waitFor(actor, (state) => state.status === 'done', { timeout: 1000 })
+      expect(snapshot.value).toBe(cira ? 'CIRA' : 'SYNC_ACTIVATION_TIME')
+      expect(devices[syntheticId].status.TLSConfiguration).toBe('Already configured')
+      expect(devices[syntheticId].status.Components?.TLS).toEqual({ Result: 'Success', Details: 'Already configured' })
+    } finally {
+      actor.stop()
+    }
+  })
+
+  it.each([
+    true,
+    false,
+    'error'
+  ])('routes post-configuration verification result %s', async (verified) => {
+    const { createMachine, waitFor } = await import('xstate')
+    const machine = activation.machine.provide({
+      actors: {
+        verifyReusableTlsIdentity: fromPromise(async () => {
+          if (verified === 'error') throw new Error('verification failed')
+          return verified === true
+        })
+      }
+    })
+    const segment = createMachine(
+      {
+        ...machine.config,
+        initial: 'VERIFY_REUSABLE_TLS_IDENTITY',
+        context: input,
+        states: {
+          ...machine.config.states,
+          ROUTE_REUSED_TLS: { type: 'final' },
+          FETCH_POST_PROVISIONING_ROOT_KEY: { type: 'final' }
+        }
+      },
+      machine.implementations
+    )
+    const actor = createActor(segment)
+    try {
+      actor.start()
+      const snapshot = await waitFor(actor, (s) => s.status === 'done', { timeout: 1000 })
+      expect(snapshot.value).toBe(verified === true ? 'ROUTE_REUSED_TLS' : 'FETCH_POST_PROVISIONING_ROOT_KEY')
+    } finally {
+      actor.stop()
+    }
+  })
+
+  it.each([5, 15])('retains the configured %s-second rollover wait without reuse approval', async (seconds) => {
+    vi.useFakeTimers()
+    Environment.Config.delay_tls_timer = seconds
+    let completed = false
+    const pending = activation.signalPortSwitch({ input }).then(() => {
+      completed = true
+    })
+    await vi.advanceTimersByTimeAsync(seconds * 1000 - 1)
+    expect(completed).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    await pending
+    expect(completed).toBe(true)
+  })
+
+  it.each([
+    'mutual',
+    'custom-certificates',
+    'wifi',
+    '8021x',
+    'disabled-local',
+    'malformed'
+  ])('rejects unsupported reuse policy %s', async (condition) => {
+    const { canReuseTlsIdentity } = await import('./tlsReuse.js')
+    const profile = { ...input.profile }
+    const liveSettings = settings.map((entry) => ({ ...entry }))
+    let leaf = certs.leaf
+    if (condition === 'mutual') profile.tlsMode = 3
+    if (condition === 'custom-certificates') profile.tlsCerts = {} as any
+    if (condition === 'wifi') profile.wifiConfigs = [{}] as any
+    if (condition === '8021x') profile.ieee8021xProfileName = 'enterprise'
+    if (condition === 'disabled-local') liveSettings[1].Enabled = false
+    if (condition === 'malformed') leaf = 'not-a-certificate'
+    expect(canReuseTlsIdentity(profile, liveSettings as any, leaf, certs.root, 'test-device')).toBe(false)
+  })
+
+  it('rejects expired and near-renewal certificates despite a valid signature', async () => {
+    const { canReuseTlsIdentity } = await import('./tlsReuse.js')
+    for (const days of [-1, 20]) {
+      expect(
+        canReuseTlsIdentity(
+          input.profile,
+          settings as any,
+          certs.issue('test-device', days, -60),
+          certs.root,
+          'test-device'
+        )
+      ).toBe(false)
+    }
+    expect(
+      canReuseTlsIdentity(input.profile, settings as any, certs.issue('test-device', 90, 1), certs.root, 'test-device')
+    ).toBe(false)
+  })
+})
+
+describe('TLS reuse state at the start of a provisioning attempt', () => {
+  it.each(['ACTIVATION', 'ACTIVATED'] as const)('clears prior reuse approval on %s', (type) => {
+    const machine = new Activation().machine
+    const segment = createMachine(
+      {
+        ...machine.config,
+        context: {
+          tlsProbeSnapshot: { sessionId: 'previous-session' },
+          tlsIdentityReuseApproved: true,
+          tlsIdentityReuseFingerprint: 'previous-identity',
+          tlsIdentityValidatedSessionId: 'previous-session',
+          skipTlsRolloverWait: true
+        },
+        states: { ...machine.config.states, GET_AMT_PROFILE: { type: 'final' } }
+      },
+      machine.implementations
+    )
+    const actor = createActor(segment)
+    try {
+      actor.start()
+      actor.send({ type, clientId: 'new-attempt', tenantId: 'tenant', friendlyName: 'device' })
+      const snapshot = actor.getSnapshot()
+      expect(snapshot.value).toBe('GET_AMT_PROFILE')
+      expect(snapshot.context).toMatchObject({
+        clientId: 'new-attempt',
+        isActivated: type === 'ACTIVATED',
+        tenantId: 'tenant',
+        friendlyName: 'device',
+        tlsProbeSnapshot: undefined,
+        tlsIdentityReuseApproved: false,
+        tlsIdentityReuseFingerprint: undefined,
+        tlsIdentityValidatedSessionId: undefined,
+        skipTlsRolloverWait: false
+      })
+    } finally {
+      actor.stop()
+    }
   })
 })

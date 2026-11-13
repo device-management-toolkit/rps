@@ -7,10 +7,11 @@ import { randomUUID } from 'node:crypto'
 import { devices } from '../devices.js'
 import { HttpHandler } from '../HttpHandler.js'
 import { Environment } from '../utils/Environment.js'
+import { DataProcessor } from '../DataProcessor.js'
 import { config } from '../test/helper/Config.js'
 
 import { vi, type Mock } from 'vitest'
-import { GATEWAY_TIMEOUT_ERROR, UNEXPECTED_PARSE_ERROR } from '../utils/constants.js'
+import { CONNECTION_RESET_ERROR, GATEWAY_TIMEOUT_ERROR, UNEXPECTED_PARSE_ERROR } from '../utils/constants.js'
 import { processTLSTunnelResponse, invokeWsmanCall } from './common.js'
 
 Environment.Config = config
@@ -107,6 +108,18 @@ describe('processTLSTunnelResponse', () => {
     expect(rejectedValue.statusCode).toBe(401)
   })
 
+  it('ignores decrypted response bytes from an obsolete tunnel', () => {
+    devices[clientId].tlsTunnelSessionId = 'replacement'
+    processTLSTunnelResponse(
+      clientId,
+      Buffer.from('HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n'),
+      httpHandler,
+      'old'
+    )
+    expect(rejectSpy).not.toHaveBeenCalled()
+    expect(devices[clientId].tlsResponseBuffer).toBeUndefined()
+  })
+
   it('should reject with UNEXPECTED_PARSE_ERROR when XML parse returns null', () => {
     const xmlBody = 'not valid xml at all'
     const httpResponse = `HTTP/1.1 200 OK\r\nContent-Length: ${xmlBody.length}\r\n\r\n${xmlBody}`
@@ -139,7 +152,8 @@ describe('invokeWsmanCall TLS error cleanup', () => {
       connect: vi.fn(),
       send: vi.fn(),
       onData: vi.fn(),
-      getSessionId: () => 'test-session'
+      getSessionId: () => 'test-session',
+      endInput: (onEnd: () => void) => onEnd()
     }
     devices[clientId] = {
       ClientSocket: { send: vi.fn() } as any,
@@ -182,6 +196,41 @@ describe('invokeWsmanCall TLS error cleanup', () => {
     expect(devices[clientId].tlsTunnelNeedsReset).toBe(true)
     expect(devices[clientId].tlsResponseBuffer).toBeUndefined()
     expect(devices[clientId].amtReconfiguring).toBe(true)
+  })
+
+  it.each([200, 400])('does not interrupt a completed HTTP %s response on subsequent EOF', async (statusCode) => {
+    const processor = new DataProcessor({ debug: vi.fn(), warn: vi.fn() } as any, {} as any)
+    vi.spyOn(context.httpHandler, 'parseXML').mockReturnValue({ parsed: true })
+    const promise = invokeWsmanCall(context)
+    const result =
+      statusCode === 200
+        ? expect(promise).resolves.toEqual({ parsed: true })
+        : expect(promise).rejects.toMatchObject({ statusCode: 400 })
+    const body = statusCode === 200 ? '<response/>' : ''
+    processTLSTunnelResponse(
+      clientId,
+      Buffer.from(`HTTP/1.1 ${statusCode} Test\r\nContent-Length: ${body.length}\r\n\r\n${body}`),
+      context.httpHandler
+    )
+    expect(devices[clientId].pendingPromise).toBeUndefined()
+    await processor.handleConnectionReset({ tlsSessionId: 'test-session', streamClosed: true } as any, clientId)
+    await result
+    expect(devices[clientId].tlsTunnelNeedsReset).toBe(true)
+    expect(devices[clientId].amtReconfiguring).toBe(false)
+  })
+
+  it('rejects an incomplete HTTP response on EOF without waiting for its timeout', async () => {
+    const processor = new DataProcessor({ debug: vi.fn(), warn: vi.fn() } as any, {} as any)
+    const promise = invokeWsmanCall(context)
+    const result = expect(promise).rejects.toBeInstanceOf(CONNECTION_RESET_ERROR)
+    processTLSTunnelResponse(
+      clientId,
+      Buffer.from('HTTP/1.1 200 OK\r\nContent-Length: 999\r\n\r\npartial'),
+      context.httpHandler
+    )
+    await processor.handleConnectionReset({ tlsSessionId: 'test-session', streamClosed: true } as any, clientId)
+    await result
+    expect(devices[clientId].pendingPromise).toBeUndefined()
   })
 
   it('should NOT clean up TLS tunnel on timeout for non-TLS device', async () => {

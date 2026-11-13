@@ -120,6 +120,96 @@ describe('DataProcessor TLS methods', () => {
   })
 
   describe('handleConnectionReset', () => {
+    const streamMessage = (overrides: Partial<ClientMsg> = {}): ClientMsg => ({
+      method: 'connection_reset',
+      payload: '',
+      apiKey: '',
+      appVersion: '',
+      status: '',
+      message: '',
+      tenantId: '',
+      tlsSessionId: 'current-session',
+      streamClosed: true,
+      ...overrides
+    })
+
+    it.each(['tls_data', 'connection_reset'])('ignores obsolete session %s events', async (method) => {
+      const manager = { injectData: vi.fn(), close: vi.fn(), endInput: vi.fn() }
+      const reject = vi.fn()
+      devices[clientId] = {
+        tlsTunnelManager: manager,
+        tlsTunnelSessionId: 'current-session',
+        reject,
+        pendingPromise: Promise.resolve()
+      } as any
+      const msg = streamMessage({ method, tlsSessionId: 'old-session', payload: 'dGVzdA==' })
+      if (method === 'tls_data') await dataProcessor.handleTLSData(msg, clientId)
+      else await dataProcessor.handleConnectionReset(msg, clientId)
+      expect(manager.injectData).not.toHaveBeenCalled()
+      expect(manager.endInput).not.toHaveBeenCalled()
+      expect(manager.close).not.toHaveBeenCalled()
+      expect(reject).not.toHaveBeenCalled()
+      expect(devices[clientId].tlsTunnelManager).toBe(manager)
+    })
+
+    it.each([true, false])('decides EOF after TLS input drains, complete response=%s', async (complete) => {
+      let finish: () => void = () => {}
+      const manager = {
+        close: vi.fn(),
+        endInput: vi.fn((callback: () => void) => {
+          finish = callback
+        })
+      }
+      const reject = vi.fn()
+      devices[clientId] = {
+        tlsTunnelManager: manager,
+        tlsTunnelSessionId: 'current-session',
+        pendingPromise: Promise.resolve(),
+        tlsResponseBuffer: Buffer.from('partial'),
+        reject
+      } as any
+      await dataProcessor.handleConnectionReset(streamMessage(), clientId)
+      expect(reject).not.toHaveBeenCalled()
+      expect(manager.close).not.toHaveBeenCalled()
+      if (complete) devices[clientId].pendingPromise = undefined
+      finish()
+      expect(manager.close).toHaveBeenCalledTimes(1)
+      expect(devices[clientId].tlsTunnelNeedsReset).toBe(true)
+      expect(devices[clientId].amtReconfiguring).toBe(!complete)
+      expect(devices[clientId].tlsResponseBuffer).toBeUndefined()
+      if (complete) expect(reject).not.toHaveBeenCalled()
+      else expect(reject).toHaveBeenCalledWith(expect.any(CONNECTION_RESET_ERROR))
+    })
+
+    it('does not close a replacement tunnel when an old EOF finishes draining', async () => {
+      let finish: () => void = () => {}
+      const old = {
+        close: vi.fn(),
+        endInput: vi.fn((callback: () => void) => {
+          expect(devices[clientId].tlsTunnelNeedsReset).toBe(true)
+          finish = callback
+        })
+      }
+      devices[clientId] = {
+        tlsTunnelManager: old,
+        tlsTunnelSessionId: 'current-session',
+        tlsTunnelNeedsReset: false,
+        pendingPromise: Promise.resolve(),
+        reject: vi.fn()
+      } as any
+      await dataProcessor.handleConnectionReset(streamMessage(), clientId)
+      const replacement = { close: vi.fn() }
+      devices[clientId].tlsTunnelManager = replacement as any
+      devices[clientId].tlsTunnelSessionId = 'replacement-session'
+      devices[clientId].tlsTunnelNeedsReset = false
+      finish()
+      expect(old.close).not.toHaveBeenCalled()
+      expect(replacement.close).not.toHaveBeenCalled()
+      expect(devices[clientId].tlsTunnelSessionId).toBe('replacement-session')
+      expect(devices[clientId].tlsTunnelNeedsReset).toBe(false)
+      expect(devices[clientId].reject).not.toHaveBeenCalled()
+    })
+
     it('should close tunnel manager and set reset flags', async () => {
       const closeSpy = vi.fn()
       devices[clientId] = {

@@ -236,6 +236,8 @@ export interface TLSConfigFlow {
   setTimeSynch?: boolean
   rootCertKey?: any
   issuedCertPEM?: string
+  /** Existing leaf approved by live/Vault and requested-profile verification. */
+  validatedCertPEM?: string
   mpsRootCertPEM?: string
 }
 
@@ -258,6 +260,8 @@ export interface ClientMsg {
   message: string
   payload: any
   tenantId: string
+  tlsSessionId?: string
+  streamClosed?: boolean
 }
 
 export interface Payload {

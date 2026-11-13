@@ -23,6 +23,7 @@ import { SyncHostNameEventType } from './stateMachines/maintenance/syncHostName.
 import { SyncIPEventType } from './stateMachines/maintenance/syncIP.js'
 import { SyncDeviceInfoEventType } from './stateMachines/maintenance/syncDeviceInfo.js'
 import { devices } from './devices.js'
+import { traceStateTransitions } from './utils/stateTransitionLog.js'
 
 export class DataProcessor {
   httpHandler: HttpHandler
@@ -109,6 +110,7 @@ export class DataProcessor {
     )
     await this.validator.validateActivationMsg(clientMsg, clientId) // Validate the activation message payload
     this.setConnectionParams(clientId)
+    traceStateTransitions(activation.service, clientId)
     activation.service.start()
     const event: ActivationEvent = {
       type: devices[clientId].activationStatus ? 'ACTIVATED' : 'ACTIVATION',
@@ -244,6 +246,11 @@ export class DataProcessor {
   async handleTLSData(clientMsg: ClientMsg, clientId: string): Promise<void> {
     const clientObj = devices[clientId]
 
+    if (clientMsg.tlsSessionId != null && clientMsg.tlsSessionId !== clientObj?.tlsTunnelSessionId) {
+      this.logger.debug('Ignoring TLS data from an obsolete tunnel session')
+      return
+    }
+
     if (clientObj?.tlsTunnelNeedsReset === true) {
       return
     }
@@ -265,11 +272,36 @@ export class DataProcessor {
 
   async handleConnectionReset(clientMsg: ClientMsg, clientId: string): Promise<void> {
     const clientObj = devices[clientId]
-    this.logger.warn(`CONNECTION RESET from rpc-go`)
 
     if (clientObj == null) {
       return
     }
+
+    if (clientMsg.tlsSessionId != null && clientMsg.tlsSessionId !== clientObj.tlsTunnelSessionId) {
+      this.logger.debug('Ignoring closure from an obsolete tunnel session')
+      return
+    }
+    if (clientMsg.streamClosed === true && clientObj.tlsTunnelManager != null) {
+      const manager = clientObj.tlsTunnelManager
+      // Draining the final response may start another request before the EOF callback.
+      clientObj.tlsTunnelNeedsReset = true
+      manager.endInput(() => {
+        // A retry may already have created another session while the old input drained.
+        if (clientObj.tlsTunnelManager !== manager) return
+        const interruptedResponse = clientObj.pendingPromise != null
+        manager.close()
+        clientObj.tlsTunnelManager = undefined
+        clientObj.tlsTunnelSessionId = undefined
+        clientObj.tlsResponseBuffer = undefined
+        clientObj.tlsTunnelNeedsReset = true
+        clientObj.amtReconfiguring = interruptedResponse
+        if (interruptedResponse && clientObj.reject != null) {
+          clientObj.reject(new CONNECTION_RESET_ERROR())
+        }
+      })
+      return
+    }
+    this.logger.warn(`CONNECTION RESET from rpc-go`)
 
     if (clientObj.tlsTunnelManager != null) {
       clientObj.tlsTunnelManager.close()
