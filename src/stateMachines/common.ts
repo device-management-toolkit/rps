@@ -20,7 +20,15 @@ import {
 } from '../utils/constants.js'
 import Logger from '../Logger.js'
 import { type HttpHandler } from '../HttpHandler.js'
-import { type ComponentResult, type ComponentResults } from '../models/RCS.Config.js'
+import {
+  type ComponentResult,
+  type ComponentResults,
+  type FailureComponent,
+  type ProvisioningFailure
+} from '../models/RCS.Config.js'
+import { resolveFailure } from '../utils/resolveFailure.js'
+import { describeCode, type ErrorCode, isDeviceOriginCode, type ReturnValueNamespace } from '../utils/errorCatalog.js'
+import { MqttProvider } from '../utils/MqttProvider.js'
 import pkg, { type HttpZResponseModel } from 'http-z'
 import { parseChunkedMessage } from '../utils/parseChunkedMessage.js'
 import { TLSTunnelManager } from '../TLSTunnelManager.js'
@@ -83,6 +91,9 @@ const invokeWsmanCallInternal = async <T>(context: any): Promise<T> => {
   const action = actionMatch ? actionMatch[1].split('/').pop() : 'unknown'
   const resource = resourceMatch ? resourceMatch[1].split('/').pop() : 'unknown'
   invokeWsmanLogger.debug(`WSMAN REQUEST: ${action} on ${resource}`)
+  // Remembered so a failure of this call (transport error or non-zero ReturnValue) can name it.
+  clientObj.lastWsmanCall = `${resource}.${action}`
+  clientObj.wsmanCallFailed = false
   invokeWsmanLogger.debug(`WSMAN REQUEST XML:\n${xmlMessage}`)
 
   if (clientObj.tlsEnforced === true) {
@@ -325,6 +336,10 @@ const invokeWsmanCall = async <T>(context: any, maxRetries = 0, timeoutMs?: numb
         invokeWsmanCallInternal<T>(context),
         timeout(timeoutValue)
       ])
+      // Diagnostics describe the call that just failed; a call that succeeded has none to report.
+      if (clientObj != null) {
+        clientObj.wsmanDiagnostics = undefined
+      }
       return result as any
     } catch (error) {
       // On TLS errors, clean up tunnel so next operation gets a fresh one.
@@ -387,6 +402,23 @@ const invokeWsmanCall = async <T>(context: any, maxRetries = 0, timeoutMs?: numb
         invokeWsmanLogger.error(
           `WSMAN final failure context: attempts=${maxAttempts}, retriesUsed=${retriesUsed}, errorType=${errorType}, tunnelState=${tunnelState}, sessionId=${sessionId}, tunnelNeedsReset=${clientObj?.tlsTunnelNeedsReset === true}, amtReconfiguring=${clientObj?.amtReconfiguring === true}`
         )
+        // Keep the same context on the device so the final failure report carries it to the logs
+        // and to rpc-go alongside the code and step.
+        if (clientObj != null) {
+          clientObj.wsmanDiagnostics = {
+            attempts: maxAttempts,
+            retriesUsed,
+            errorType,
+            errorMessage: (error as any)?.message,
+            tunnelState,
+            sessionId,
+            tunnelNeedsReset: clientObj.tlsTunnelNeedsReset === true,
+            amtReconfiguring: clientObj.amtReconfiguring === true
+          }
+        }
+      }
+      if (clientObj != null) {
+        clientObj.wsmanCallFailed = true
       }
       throw error
     }
@@ -558,7 +590,119 @@ export function recordComponentResult(
   if (result.Details != null) {
     normalized.Details = normalizeDetails(result.Details)
   }
+  if (result.Result === 'Failure') {
+    if (result.Code != null) {
+      normalized.Code = result.Code
+    }
+    if (result.Step != null) {
+      normalized.Step = result.Step
+    }
+    if (result.AmtReturnValue != null) {
+      normalized.AmtReturnValue = result.AmtReturnValue
+    }
+  }
   clientObj.status.Components[component] = normalized
+}
+
+/**
+ * Builds a Failure component result from a structured failure, carrying the code, step and AMT
+ * return value alongside the human-readable details. `details` defaults to the legacy text the
+ * machine already produced so flat output is unchanged.
+ */
+export function componentFailureResult(failure: ProvisioningFailure | undefined, details?: string): ComponentResult {
+  const result: ComponentResult = { Result: 'Failure' }
+  const text = details ?? failure?.Reason
+  if (text != null) {
+    result.Details = text
+  }
+  if (failure != null) {
+    result.Code = failure.Code
+    result.Step = failure.Step
+    if (failure.AmtReturnValue != null) {
+      result.AmtReturnValue = failure.AmtReturnValue
+    }
+  }
+  return result
+}
+
+/**
+ * Chooses the failure that ended the flow: the structured failure on the root machine's context,
+ * or one synthesized from the legacy text so the Error block is always present on a failed run.
+ * Component results are deliberately not consulted: a component failure (wired, wireless, CIRA,
+ * TLS) never ends the flow, so a failed component is not the reason the flow failed.
+ */
+export function resolveStatusError(
+  clientId: string,
+  failure: ProvisioningFailure | undefined,
+  fallback: { component: FailureComponent; code: ErrorCode; message?: string }
+): ProvisioningFailure {
+  if (failure != null) {
+    return { ...failure }
+  }
+  return {
+    Code: fallback.code,
+    Component: fallback.component,
+    Step: 'UNKNOWN',
+    Reason: fallback.message != null && fallback.message !== '' ? fallback.message : describeCode(fallback.code)
+  }
+}
+
+/**
+ * The failure as it is sent to the device. `Detail` is the raw text of the underlying error; for
+ * RPS-side failures (database, secrets, MPS, Enterprise Assistant) that text can name internal
+ * hosts, ports and paths, and the websocket peer is a device RPS has not authenticated, so it is
+ * dropped here and kept only in the RPS log line. Device-origin failures keep it.
+ */
+export function toWireFailure(failure: ProvisioningFailure): ProvisioningFailure {
+  const wire = { ...failure }
+  if (!isDeviceOriginCode(failure.Code)) {
+    delete wire.Detail
+  }
+  return wire
+}
+
+/**
+ * Records the final failure for a device: emits one structured log line carrying the full failure
+ * plus the transport diagnostics captured by invokeWsmanCall, publishes the wire-safe version of
+ * the same record as an MQTT event (MQTT consumers, like the device, do not get RPS-internal
+ * detail), and returns the wire-safe failure (also set on `status.Error` when the device has a
+ * status object) so it reaches rpc-go. Never throws.
+ */
+export function reportProvisioningFailure(
+  logger: Logger,
+  clientId: string,
+  failure: ProvisioningFailure,
+  flow: 'activation' | 'deactivation' | 'maintenance',
+  task?: string
+): ProvisioningFailure {
+  const wire = toWireFailure(failure)
+  try {
+    const clientObj = devices[clientId]
+    if (clientObj?.status != null) {
+      clientObj.status.Error = wire
+    }
+    const identity = {
+      flow,
+      ...(task != null ? { task } : {}),
+      clientId,
+      uuid: clientObj?.uuid,
+      hostname: clientObj?.hostname
+    }
+    const wsman = clientObj?.wsmanDiagnostics
+    logger.error(`Provisioning failure: ${JSON.stringify({ ...identity, ...failure, wsman })}`)
+    // publishEvent returns a promise when MQTT is on; a broker outage must not become an unhandled rejection.
+    Promise.resolve(
+      MqttProvider.publishEvent('fail', [flow], JSON.stringify({ ...identity, ...wire, wsman }), clientObj?.uuid)
+    ).catch((err: unknown) => {
+      logger.warn(`Failed to publish provisioning failure for ${clientId}: ${(err as Error).message}`)
+    })
+    if (clientObj != null) {
+      clientObj.wsmanDiagnostics = undefined
+    }
+  } catch (err) {
+    logger.warn(`Failed to report provisioning failure for ${clientId}: ${(err as Error).message}`)
+  }
+  return wire
 }
 
 /**
@@ -618,6 +762,127 @@ export function applicableComponents(components: ComponentResults | undefined): 
   return result
 }
 
+// ---------------------------------------------------------------------------------------------
+// Structured failure helpers
+// ---------------------------------------------------------------------------------------------
+
+interface ActionArgs {
+  context: any
+  event: any
+}
+
+export interface FailAtOptions {
+  /** Catalog code for this step. A transport-class error (timeout, parse, reset, tunnel, EA timeout) or a non-zero `returnValue` takes precedence over it; HTTP-status and generic errors do not. */
+  code?: ErrorCode
+  /**
+   * Legacy human-readable text assigned to `errorMessage` (or `statusMessage`). Machines being
+   * migrated pass their existing string here so the flat status output is unchanged. Defaults to
+   * the catalog reason.
+   */
+  message?: string | ((args: ActionArgs) => string)
+  /** Resolver for the thrown value, usually `({ event }) => event.error`. */
+  error?: (args: ActionArgs) => unknown
+  /** Resolver for the AMT / CIM method ReturnValue, usually `({ event }) => returnValueOf(event.output, 'AddWiFiSettings')`. */
+  returnValue?: (args: ActionArgs) => number | undefined
+  /** Table that decodes the ReturnValue (see ReturnValueNamespace); defaults to AMT (PT_STATUS). */
+  namespace?: ReturnValueNamespace
+  /** Which legacy context field receives the text; defaults to errorMessage. */
+  assignTo?: 'errorMessage' | 'statusMessage'
+}
+
+/**
+ * Reads `<Method>_OUTPUT.ReturnValue` from a parsed WSMAN response. Returns undefined when the
+ * response does not carry that output so callers can distinguish "no code" from "code 0".
+ */
+export function returnValueOf(output: any, method: string): number | undefined {
+  const value = output?.Envelope?.Body?.[`${method}_OUTPUT`]?.ReturnValue
+  if (typeof value === 'number') {
+    return value
+  }
+  if (typeof value === 'string' && value.trim() !== '' && !Number.isNaN(Number(value))) {
+    return Number(value)
+  }
+  return undefined
+}
+
+/**
+ * Builds the structured failure for a step plus the legacy text, without touching xstate. Used by
+ * `failAt` and by machines that need the failure outside an `assign` (e.g. maintenance done output).
+ */
+export function buildFailure(
+  step: string,
+  component: FailureComponent,
+  options: FailAtOptions,
+  args: ActionArgs
+): { failure: ProvisioningFailure; message: string } {
+  const error = options.error != null ? options.error(args) : undefined
+  const returnValue = options.returnValue != null ? options.returnValue(args) : undefined
+  const failure = resolveFailure(step, component, {
+    code: options.code,
+    error,
+    returnValue,
+    namespace: options.namespace
+  })
+  // Name the WSMAN call when it is what failed: either it was answered with a non-zero
+  // ReturnValue, or it is the call that just threw. A step that fails for another reason is not
+  // about the last call that happened to be sent, so it does not get one.
+  const clientObj = devices[args.context?.clientId]
+  const callFailed = failure.AmtReturnValue != null || clientObj?.wsmanCallFailed === true
+  if (clientObj?.lastWsmanCall != null && callFailed && isDeviceOriginCode(failure.Code)) {
+    failure.WsmanCall = clientObj.lastWsmanCall
+  }
+  const message = typeof options.message === 'function' ? options.message(args) : options.message ?? failure.Reason
+  return { failure, message }
+}
+
+/**
+ * Assigner for a failing transition. Use as `actions: assign(failAt('STEP', 'Component', {...}))`.
+ * Sets `failure` to the structured description and `errorMessage` (or `statusMessage`) to the legacy
+ * text, so existing flat-status behaviour is preserved while the code, step and reason ride along.
+ */
+export function failAt(
+  step: string,
+  component: FailureComponent,
+  options: FailAtOptions = {}
+): (args: ActionArgs) => Record<string, unknown> {
+  return (args: ActionArgs) => {
+    const { failure, message } = buildFailure(step, component, options, args)
+    const field = options.assignTo ?? 'errorMessage'
+    return { [field]: message, failure }
+  }
+}
+
+/**
+ * Value for `failure` on a transition into the error machine: records the step, the thrown error
+ * and the WSMAN call, and leaves the legacy text alone (the error machine supplies that).
+ * Use as `assign({ failure: stepFailure('STEP', 'Component') })`.
+ */
+export function stepFailure(
+  step: string,
+  component: FailureComponent,
+  options: FailAtOptions = {}
+): (args: ActionArgs) => ProvisioningFailure {
+  return (args: ActionArgs) =>
+    buildFailure(step, component, { error: ({ event }) => event.error, ...options }, args).failure
+}
+
+/**
+ * Failure to record when the error machine gives up (`ONFAILED`). The failure recorded on the way
+ * into ERROR names the real step and call, so it wins. The error machine's own failure only knows
+ * its internal state (UNAUTHORIZED / BADREQUEST / UNKNOWN) and is the fallback, re-homed to the
+ * invoking component; failing that, one is derived from the last response.
+ */
+export function failureAfterErrorMachine(component: FailureComponent, args: ActionArgs): ProvisioningFailure {
+  const { context, event } = args
+  if (context.failure != null) {
+    return context.failure
+  }
+  if (event?.failure != null) {
+    return { ...event.failure, Component: component }
+  }
+  return buildFailure('ERROR', component, { error: () => context.message }, args).failure
+}
+
 const isDigestRealmValid = (realm: string): boolean => {
   const regex = /[0-9A-Fa-f]{32}/g
   let isValidRealm = false
@@ -643,6 +908,9 @@ export interface CommonContext {
   // verification for this call. The factory self-signed cert on a TLS-enforced box has no
   // trust anchor we could validate against, and we already hold the admin credential.
   skipTlsVerification?: boolean
+  // Structured description of the step that failed (set by `failAt`). Carried to the final
+  // status message so the code, step and reason reach rpc-go and the logs together.
+  failure?: ProvisioningFailure
 }
 
 export interface CommonMaintenanceContext extends CommonContext {
