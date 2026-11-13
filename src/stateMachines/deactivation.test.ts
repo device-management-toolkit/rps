@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { type MachineImplementationsSimplified, createActor, fromPromise, type StateValue } from 'xstate'
+import { type MachineImplementationsSimplified, createActor, fromPromise, type StateValue, waitFor } from 'xstate'
 import { randomUUID } from 'node:crypto'
 import { devices } from '../devices.js'
 import { config } from '../test/helper/Config.js'
@@ -31,6 +31,17 @@ vi.mock('./common.js', async () => {
     invokeWsmanCall: invokeWsmanCallSpy,
     invokeEnterpriseAssistantCall: vi.fn(),
     processTLSTunnelResponse: vi.fn(),
+    resolveStatusError: actual.resolveStatusError,
+    reportProvisioningFailure: actual.reportProvisioningFailure,
+    failAt: actual.failAt,
+    returnValueOf: actual.returnValueOf,
+    buildFailure: actual.buildFailure,
+
+    stepFailure: actual.stepFailure,
+
+    failureAfterErrorMachine: actual.failureAfterErrorMachine,
+
+    messageAfterErrorMachine: actual.messageAfterErrorMachine,
     HttpResponseError,
     isDigestRealmValid,
     coalesceMessage
@@ -304,6 +315,73 @@ describe('Deactivation State Machine', () => {
     expect(sendSpy).toHaveBeenCalled()
   })
 
+  it('sends a structured Error block carrying the failing step and code on error', () => {
+    deactivationContext.status = 'error'
+    deactivationContext.errorMessage = 'Failed to remove device from secret provider'
+    deactivationContext.failure = {
+      Code: 'RPS_SECRETS_DELETE_FAILED',
+      Component: 'Deactivation',
+      Step: 'REMOVE_DEVICE_FROM_SECRET_PROVIDER',
+      Reason: 'Secret could not be deleted from the secret provider',
+      Detail: 'vault down'
+    }
+    const errorLogSpy = vi.spyOn(deactivation.logger, 'error')
+    deactivation.sendMessageToDevice({ context: deactivationContext })
+
+    const sentPayload = JSON.parse(responseMessageSpy.mock.calls[0][4])
+    // Legacy flat text is unchanged; the structured block rides alongside it.
+    expect(sentPayload.Status).toEqual('Failed to remove device from secret provider')
+    // Detail is dropped from the wire for RPS_* codes; it stays in the log line.
+    expect(sentPayload.Error).toEqual({
+      Code: 'RPS_SECRETS_DELETE_FAILED',
+      Component: 'Deactivation',
+      Step: 'REMOVE_DEVICE_FROM_SECRET_PROVIDER',
+      Reason: 'Secret could not be deleted from the secret provider'
+    })
+    const failureLine = errorLogSpy.mock.calls
+      .map((c) => c[0] as string)
+      .find((l) => l.startsWith('Provisioning failure: '))
+    expect(failureLine).toBeDefined()
+    expect(JSON.parse(failureLine!.replace('Provisioning failure: ', ''))).toMatchObject({
+      flow: 'deactivation',
+      clientId,
+      ...deactivationContext.failure
+    })
+    expect(sendSpy).toHaveBeenCalled()
+  })
+
+  it('falls back to RPS_DEACTIVATION_FAILED when the context has no structured failure', () => {
+    deactivationContext.status = 'error'
+    deactivationContext.errorMessage = 'Failed'
+    deactivationContext.failure = undefined
+    deactivation.sendMessageToDevice({ context: deactivationContext })
+
+    const sentPayload = JSON.parse(responseMessageSpy.mock.calls[0][4])
+    expect(sentPayload.Error).toMatchObject({
+      Code: 'RPS_DEACTIVATION_FAILED',
+      Component: 'Deactivation',
+      Step: 'UNKNOWN'
+    })
+  })
+
+  it('does not resend the Error block of an earlier failed attempt on success', () => {
+    deactivationContext.status = 'success'
+    devices[clientId].status = {
+      Status: 'Failed',
+      Error: {
+        Code: 'RPS_SECRETS_DELETE_FAILED',
+        Component: 'Deactivation',
+        Step: 'REMOVE_DEVICE_FROM_SECRET_PROVIDER',
+        Reason: 'Secret could not be deleted from the secret provider'
+      }
+    }
+    deactivation.sendMessageToDevice({ context: deactivationContext })
+
+    const sentPayload = JSON.parse(responseMessageSpy.mock.calls[0][4])
+    expect(sentPayload.Status).toEqual('Deactivated')
+    expect(sentPayload.Error).toBeUndefined()
+  })
+
   it('should eventually reach "PROVISIONED"', () =>
     new Promise<void>((resolve, reject) => {
       const service = createActor(deactivation.machine, { input: deactivationContext })
@@ -325,4 +403,23 @@ describe('Deactivation State Machine', () => {
       service.start()
       service.send({ type: 'UNPROVISION', clientId, tenantId, output: null, error: null })
     }))
+  it('records a structured failure when the secret provider delete fails', async () => {
+    config.actors!.removeDeviceFromSecretProvider = fromPromise(
+      async () => await Promise.reject(new Error('vault down'))
+    )
+    config.guards = { ...config.guards, isNotFound: () => false }
+    const service = createActor(deactivation.machine.provide(config), { input: deactivationContext })
+    service.start()
+    service.send({ type: 'UNPROVISION', clientId, tenantId, output: null, error: null })
+    const snapshot = await waitFor(service, (s) => s.status === 'done')
+    expect(snapshot.value).toBe('FAILED')
+    expect(snapshot.context.errorMessage).toBe('Failed to remove device from secret provider')
+    expect(snapshot.context.failure).toEqual({
+      Code: 'RPS_SECRETS_DELETE_FAILED',
+      Component: 'Deactivation',
+      Step: 'REMOVE_DEVICE_FROM_SECRET_PROVIDER',
+      Reason: 'Secret could not be deleted from the secret provider',
+      Detail: 'vault down'
+    })
+  })
 })
