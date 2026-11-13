@@ -28,9 +28,17 @@ export const PTStatus = {
     name: 'PT_STATUS_INTERNAL_ERROR',
     value: 1
   },
+  NOT_READY: {
+    name: 'PT_STATUS_NOT_READY',
+    value: 2
+  },
   INVALID_PT_MODE: {
     name: 'PT_STATUS_INVALID_PT_MODE',
     value: 3
+  },
+  INVALID_MESSAGE_LENGTH: {
+    name: 'PT_STATUS_INVALID_MESSAGE_LENGTH',
+    value: 4
   },
   INVALID_REGISTRATION_DATA: {
     name: 'PT_STATUS_INVALID_REGISTRATION_DATA',
@@ -135,6 +143,18 @@ export const PTStatus = {
   FLASH_WRITE_LIMIT_EXCEEDED: {
     name: 'PT_STATUS_FLASH_WRITE_LIMIT_EXCEEDED',
     value: 38
+  },
+  RNG_GENERATION_IN_PROGRESS: {
+    name: 'PT_STATUS_RNG_GENERATION_IN_PROGRESS',
+    value: 47
+  },
+  RNG_NOT_READY: {
+    name: 'PT_STATUS_RNG_NOT_READY',
+    value: 48
+  },
+  CERTIFICATE_NOT_READY: {
+    name: 'PT_STATUS_CERTIFICATE_NOT_READY',
+    value: 49
   },
   UNSUPPORTED_OEM_NUMBER: {
     name: 'PT_STATUS_UNSUPPORTED_OEM_NUMBER',
