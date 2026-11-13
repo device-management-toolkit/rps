@@ -14,7 +14,7 @@ import {
 } from './unconfiguration.js'
 import { config } from '../test/helper/Config.js'
 import { HttpHandler } from '../HttpHandler.js'
-import { type MachineImplementationsSimplified, createActor, fromPromise } from 'xstate'
+import { type MachineImplementationsSimplified, createActor, fromPromise, waitFor } from 'xstate'
 import { AMT, CIM, IPS } from '@device-management-toolkit/wsman-messages'
 
 import { HttpResponseError, coalesceMessage, isDigestRealmValid } from './common.js'
@@ -28,6 +28,13 @@ vi.mock('./common.js', async () => {
     invokeWsmanCall: invokeWsmanCallSpy,
     invokeEnterpriseAssistantCall: invokeEnterpriseAssistantCallSpy,
     processTLSTunnelResponse: vi.fn(),
+    failAt: actual.failAt,
+    returnValueOf: actual.returnValueOf,
+    buildFailure: actual.buildFailure,
+
+    stepFailure: actual.stepFailure,
+
+    failureAfterErrorMachine: actual.failureAfterErrorMachine,
     HttpResponseError,
     isDigestRealmValid,
     coalesceMessage
@@ -198,6 +205,26 @@ describe('Unconfiguration State Machine', () => {
       delays: {}
     }
     loggerSpy = vi.spyOn(unconfiguration.logger, 'error')
+  })
+
+  it('records a structured failure with the failing step and HTTP status', async () => {
+    configuration.actors!.pullEthernetPortSettings = fromPromise(
+      async ({ input }) => await Promise.reject({ statusCode: 400, statusMessage: 'Bad Request' })
+    )
+    const service = createActor(unconfiguration.machine.provide(configuration), { input: unconfigContext })
+    service.start()
+    service.send({ type: 'REMOVECONFIG', clientId, output: null })
+    const snapshot = await waitFor(service, (s) => s.status === 'done')
+    expect(snapshot.value).toBe('FAILURE')
+    expect(snapshot.context.errorMessage).toBe('Failed to pull ethernet port settings')
+    expect(snapshot.context.failure).toEqual({
+      Code: 'WSMAN_BAD_REQUEST',
+      Component: 'Unconfiguration',
+      Step: 'PULL_ETHERNET_PORT_SETTINGS',
+      Reason: 'AMT rejected the WSMAN request as malformed (HTTP 400)',
+      HttpStatus: 400,
+      Detail: 'Bad Request'
+    })
   })
 
   it('should eventually reach FAILURE after ENUMERATE_WIFI_ENDPOINT_SETTINGS', () =>
