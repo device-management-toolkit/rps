@@ -15,7 +15,7 @@ import { Environment } from '../../utils/Environment.js'
 
 import { vi, type MockInstance } from 'vitest'
 import got from 'got'
-import { type MachineImplementationsSimplified, fromPromise } from 'xstate'
+import { type MachineImplementationsSimplified, createActor, fromPromise, waitFor } from 'xstate'
 
 import {
   type ChangePassword as ChangePasswordType,
@@ -32,7 +32,14 @@ vi.mock('../common.js', async () => {
     invokeWsmanCall: invokeWsmanCallSpy,
     isDigestRealmValid,
     HttpResponseError,
-    coalesceMessage
+    coalesceMessage,
+    failAt: actual.failAt,
+    returnValueOf: actual.returnValueOf,
+    buildFailure: actual.buildFailure,
+
+    stepFailure: actual.stepFailure,
+
+    failureAfterErrorMachine: actual.failureAfterErrorMachine
   }
 })
 
@@ -150,6 +157,59 @@ describe('ChangePassword State Machine', () => {
     delete (setAdminACLEntryExResponse as any).Envelope.Body.SetAdminAclEntryEx_OUTPUT
     doneResponse.status = StatusFailed
     await runTheTest()
+  })
+  it('should map a non-zero SetAdminAclEntryEx ReturnValue to a structured AMT failure', async () => {
+    setAdminACLEntryExResponse.Envelope.Body.SetAdminAclEntryEx_OUTPUT.ReturnValue = 2054
+    invokeWsmanCallSpy.mockResolvedValueOnce(generalSettingsRsp).mockResolvedValueOnce(setAdminACLEntryExResponse)
+    const actor = createActor(implementation.machine.provide(implementationConfig), { input: context })
+    actor.start()
+    actor.send(event)
+    const state = await waitFor(actor, (s) => s.status === 'done')
+    expect(state.output.status).toBe(StatusFailed)
+    expect(state.context.errorMessage).toBe('at SET_ADMIN_ACL_ENTRY ReturnValue PT_STATUS_INVALID_PASSWORD')
+    expect(state.context.failure).toEqual({
+      Code: 'AMT_PT_INVALID_PASSWORD',
+      Component: 'Maintenance',
+      Step: 'SET_ADMIN_ACL_ENTRY',
+      Reason: 'Password does not meet AMT requirements',
+      AmtReturnValue: 2054,
+      Detail: 'ReturnValue PT_STATUS_INVALID_PASSWORD'
+    })
+    expect(state.output.failure).toEqual(state.context.failure)
+  })
+  it('should carry a structured WSMAN_BAD_REQUEST failure through the error machine', async () => {
+    // The WSMAN path rejects with the parsed AMT response itself.
+    invokeWsmanCallSpy.mockRejectedValueOnce({ statusCode: 400, statusMessage: 'Bad Request' })
+    const actor = createActor(implementation.machine, { input: context })
+    actor.start()
+    actor.send(event)
+    const state = await waitFor(actor, (s) => s.status === 'done')
+    expect(state.output.status).toBe(StatusFailed)
+    expect(state.context.failure).toMatchObject({
+      Code: 'WSMAN_BAD_REQUEST',
+      Component: 'Maintenance',
+      Step: 'GET_GENERAL_SETTINGS',
+      HttpStatus: 400
+    })
+    expect(state.output.failure).toEqual(state.context.failure)
+  })
+  it('should tag secret provider failures with RPS_SECRETS_WRITE_FAILED', async () => {
+    implementationConfig.actors!.saveToSecretProvider = fromPromise(
+      async ({ input }) => await Promise.reject(new Error('vault sealed'))
+    )
+    invokeWsmanCallSpy.mockResolvedValueOnce(generalSettingsRsp).mockResolvedValueOnce(setAdminACLEntryExResponse)
+    const actor = createActor(implementation.machine.provide(implementationConfig), { input: context })
+    actor.start()
+    actor.send(event)
+    const state = await waitFor(actor, (s) => s.status === 'done')
+    expect(state.output.status).toBe(StatusFailed)
+    expect(state.context.failure).toEqual({
+      Code: 'RPS_SECRETS_WRITE_FAILED',
+      Component: 'Maintenance',
+      Step: 'SAVE_TO_SECRET_PROVIDER',
+      Reason: 'Secret could not be written to the secret provider',
+      Detail: 'vault sealed'
+    })
   })
   it('should fail on failed SaveToSecretProvider', async () => {
     implementationConfig.actors!.saveToSecretProvider = fromPromise(

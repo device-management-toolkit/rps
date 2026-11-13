@@ -9,6 +9,7 @@ import { createActor, waitFor } from 'xstate'
 import { Environment } from '../../utils/Environment.js'
 import { config, setupTestClient } from '../../test/helper/Config.js'
 import Logger from '../../Logger.js'
+import ClientResponseMsg from '../../utils/ClientResponseMsg.js'
 import { type SyncTimeEvent, SyncTimeEventType } from './syncTime.js'
 import { type HostNameInfo } from './syncHostName.js'
 import { type DeviceInfo } from './syncDeviceInfo.js'
@@ -27,7 +28,16 @@ vi.mock('../common.js', async () => {
     invokeWsmanCall: invokeWsmanCallSpy,
     coalesceMessage: vi.fn(),
     isDigestRealmValid: vi.fn(),
-    HttpResponseError: vi.fn()
+    HttpResponseError: vi.fn(),
+    failAt: actual.failAt,
+    returnValueOf: actual.returnValueOf,
+    buildFailure: actual.buildFailure,
+
+    stepFailure: actual.stepFailure,
+
+    failureAfterErrorMachine: actual.failureAfterErrorMachine,
+
+    reportProvisioningFailure: actual.reportProvisioningFailure
   }
 })
 const { Maintenance } = await import('./maintenance.js')
@@ -237,6 +247,50 @@ describe('Maintenance State Machine', () => {
     const logInfoSpy = vi.spyOn(Logger.prototype, 'info').mockReturnValue(null as any)
     await implementation.respondAfterDone(context.clientId, rsp)
     expect(logInfoSpy).toHaveBeenCalledWith(`${context.clientId} ${rsp.taskName} failed`)
+  })
+  it('should attach a structured Error block and log it on failure', async () => {
+    context.clientId = 'testClient'
+    const rsp: DoneResponse = {
+      taskName: 'synctime',
+      status: StatusFailed,
+      message: 'at SET_HIGH_ACCURACY_TIME_SYNCH',
+      failure: {
+        Code: 'AMT_PT_INVALID_TIME',
+        Component: 'Maintenance',
+        Step: 'SET_HIGH_ACCURACY_TIME_SYNCH',
+        Reason: 'Time value is invalid',
+        AmtReturnValue: 34
+      }
+    }
+    vi.spyOn(Logger.prototype, 'info').mockReturnValue(null as any)
+    const logErrorSpy = vi.spyOn(Logger.prototype, 'error').mockReturnValue(null as any)
+    const responseSpy = vi.spyOn(ClientResponseMsg, 'get')
+    await implementation.respondAfterDone(context.clientId, rsp)
+    const sent = JSON.parse(responseSpy.mock.calls.at(-1)?.[4] as string)
+    expect(sent.Status).toBe('synctime failed at SET_HIGH_ACCURACY_TIME_SYNCH')
+    expect(sent.Error).toEqual(rsp.failure)
+    const line = logErrorSpy.mock.calls.map((c) => c[0] as string).find((l) => l.startsWith('Provisioning failure: '))
+    expect(line).toBeDefined()
+    expect(JSON.parse(line!.replace('Provisioning failure: ', ''))).toMatchObject({
+      flow: 'maintenance',
+      task: 'synctime',
+      ...rsp.failure
+    })
+  })
+  it('should synthesize an Error block when a failed task carries no structured failure', async () => {
+    context.clientId = 'testClient'
+    const rsp: DoneResponse = { taskName: 'synctime', status: StatusFailed, message: 'boom' }
+    vi.spyOn(Logger.prototype, 'info').mockReturnValue(null as any)
+    vi.spyOn(Logger.prototype, 'error').mockReturnValue(null as any)
+    const responseSpy = vi.spyOn(ClientResponseMsg, 'get')
+    await implementation.respondAfterDone(context.clientId, rsp)
+    const sent = JSON.parse(responseSpy.mock.calls.at(-1)?.[4] as string)
+    expect(sent.Error).toEqual({
+      Code: 'RPS_UNEXPECTED_ERROR',
+      Component: 'Maintenance',
+      Step: 'UNKNOWN',
+      Reason: 'synctime failed boom'
+    })
   })
   describe('service logging', () => {
     it('should include child state machine', async () => {

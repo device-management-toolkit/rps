@@ -4,7 +4,14 @@
  **********************************************************************/
 
 import { assign, setup, sendTo, fromPromise } from 'xstate'
-import { coalesceMessage, type CommonMaintenanceContext, type EnumerationContext } from '../common.js'
+import {
+  buildFailure,
+  coalesceMessage,
+  type CommonMaintenanceContext,
+  type EnumerationContext,
+  failAt,
+  failureAfterErrorMachine
+} from '../common.js'
 import { AMT } from '@device-management-toolkit/wsman-messages'
 import { doneFail, doneSuccess } from './doneResponse.js'
 import Logger from '../../Logger.js'
@@ -213,9 +220,16 @@ export class SyncIP {
               target: 'ENUMERATE_ETHERNET_PORT_SETTINGS'
             },
             {
-              actions: assign({
-                message: 'at INITIAL - invalid ip configuration'
-              }),
+              // Legacy behaviour writes the text to message (not errorMessage); keep it and add the structured failure.
+              actions: assign(({ context, event }) => ({
+                message: 'at INITIAL - invalid ip configuration',
+                failure: buildFailure(
+                  'INITIAL',
+                  'Maintenance',
+                  { code: 'RPS_CONFIG_INVALID_PROFILE', message: 'at INITIAL - invalid ip configuration' },
+                  { context, event }
+                ).failure
+              })),
               target: 'FAILED'
             }
           ]
@@ -235,11 +249,18 @@ export class SyncIP {
             target: 'PULL_ETHERNET_PORT_SETTINGS'
           },
           onError: {
-            actions: assign({
-              message: ({ event }) => event.error,
-              errorMessage: ({ event }) => coalesceMessage('at ENUMERATE_ETHERNET_PORT_SETTINGS', event.error),
-              targetAfterError: () => 'ENUMERATE_ETHERNET_PORT_SETTINGS'
-            }),
+            actions: [
+              assign({
+                message: ({ event }) => event.error,
+                targetAfterError: () => 'ENUMERATE_ETHERNET_PORT_SETTINGS'
+              }),
+              assign(
+                failAt('ENUMERATE_ETHERNET_PORT_SETTINGS', 'Maintenance', {
+                  message: ({ event }) => coalesceMessage('at ENUMERATE_ETHERNET_PORT_SETTINGS', event.error),
+                  error: ({ event }) => event.error
+                })
+              )
+            ],
             target: 'ERROR'
           }
         }
@@ -269,9 +290,12 @@ export class SyncIP {
             {
               actions: [
                 'resetParseErrorCount',
-                assign({
-                  errorMessage: ({ event }) => coalesceMessage('at PULL_ETHERNET_PORT_SETTINGS', event.error)
-                })
+                assign(
+                  failAt('PULL_ETHERNET_PORT_SETTINGS', 'Maintenance', {
+                    message: ({ event }) => coalesceMessage('at PULL_ETHERNET_PORT_SETTINGS', event.error),
+                    error: ({ event }) => event.error
+                  })
+                )
               ],
               target: 'FAILED'
             }
@@ -292,9 +316,12 @@ export class SyncIP {
             target: 'SUCCESS'
           },
           onError: {
-            actions: assign({
-              errorMessage: ({ event }) => coalesceMessage('at PUT_ETHERNET_PORT_SETTINGS', event.error)
-            }),
+            actions: assign(
+              failAt('PUT_ETHERNET_PORT_SETTINGS', 'Maintenance', {
+                message: ({ event }) => coalesceMessage('at PUT_ETHERNET_PORT_SETTINGS', event.error),
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -312,12 +339,14 @@ export class SyncIP {
             actions: assign({ message: ({ event }) => event.error }),
             target: 'FAILED'
           },
-          onDone: 'NEXT_STATE'
+          // The error machine recovered (e.g. digest retry): the recorded failure no longer applies.
+          onDone: { actions: assign({ failure: undefined }), target: 'NEXT_STATE' }
         },
         on: {
           ONFAILED: {
             actions: assign({
-              errorMessage: ({ context, event }) => coalesceMessage(context.errorMessage, event.output)
+              errorMessage: ({ context, event }) => coalesceMessage(context.errorMessage, event.output),
+              failure: (args) => failureAfterErrorMachine('Maintenance', args)
             }),
             target: 'FAILED'
           }
@@ -344,7 +373,7 @@ export class SyncIP {
       if (context.statusMessage === 'SUCCESS') {
         return doneSuccess(context.taskName)
       } else {
-        return doneFail(context.taskName, context.errorMessage)
+        return doneFail(context.taskName, context.errorMessage, context.failure)
       }
     }
   })

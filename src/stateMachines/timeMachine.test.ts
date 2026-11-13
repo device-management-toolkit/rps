@@ -7,6 +7,7 @@ import { vi } from 'vitest'
 import { type MachineImplementationsSimplified, createActor, fromPromise } from 'xstate'
 import { HttpHandler } from '../HttpHandler.js'
 import { devices } from '../devices.js'
+import { GATEWAY_TIMEOUT_ERROR } from '../utils/constants.js'
 
 import { type TimeSyncContext, type TimeSyncEvent, type TimeSync as TimeSyncType } from './timeMachine.js'
 const invokeWsmanCallSpy = vi.hoisted(() => vi.fn<any>())
@@ -151,11 +152,11 @@ describe('TLS State Machine', () => {
     const actor = createActor(timeMachine.machine.provide(config), {
       input: { ...context, lmsInstalled: true }
     })
-    const completed = new Promise<{ status: string; errorMessage: string }>((resolve, reject) => {
+    const completed = new Promise<{ status: string; errorMessage: string; failure: any }>((resolve, reject) => {
       actor.subscribe({
         next: (state) => {
           if (state.status === 'done') {
-            resolve(state.output as { status: string; errorMessage: string })
+            resolve(state.output as { status: string; errorMessage: string; failure: any })
           }
         },
         error: reject
@@ -167,6 +168,12 @@ describe('TLS State Machine', () => {
 
     expect(output.status).toBe('error')
     expect(output.errorMessage).toContain('Failed to ENABLE_LOCAL_TIME_SYNC')
+    expect(output.failure).toMatchObject({
+      Code: 'AMT_PT_INTERNAL_ERROR',
+      Component: 'TimeSync',
+      Step: 'ENABLE_LOCAL_TIME_SYNC_RESPONSE',
+      AmtReturnValue: 1
+    })
     actor.stop()
   })
 
@@ -181,5 +188,65 @@ describe('TLS State Machine', () => {
   it('should getLowAccuracyTimeSync', async () => {
     await timeMachine.getLowAccuracyTimeSync({ input: context })
     expect(invokeWsmanCallSpy).toHaveBeenCalled()
+  })
+
+  const runToCompletion = async (input: any): Promise<any> => {
+    const actor = createActor(timeMachine.machine.provide(config), { input })
+    const completed = new Promise<any>((resolve, reject) => {
+      actor.subscribe({
+        next: (state) => {
+          if (state.status === 'done') {
+            resolve(state.output)
+          }
+        },
+        error: reject
+      })
+    })
+    actor.start()
+    const output = await completed
+    actor.stop()
+    return output
+  }
+
+  it('maps a non-zero AMT ReturnValue to its PT_STATUS code in the output failure', async () => {
+    config.actors!.setHighAccuracyTimeSync = fromPromise(
+      async () =>
+        await Promise.resolve({ Envelope: { Body: { SetHighAccuracyTimeSynch_OUTPUT: { ReturnValue: 34 } } } })
+    )
+    const output = await runToCompletion({ ...context, lmsInstalled: false })
+    expect(output.status).toBe('error')
+    // Legacy text unchanged ...
+    expect(output.errorMessage).toBe('Failed to SET_HIGH_ACCURACY_TIME_SYNCH')
+    // ... with the AMT code captured instead of dropped.
+    expect(output.failure).toEqual({
+      Code: 'AMT_PT_INVALID_TIME',
+      Component: 'TimeSync',
+      Step: 'SET_HIGH_ACCURACY_TIME_SYNCH_RESPONSE',
+      Reason: 'Time value is invalid',
+      AmtReturnValue: 34
+    })
+  })
+
+  it('maps a rejected WSMAN call to a transport code', async () => {
+    config.actors!.setHighAccuracyTimeSync = fromPromise(async () => await Promise.reject(new GATEWAY_TIMEOUT_ERROR()))
+    const output = await runToCompletion({ ...context, lmsInstalled: false })
+    expect(output.status).toBe('error')
+    expect(output.errorMessage).toBe('Failed to SET_HIGH_ACCURACY_TIME_SYNCH')
+    expect(output.failure).toMatchObject({
+      Code: 'WSMAN_TIMEOUT',
+      Component: 'TimeSync',
+      Step: 'SET_HIGH_ACCURACY_TIME_SYNCH'
+    })
+  })
+
+  it('always carries a failure in a failed output', async () => {
+    invokeWsmanCallSpy.mockResolvedValue({
+      Envelope: { Body: { EnableLocalTimeSync_OUTPUT: { ReturnValue: 1 } } }
+    })
+    const output = await runToCompletion({ ...context, lmsInstalled: true })
+    expect(output.status).toBe('error')
+    expect(output.failure).toBeDefined()
+    expect(output.failure.Component).toBe('TimeSync')
+    expect(typeof output.failure.Code).toBe('string')
   })
 })

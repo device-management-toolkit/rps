@@ -6,7 +6,8 @@
 import { assign, createActor, sendTo, setup } from 'xstate'
 import Logger from '../../Logger.js'
 import { devices } from '../../devices.js'
-import { type Status } from '../../models/RCS.Config.js'
+import { type ProvisioningFailure, type Status } from '../../models/RCS.Config.js'
+import { reportProvisioningFailure } from '../common.js'
 import { SyncTime, type SyncTimeEvent } from './syncTime.js'
 import { SyncIP, type SyncIPEvent } from './syncIP.js'
 import { ChangePassword, type ChangePasswordEvent } from './changePassword.js'
@@ -246,6 +247,15 @@ export class Maintenance {
     }
     const taskStatus: Status = {
       Status: actualStatusMsg
+    }
+    if (doneData.status !== StatusSuccess) {
+      const failure: ProvisioningFailure = doneData.failure ?? {
+        Code: 'RPS_UNEXPECTED_ERROR',
+        Component: 'Maintenance',
+        Step: 'UNKNOWN',
+        Reason: actualStatusMsg
+      }
+      taskStatus.Error = reportProvisioningFailure(logger, clientId, failure, 'maintenance', doneData.taskName)
     }
     logger.info(`${clientId} ${actualStatusMsg}`)
     const rspMsg = ClientResponseMsg.get(clientId, null, method, status, JSON.stringify(taskStatus))

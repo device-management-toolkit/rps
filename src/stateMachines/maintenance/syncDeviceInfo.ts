@@ -4,7 +4,7 @@
  **********************************************************************/
 
 import { assign, fromPromise, setup } from 'xstate'
-import { type CommonMaintenanceContext, coalesceMessage, HttpResponseError } from '../common.js'
+import { type CommonMaintenanceContext, coalesceMessage, failAt, HttpResponseError } from '../common.js'
 import Logger from '../../Logger.js'
 import { doneFail, doneSuccess } from './doneResponse.js'
 import { devices } from '../../devices.js'
@@ -106,9 +106,13 @@ export class SyncDeviceInfo {
             target: 'SUCCESS'
           },
           onError: {
-            actions: assign({
-              errorMessage: ({ event }) => coalesceMessage('at SAVE_TO_MPS', event.error)
-            }),
+            actions: assign(
+              failAt('SAVE_TO_MPS', 'Maintenance', {
+                code: 'RPS_MPS_SAVE_DEVICE_FAILED',
+                message: ({ event }) => coalesceMessage('at SAVE_TO_MPS', event.error),
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -126,7 +130,7 @@ export class SyncDeviceInfo {
       if (context.statusMessage === 'SUCCESS') {
         return doneSuccess(context.taskName)
       } else {
-        return doneFail(context.taskName, context.errorMessage)
+        return doneFail(context.taskName, context.errorMessage, context.failure)
       }
     }
   })
