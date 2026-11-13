@@ -10,7 +10,8 @@ import { config, setupTestClient } from '../../test/helper/Config.js'
 import { runTilDone } from '../../test/helper/xstate.js'
 import { Environment } from '../../utils/Environment.js'
 import { vi, type MockInstance } from 'vitest'
-import { type MachineImplementationsSimplified, fromPromise } from 'xstate'
+import { type MachineImplementationsSimplified, createActor, fromPromise, waitFor } from 'xstate'
+import { GATEWAY_TIMEOUT_ERROR } from '../../utils/constants.js'
 import got from 'got'
 import { SecretManagerCreatorFactory } from '../../factories/SecretManagerCreatorFactory.js'
 import { devices } from '../../devices.js'
@@ -28,7 +29,14 @@ vi.mock('../common.js', async () => {
   return {
     invokeWsmanCall: invokeWsmanCallSpy,
     HttpResponseError,
-    coalesceMessage
+    coalesceMessage,
+    failAt: actual.failAt,
+    returnValueOf: actual.returnValueOf,
+    buildFailure: actual.buildFailure,
+
+    stepFailure: actual.stepFailure,
+
+    failureAfterErrorMachine: actual.failureAfterErrorMachine
   }
 })
 
@@ -161,6 +169,43 @@ describe('SyncHostName State Machine', () => {
     implementationConfig.actors!.saveToMPS = fromPromise(async ({ input }) => await Promise.reject(new Error()))
     doneResponse.status = StatusFailed
     await runTheTest()
+  })
+  it('should map a WSMAN timeout on put general settings to WSMAN_TIMEOUT', async () => {
+    invokeWsmanCallSpy.mockRejectedValueOnce(new GATEWAY_TIMEOUT_ERROR())
+    gotSpy.mockResolvedValue(mpsRsp)
+    const actor = createActor(implementation.machine.provide(implementationConfig), { input: context })
+    actor.start()
+    actor.send(event)
+    const state = await waitFor(actor, (s) => s.status === 'done')
+    expect(state.output.status).toBe(StatusFailed)
+    expect(state.context.errorMessage).toBe('at PUT_GENERAL_SETTINGS 504 Gateway Timeout')
+    expect(state.context.failure).toEqual({
+      Code: 'WSMAN_TIMEOUT',
+      Component: 'Maintenance',
+      Step: 'PUT_GENERAL_SETTINGS',
+      Reason: 'Timed out waiting for a WSMAN response from AMT',
+      Detail: 'Gateway Timeout'
+    })
+    expect(state.output.failure).toEqual(state.context.failure)
+  })
+  it('should tag MPS save failures with RPS_MPS_SAVE_DEVICE_FAILED', async () => {
+    mpsRsp.statusCode = 404
+    mpsRsp.statusMessage = 'Device not found'
+    invokeWsmanCallSpy.mockResolvedValueOnce(generalSettingsRsp)
+    gotSpy.mockResolvedValue(mpsRsp)
+    const actor = createActor(implementation.machine.provide(implementationConfig), { input: context })
+    actor.start()
+    actor.send(event)
+    const state = await waitFor(actor, (s) => s.status === 'done')
+    expect(state.output.status).toBe(StatusFailed)
+    expect(state.context.failure).toEqual({
+      Code: 'RPS_MPS_SAVE_DEVICE_FAILED',
+      Component: 'Maintenance',
+      Step: 'SAVE_TO_MPS',
+      Reason: 'Device information could not be saved to MPS',
+      HttpStatus: 404,
+      Detail: 'Device not found'
+    })
   })
   it('should succeed put AMT_GeneralSettings response', async () => {
     doneResponse.status = StatusSuccess

@@ -8,7 +8,7 @@ import { type DoneResponse, StatusFailed } from './doneResponse.js'
 import { setupTestClient } from '../../test/helper/Config.js'
 import { PTStatus } from '../../utils/PTStatus.js'
 import { runTilDone } from '../../test/helper/xstate.js'
-import { type MachineImplementationsSimplified } from 'xstate'
+import { type MachineImplementationsSimplified, createActor, waitFor } from 'xstate'
 
 import { HttpResponseError, coalesceMessage } from '../common.js'
 
@@ -28,7 +28,14 @@ vi.mock('../common.js', async () => {
   return {
     invokeWsmanCall: invokeWsmanCallSpy,
     HttpResponseError,
-    coalesceMessage
+    coalesceMessage,
+    failAt: actual.failAt,
+    returnValueOf: actual.returnValueOf,
+    buildFailure: actual.buildFailure,
+
+    stepFailure: actual.stepFailure,
+
+    failureAfterErrorMachine: actual.failureAfterErrorMachine
   }
 })
 
@@ -145,6 +152,42 @@ describe('SyncTime State Machine', () => {
     doneResponse.status = StatusFailed
     highAccuracyRsp.Envelope.Body.SetHighAccuracyTimeSynch_OUTPUT.ReturnValue = PTStatus.INTERNAL_ERROR.value
     await runTheTest()
+  })
+  it('should map a non-zero SetHighAccuracyTimeSynch ReturnValue to a structured AMT failure', async () => {
+    highAccuracyRsp.Envelope.Body.SetHighAccuracyTimeSynch_OUTPUT.ReturnValue = PTStatus.INVALID_TIME.value
+    invokeWsmanCallSpy.mockResolvedValueOnce(lowAccuracyRsp).mockResolvedValueOnce(highAccuracyRsp)
+    const actor = createActor(implementation.machine.provide(implementationConfig), { input: context })
+    actor.start()
+    actor.send(event)
+    const state = await waitFor(actor, (s) => s.status === 'done')
+    // Legacy text is unchanged...
+    expect(state.context.errorMessage).toBe('at SET_HIGH_ACCURACY_TIME_SYNCH ReturnValue PT_STATUS_INVALID_TIME')
+    // ...and the structured failure carries the mapped AMT code, the step and the raw return value.
+    expect(state.context.failure).toEqual({
+      Code: 'AMT_PT_INVALID_TIME',
+      Component: 'Maintenance',
+      Step: 'SET_HIGH_ACCURACY_TIME_SYNCH',
+      Reason: 'Time value is invalid',
+      AmtReturnValue: PTStatus.INVALID_TIME.value,
+      Detail: 'ReturnValue PT_STATUS_INVALID_TIME'
+    })
+    expect(state.output.status).toBe(StatusFailed)
+    expect(state.output.failure).toEqual(state.context.failure)
+  })
+  it('should keep the AMT failure from the failing step when the error machine reports unknown', async () => {
+    lowAccuracyRsp.Envelope.Body.GetLowAccuracyTimeSynch_OUTPUT.ReturnValue = PTStatus.INTERNAL_ERROR.value
+    invokeWsmanCallSpy.mockResolvedValueOnce(lowAccuracyRsp)
+    const actor = createActor(implementation.machine.provide(implementationConfig), { input: context })
+    actor.start()
+    actor.send(event)
+    const state = await waitFor(actor, (s) => s.status === 'done')
+    expect(state.output.status).toBe(StatusFailed)
+    expect(state.context.failure).toMatchObject({
+      Code: 'AMT_PT_INTERNAL_ERROR',
+      Step: 'GET_LOW_ACCURACY_TIME_SYNCH',
+      AmtReturnValue: PTStatus.INTERNAL_ERROR.value
+    })
+    expect(state.output.failure).toEqual(state.context.failure)
   })
   it('should fail enabling local time sync on bad return value', async () => {
     doneResponse.status = StatusFailed
