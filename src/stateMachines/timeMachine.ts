@@ -5,9 +5,18 @@
 
 import { AMT } from '@device-management-toolkit/wsman-messages'
 import { assign, fromPromise, sendTo, setup } from 'xstate'
-import { coalesceMessage, type CommonContext, invokeWsmanCall } from './common.js'
+import {
+  buildFailure,
+  coalesceMessage,
+  type CommonContext,
+  failAt,
+  invokeWsmanCall,
+  returnValueOf,
+  failureAfterErrorMachine
+} from './common.js'
 import { Error as ErrorStateMachine } from './error.js'
 import Logger from '../Logger.js'
+import { type ProvisioningFailure } from '../models/RCS.Config.js'
 
 export interface TimeSyncContext extends CommonContext {
   status: string
@@ -17,6 +26,7 @@ export interface TimeSyncContext extends CommonContext {
 export interface TimeSyncEvent {
   type: 'ONFAILED'
   output?: any
+  failure?: ProvisioningFailure
 }
 
 export class TimeSync {
@@ -27,13 +37,10 @@ export class TimeSync {
     this.logger.debug('Activation time sync: sending EnableLocalTimeSync(true)')
     const amt = new AMT.Messages()
     input.xmlMessage = amt.TimeSynchronizationService.EnableLocalTimeSync(true)
-    const response = await invokeWsmanCall<{
+    // A non-zero ReturnValue is not thrown here: ENABLE_LOCAL_TIME_SYNC_RESPONSE maps it to its AMT code.
+    return await invokeWsmanCall<{
       Envelope: { Body: { EnableLocalTimeSync_OUTPUT: { ReturnValue: number } } }
     }>(input)
-    if (response.Envelope.Body?.EnableLocalTimeSync_OUTPUT?.ReturnValue !== 0) {
-      throw new Error('Failed to ENABLE_LOCAL_TIME_SYNC')
-    }
-    return response
   }
 
   setHighAccuracyTimeSync = async ({ input }: { input: TimeSyncContext }): Promise<any> => {
@@ -86,7 +93,7 @@ export class TimeSync {
       lmsInstalled: input.lmsInstalled,
       targetAfterError: input.targetAfterError
     }),
-    output: ({ context }) => ({ status: context.status, errorMessage: context.errorMessage }),
+    output: ({ context }) => ({ status: context.status, errorMessage: context.errorMessage, failure: context.failure }),
     id: 'time-machine',
     initial: 'THE_PAST',
     states: {
@@ -112,11 +119,14 @@ export class TimeSync {
             target: 'ENABLE_LOCAL_TIME_SYNC_RESPONSE'
           },
           onError: {
-            actions: assign({
-              message: ({ event }) => event.error,
-              errorMessage: ({ event }) => coalesceMessage('at ENABLE_LOCAL_TIME_SYNC', event.error),
-              targetAfterError: () => 'ENABLE_LOCAL_TIME_SYNC'
-            }),
+            actions: assign(({ context, event }) => ({
+              message: event.error,
+              targetAfterError: 'ENABLE_LOCAL_TIME_SYNC',
+              ...failAt('ENABLE_LOCAL_TIME_SYNC', 'TimeSync', {
+                message: () => coalesceMessage('at ENABLE_LOCAL_TIME_SYNC', event.error),
+                error: () => event.error
+              })({ context, event })
+            })),
             target: 'ERROR'
           }
         }
@@ -124,7 +134,15 @@ export class TimeSync {
       ENABLE_LOCAL_TIME_SYNC_RESPONSE: {
         always: [
           { guard: 'isEnableLocalTimeSyncSuccessful', target: 'SUCCESS' },
-          { actions: assign({ errorMessage: 'Failed to ENABLE_LOCAL_TIME_SYNC' }), target: 'FAILED' }
+          {
+            actions: assign(
+              failAt('ENABLE_LOCAL_TIME_SYNC_RESPONSE', 'TimeSync', {
+                message: 'Failed to ENABLE_LOCAL_TIME_SYNC',
+                returnValue: ({ context }) => returnValueOf(context.message, 'EnableLocalTimeSync')
+              })
+            ),
+            target: 'FAILED'
+          }
         ]
       },
       GET_LOW_ACCURACY_TIME_SYNCH: {
@@ -139,11 +157,14 @@ export class TimeSync {
             }
           ],
           onError: {
-            actions: assign({
-              message: ({ event }) => event.error,
-              errorMessage: ({ event }) => coalesceMessage('at GET_LOW_ACCURACY_TIME_SYNCH', event.error),
-              targetAfterError: () => 'GET_LOW_ACCURACY_TIME_SYNCH'
-            }),
+            actions: assign(({ context, event }) => ({
+              message: event.error,
+              targetAfterError: 'GET_LOW_ACCURACY_TIME_SYNCH',
+              ...failAt('GET_LOW_ACCURACY_TIME_SYNCH', 'TimeSync', {
+                message: () => coalesceMessage('at GET_LOW_ACCURACY_TIME_SYNCH', event.error),
+                error: () => event.error
+              })({ context, event })
+            })),
             target: 'ERROR'
           }
         }
@@ -155,9 +176,12 @@ export class TimeSync {
             target: 'SET_HIGH_ACCURACY_TIME_SYNCH'
           },
           {
-            actions: assign({
-              errorMessage: 'Failed to GET_LOW_ACCURACY_TIME_SYNC'
-            }),
+            actions: assign(
+              failAt('GET_LOW_ACCURACY_TIME_SYNCH_RESPONSE', 'TimeSync', {
+                message: 'Failed to GET_LOW_ACCURACY_TIME_SYNC',
+                returnValue: ({ context }) => returnValueOf(context.message, 'GetLowAccuracyTimeSynch')
+              })
+            ),
             target: 'FAILED'
           }
         ]
@@ -174,9 +198,12 @@ export class TimeSync {
             }
           ],
           onError: {
-            actions: assign({
-              errorMessage: 'Failed to SET_HIGH_ACCURACY_TIME_SYNCH'
-            }),
+            actions: assign(
+              failAt('SET_HIGH_ACCURACY_TIME_SYNCH', 'TimeSync', {
+                message: 'Failed to SET_HIGH_ACCURACY_TIME_SYNCH',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -188,9 +215,12 @@ export class TimeSync {
             target: 'SUCCESS'
           },
           {
-            actions: assign({
-              errorMessage: 'Failed to SET_HIGH_ACCURACY_TIME_SYNCH'
-            }),
+            actions: assign(
+              failAt('SET_HIGH_ACCURACY_TIME_SYNCH_RESPONSE', 'TimeSync', {
+                message: 'Failed to SET_HIGH_ACCURACY_TIME_SYNCH',
+                returnValue: ({ context }) => returnValueOf(context.message, 'SetHighAccuracyTimeSynch')
+              })
+            ),
             target: 'FAILED'
           }
         ]
@@ -202,14 +232,21 @@ export class TimeSync {
           id: 'error-machine',
           input: ({ context }) => ({ message: context.message, clientId: context.clientId }),
           onError: {
-            actions: assign({ message: ({ event }) => event.error }),
+            actions: assign(({ context, event }) => ({
+              message: event.error,
+              failure: buildFailure('ERROR', 'TimeSync', { error: () => event.error }, { context, event }).failure
+            })),
             target: 'FAILED'
           },
-          onDone: 'NEXT_STATE'
+          // The error machine recovered (e.g. digest retry): the recorded failure no longer applies.
+          onDone: { actions: assign({ failure: undefined }), target: 'NEXT_STATE' }
         },
         on: {
           ONFAILED: {
-            actions: assign({ errorMessage: ({ context, event }) => coalesceMessage(context.message, event.output) }),
+            actions: assign({
+              errorMessage: ({ context, event }) => coalesceMessage(context.message, event.output),
+              failure: (args) => failureAfterErrorMachine('TimeSync', args)
+            }),
             target: 'FAILED'
           }
         }
@@ -224,7 +261,16 @@ export class TimeSync {
       FAILED: {
         entry: assign({
           status: () => 'error',
-          errorMessage: ({ context }) => context.errorMessage || 'Time synchronization failed'
+          errorMessage: ({ context }) => context.errorMessage || 'Time synchronization failed',
+          // Always leave a structured failure behind, even when a path reached FAILED without one.
+          failure: ({ context, event }) =>
+            context.failure ??
+            buildFailure(
+              'FAILED',
+              'TimeSync',
+              { code: 'RPS_UNEXPECTED_ERROR', message: context.errorMessage || 'Time synchronization failed' },
+              { context, event }
+            ).failure
         }),
         type: 'final'
       },
