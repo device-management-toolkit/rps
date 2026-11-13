@@ -656,6 +656,34 @@ describe('Activation State Machine', () => {
       devices[clientId].existingDeviceInfo = undefined
       expect(activation.buildMpsDeviceInfo(devices[clientId], context.profile, true).activatedAt).toBeNull()
     })
+    it('buildMpsDeviceInfo includes host OS, serial number, and UPID reported by rpc-go', () => {
+      const upid = { csmeId: '094BB130B1EB87DC', oemPlatformIdType: 'Not Set (0)' }
+      Object.assign(devices[clientId].ClientData.payload, {
+        osName: 'windows',
+        osVersion: '10.0.26200.9711',
+        osDistro: 'Windows 11 Enterprise 25H2',
+        serialNumber: 'PF51TS9X',
+        upid
+      })
+      devices[clientId].existingDeviceInfo = undefined
+      const info = activation.buildMpsDeviceInfo(devices[clientId], context.profile, true)
+      expect(info.osName).toBe('windows')
+      expect(info.osVersion).toBe('10.0.26200.9711')
+      expect(info.osDistro).toBe('Windows 11 Enterprise 25H2')
+      expect(info.serialNumber).toBe('PF51TS9X')
+      expect(info.upid).toEqual(upid)
+    })
+    it('buildMpsDeviceInfo keeps host inventory already in MPS when an older rpc-go omits it', () => {
+      const payload = devices[clientId].ClientData.payload
+      delete payload.osName
+      delete payload.serialNumber
+      delete payload.upid
+      devices[clientId].existingDeviceInfo = { osName: 'linux', serialNumber: 'OLD123' }
+      const info = activation.buildMpsDeviceInfo(devices[clientId], context.profile, true)
+      expect(info.osName).toBe('linux')
+      expect(info.serialNumber).toBe('OLD123')
+      expect(info.upid).toBeUndefined()
+    })
     it('posts the status on a successful run', async () => {
       gotSpy = vi.spyOn(got, 'post')
       gotSpy.mockResolvedValue({})
