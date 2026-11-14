@@ -25,6 +25,28 @@ import {
   UnsupportedDeviceKeyError
 } from './utils/ecLeafCertificate.js'
 
+/** What the firmware checks on each certificate of a provisioning chain as it is uploaded. */
+export interface ProvisioningCertInfo {
+  role: 'leaf' | 'intermediate' | 'root'
+  /** Common name, falling back to the role when the certificate has none. */
+  name: string
+  /** Digest the certificate is signed with, for example sha256. */
+  hashAlgorithm: string | null
+  /** RSA modulus size in bits, null for a key that is not RSA. */
+  rsaKeySize: number | null
+}
+
+function describeCertificate(cert: pki.Certificate, role: ProvisioningCertInfo['role']): ProvisioningCertInfo {
+  const cn = cert.subject?.getField?.('CN')?.value
+  const modulus = (cert.publicKey as pki.rsa.PublicKey | undefined)?.n
+  return {
+    role,
+    name: typeof cn === 'string' && cn !== '' ? cn : role,
+    hashAlgorithm: cert.md?.algorithm?.toLowerCase() ?? null,
+    rsaKeySize: typeof modulus?.bitLength === 'function' ? modulus.bitLength() : null
+  }
+}
+
 /** The digest a certificate is signed with and the size of a key RPS generates, as chosen by the certificate policy. */
 export type CertificateSigningOptions = Partial<Pick<AMTCertificatePolicy, 'hashAlgorithm' | 'rsaKeySize'>>
 
@@ -80,6 +102,9 @@ export class CertManager {
     provisioningCertificateObj: ProvisioningCertObj
     fingerprint: RootCertFingerprint
     hashAlgorithm: string | null
+    certificates: ProvisioningCertInfo[]
+    /** Certificates in the PFX that could not be read, so they are in neither the chain nor `certificates`. */
+    unreadableCertificates: number
   } {
     const provisioningCertificateObj: ProvisioningCertObj = {} as ProvisioningCertObj
     const interObj: CertificateObject[] = []
@@ -87,6 +112,11 @@ export class CertManager {
     const root: CertificateObject = {} as CertificateObject
     const fingerprint: RootCertFingerprint = {} as RootCertFingerprint
     let hashAlgorithm: string | null = null
+    // Details of exactly the certificates that end up in the chain sent to AMT, so a root or certificate that is
+    // not sent is never judged.
+    let leafInfo: ProvisioningCertInfo | undefined
+    let rootInfo: ProvisioningCertInfo | undefined
+    const interInfos = new Map<CertificateObject, ProvisioningCertInfo>()
 
     this.logger.debug(
       `Processing PFX with ${pfxobj.certs?.length ?? 0} certificates and ${pfxobj.keys?.length ?? 0} keys`
@@ -107,6 +137,7 @@ export class CertManager {
         // pem = pem.replace(/(\r\n|\n|\r)/g, '');
         // Index 0 = Leaf, Root subject.hash will match issuer.hash, rest are Intermediate.
         if (i === 0) {
+          leafInfo = describeCertificate(cert, 'leaf')
           leaf.pem = pem
           leaf.subject = cert.subject.hash
           leaf.issuer = cert.issuer.hash
@@ -115,6 +146,8 @@ export class CertManager {
             `  Certificate[${i}]: LEAF (subject=${cert.subject.hash}, issuer=${cert.issuer.hash}, algo=${hashAlgorithm})`
           )
         } else if (cert.subject.hash === cert.issuer.hash) {
+          // A later self-signed certificate replaces this one, as in the chain below.
+          rootInfo = describeCertificate(cert, 'root')
           root.pem = pem
           root.subject = cert.subject.hash
           root.issuer = cert.issuer.hash
@@ -136,6 +169,7 @@ export class CertManager {
             subject: cert.subject.hash
           }
           interObj.push(inter)
+          interInfos.set(inter, describeCertificate(cert, 'intermediate'))
           this.logger.debug(
             `  Certificate[${i}]: INTERMEDIATE (subject=${cert.subject.hash}, issuer=${cert.issuer.hash})`
           )
@@ -146,22 +180,27 @@ export class CertManager {
     // Need to put the certificate PEMs in the correct order before sending to AMT.
     // This currently only supports certificate chains that are no more than 4 certificates long
     provisioningCertificateObj.certChain = []
+    const certificates: ProvisioningCertInfo[] = []
     // Leaf PEM is first
     provisioningCertificateObj.certChain.push(leaf.pem)
+    if (leafInfo != null) certificates.push(leafInfo)
     // Need to figure out which Intermediate PEM is next to the Leaf PEM
     for (const obj of interObj) {
       if (!this.sortCertificate(obj, root)) {
         provisioningCertificateObj.certChain.push(obj.pem)
+        certificates.push(interInfos.get(obj)!)
       }
     }
     // Need to figure out which Intermediate PEM is next to the Root PEM
     for (const obj of interObj) {
       if (this.sortCertificate(obj, root)) {
         provisioningCertificateObj.certChain.push(obj.pem)
+        certificates.push(interInfos.get(obj)!)
       }
     }
     // Root PEM goes in last
     provisioningCertificateObj.certChain.push(root.pem)
+    if (rootInfo != null) certificates.push(rootInfo)
     if (pfxobj.keys?.length > 0) {
       for (const key of pfxobj.keys) {
         // Just need the key in key format for signing.  Keeping the private key in memory only.
@@ -173,7 +212,13 @@ export class CertManager {
       `Certificate chain built: ${provisioningCertificateObj.certChain.length} certificates (leaf -> intermediate -> root)`
     )
 
-    return { provisioningCertificateObj, fingerprint, hashAlgorithm }
+    return {
+      provisioningCertificateObj,
+      fingerprint,
+      hashAlgorithm,
+      certificates,
+      unreadableCertificates: pfxobj.unreadableCertificates ?? 0
+    }
   }
 
   /**
@@ -213,6 +258,8 @@ export class CertManager {
       for (const certBag of certBagArray) {
         if (certBag.cert) {
           pfxOut.certs.push(certBag.cert)
+        } else {
+          pfxOut.unreadableCertificates = (pfxOut.unreadableCertificates ?? 0) + 1
         }
       }
       this.logger.debug(`Extracted ${pfxOut.certs.length} certificates from PFX`)

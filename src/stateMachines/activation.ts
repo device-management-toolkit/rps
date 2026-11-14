@@ -13,7 +13,7 @@ import { Environment } from '../utils/Environment.js'
 import { MqttProvider } from '../utils/MqttProvider.js'
 import { devices } from '../devices.js'
 import got from 'got'
-import { CertManager } from '../certManager.js'
+import { CertManager, type ProvisioningCertInfo } from '../certManager.js'
 import { PasswordHelper } from '../utils/PasswordHelper.js'
 import { SignatureHelper } from '../utils/SignatureHelper.js'
 import { Error } from './error.js'
@@ -160,6 +160,15 @@ export class Activation {
     return domain
   }
 
+  domainCertFailureMessage(context: ActivationContext): string {
+    const device = devices[context.clientId]
+    if (context.amtDomain == null) {
+      const suffix = device?.ClientData?.payload?.fqdn ?? 'unknown'
+      return `Device ${device?.uuid ?? context.clientId} activation failed. Specified AMT domain suffix: ${suffix} does not match list of available AMT domain suffixes`
+    }
+    return 'Failed to extract domain certificate'
+  }
+
   sendMessageToDevice({ context }): void {
     const { clientId, status } = context
     const clientObj = devices[clientId]
@@ -198,15 +207,34 @@ export class Activation {
   }
 
   /**
-   * The digest of the provisioning certificate when the device's firmware cannot accept it, else null.
-   * When `weakAlgorithmsRemoved` is true the firmware refuses a chain that is not SHA-384, so this is checked
-   * before anything is sent.
+   * Why the firmware cannot accept the provisioning certificate chain, or null when it can. When
+   * `weakAlgorithmsRemoved` is true the firmware needs SHA-384 and RSA-3072 or larger on every
+   * certificate of the chain, not only the leaf, so each one is checked and the first failure is named.
+   * This does not depend on the device trusting the root, so it runs before the trusted-root hash match.
    */
-  rejectedProvisioningCertDigest(clientId: string, certDigest: string | null | undefined): string | null {
+  rejectedProvisioningCert(clientId: string, certChainPfx: ActivationContext['certChainPfx']): string | null {
     const payload = devices[clientId]?.ClientData?.payload
     const policy = getAMTCertificatePolicy(payload?.weakAlgorithmsRemoved, payload?.ver)
-    const digest = certDigest?.toLowerCase()
-    return policy.requiresSha384ProvisioningCert && digest !== 'sha384' ? digest ?? 'unknown' : null
+    if (!policy.requiresSha384ProvisioningCert || certChainPfx == null) return null
+
+    const chain: ProvisioningCertInfo[] =
+      certChainPfx.certificates?.length > 0
+        ? certChainPfx.certificates
+        : [{ role: 'leaf', name: 'leaf', hashAlgorithm: certChainPfx.hashAlgorithm ?? null, rsaKeySize: null }]
+    for (const cert of chain) {
+      const which = `${cert.role} "${cert.name}"`
+      if (cert.hashAlgorithm !== 'sha384') {
+        return `Provisioning certificate rejected: ${which} is signed with ${cert.hashAlgorithm ?? 'an unknown digest'}, SHA-384 required`
+      }
+      if (cert.rsaKeySize != null && cert.rsaKeySize < policy.rsaKeySize) {
+        return `Provisioning certificate rejected: ${which} has a ${cert.rsaKeySize}-bit RSA key, ${policy.rsaKeySize} bits required`
+      }
+    }
+    // A certificate that cannot be read cannot be checked, so the chain is not accepted on the ones that can.
+    if (certChainPfx.unreadableCertificates > 0) {
+      return `Provisioning certificate rejected: ${certChainPfx.unreadableCertificates} certificate(s) in the chain cannot be read, so SHA-384 and RSA-${policy.rsaKeySize} cannot be confirmed`
+    }
+    return null
   }
 
   createSignedString(clientId: string, hashAlgorithm: string): boolean {
@@ -471,6 +499,8 @@ export class Activation {
 
   GetProvisioningCertObj({ context }): void {
     const { amtDomain, clientId } = context
+    // Drop any earlier result so a failure here cannot fall back to a certificate extracted before.
+    context.certChainPfx = undefined
     try {
       if (amtDomain?.provisioningCert != null && amtDomain.provisioningCertPassword != null) {
         // read in cert
@@ -1407,9 +1437,8 @@ export class Activation {
         context.message.Envelope.Body?.UpgradeClientToAdmin_OUTPUT?.ReturnValue === 0,
       isCertExtracted: ({ context }) => context.certChainPfx != null,
       isValidCert: ({ context }) => devices[context.clientId].certObj != null,
-      isProvisioningCertDigestRejected: ({ context }) =>
-        devices[context.clientId].certObj != null &&
-        this.rejectedProvisioningCertDigest(context.clientId, context.certChainPfx?.hashAlgorithm) != null,
+      isProvisioningCertRejected: ({ context }) =>
+        this.rejectedProvisioningCert(context.clientId, context.certChainPfx) != null,
       isDigestRealmInvalid: ({ context }) =>
         !this.validator.isDigestRealmValid(devices[context.clientId].ClientData.payload.digestRealm),
       maxCertLength: ({ context }) => {
@@ -1575,8 +1604,9 @@ export class Activation {
             actions: { type: 'Send Progress', params: { label: 'Device already activated' } }
           },
           {
+            // The device goes to CCM first, so the provisioning certificate for the ACM upgrade is checked now.
             guard: 'isTlsActivation',
-            target: 'INIT_TLS_TUNNEL'
+            target: 'CHECK_TLS_PROVISIONING_CERT'
           },
           {
             // For --tls-tunnel activation: skip domain cert fetch, do CCM first, then ACM upgrade after tunnel
@@ -1655,38 +1685,54 @@ export class Activation {
             target: 'COMPARE_DEVICE_HASHES'
           },
           {
-            actions: assign(({ context }) => {
-              const device = devices[context.clientId]
-              const deviceId = device?.uuid ?? context.clientId
-
-              if (context.amtDomain == null) {
-                const suffix = device?.ClientData?.payload?.fqdn ?? 'unknown'
-                return {
-                  errorMessage: `Device ${deviceId} activation failed. Specified AMT domain suffix: ${suffix} does not match list of available AMT domain suffixes`
-                }
-              }
-
-              return { errorMessage: 'Failed to extract domain certificate' }
-            }),
+            actions: assign(({ context }) => ({ errorMessage: this.domainCertFailureMessage(context) })),
             target: 'FAILED'
           }
+        ]
+      },
+      CHECK_TLS_PROVISIONING_CERT: {
+        invoke: {
+          src: 'getAMTDomainCert',
+          input: ({ context }) => context,
+          id: 'check-tls-provisioning-cert',
+          onDone: {
+            actions: assign({ amtDomain: ({ event }) => event.output as any }),
+            target: 'CHECK_TLS_PROVISIONING_CERT_EXTRACT'
+          },
+          onError: {
+            actions: assign({ errorMessage: 'Failed to get amt domain certificate from database' }),
+            target: 'FAILED'
+          }
+        }
+      },
+      CHECK_TLS_PROVISIONING_CERT_EXTRACT: {
+        entry: 'Get Provisioning CertObj',
+        always: [
+          {
+            guard: ({ context }) => context.certChainPfx == null,
+            actions: assign(({ context }) => ({ errorMessage: this.domainCertFailureMessage(context) })),
+            target: 'FAILED'
+          },
+          {
+            // Reject before the device enters CCM so an incompatible pair never starts provisioning.
+            guard: 'isProvisioningCertRejected',
+            actions: assign(({ context }) => ({
+              errorMessage: this.rejectedProvisioningCert(context.clientId, context.certChainPfx) ?? ''
+            })),
+            target: 'FAILED'
+          },
+          { target: 'INIT_TLS_TUNNEL' }
         ]
       },
       COMPARE_DEVICE_HASHES: {
         entry: 'Compare Domain Cert Hashes',
         always: [
           {
-            // Reject before any request is sent to the device, and name the digest.
-            guard: 'isProvisioningCertDigestRejected',
-            actions: assign(({ context }) => {
-              const digest = this.rejectedProvisioningCertDigest(context.clientId, context.certChainPfx?.hashAlgorithm)
-              return {
-                errorMessage:
-                  `Device ${devices[context.clientId]?.uuid ?? context.clientId} activation failed. ` +
-                  `Firmware that has removed weak algorithms requires a SHA-384 provisioning certificate, ` +
-                  `but the provisioning certificate is signed with ${digest}`
-              }
-            }),
+            // Reject before any request is sent to the device, and before the trusted-root match.
+            guard: 'isProvisioningCertRejected',
+            actions: assign(({ context }) => ({
+              errorMessage: this.rejectedProvisioningCert(context.clientId, context.certChainPfx) ?? ''
+            })),
             target: 'FAILED'
           },
           {

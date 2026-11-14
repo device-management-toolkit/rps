@@ -613,6 +613,13 @@ describe('Activation State Machine', () => {
       expect(devices[clientId].certObj).toBeNull()
       expect(convertPfxToObjectSpy).toHaveBeenCalled()
     })
+    it('drops an earlier extraction result when the certificate cannot be extracted again', () => {
+      context.certChainPfx = { hashAlgorithm: 'sha384' }
+      context.amtDomain = null as any
+      activation.GetProvisioningCertObj({ context })
+      expect(context.certChainPfx).toBeUndefined()
+      expect(devices[clientId].certObj).toBeNull()
+    })
     it('should assign return valid certificate object', () => {
       const certObject = { provisioningCertificateObj: { certChain: [
             'leaf',
@@ -2229,6 +2236,7 @@ describe('Activation State Machine', () => {
           'UNPROVISIONED',
           'GET_AMT_PROFILE',
           'RESOLVE_LOCAL_TLS_ROUTING',
+          'CHECK_TLS_PROVISIONING_CERT',
           'INIT_TLS_TUNNEL',
           'GET_GENERAL_SETTINGS',
           'SETUP',
@@ -2709,34 +2717,136 @@ describe('Activation State Machine', () => {
         vi.runAllTicks()
       }))
 
-    describe('provisioning certificate digest check', () => {
+    describe('provisioning certificate chain check', () => {
+      interface Info {
+        role: string
+        name: string
+        hashAlgorithm: string | null
+        rsaKeySize: number | null
+      }
+      const cert = (role: string, hashAlgorithm: string | null, rsaKeySize: number | null = 3072): Info => ({
+        role,
+        name: `${role}-ca`,
+        hashAlgorithm,
+        rsaKeySize
+      })
+      const goodChain = (): Info[] => [
+        cert('leaf', 'sha384'),
+        cert('intermediate', 'sha384'),
+        cert('root', 'sha384')
+      ]
+
       it.each([
-        // With weakAlgorithmsRemoved true the firmware refuses anything but a SHA-384 chain, so it is rejected before the device is contacted.
-        { payload: { ver: '22.0.0', weakAlgorithmsRemoved: true }, digest: 'sha256', expected: 'sha256' },
-        { payload: { ver: '22.0.0' }, digest: 'SHA256', expected: 'sha256' },
-        { payload: { ver: '22.0.0', weakAlgorithmsRemoved: true }, digest: undefined, expected: 'unknown' },
-        { payload: { ver: '22.0.0', weakAlgorithmsRemoved: true }, digest: 'sha384', expected: null },
-        // Other firmware accepts either digest.
-        { payload: { ver: '21.0.6' }, digest: 'sha256', expected: null },
-        { payload: { ver: '22.0.0', weakAlgorithmsRemoved: false }, digest: 'sha256', expected: null }
-      ])('reports $expected for a $digest certificate given $payload', ({ payload, digest, expected }) => {
+        // With weakAlgorithmsRemoved true the firmware needs SHA-384 and RSA-3072 on every certificate, so the chain is rejected before the device is contacted.
+        {
+          payload: { ver: '22.0.0', weakAlgorithmsRemoved: true },
+          chain: [cert('leaf', 'sha256'), cert('root', 'sha384')],
+          expected: ['leaf "leaf-ca"', 'signed with sha256']
+        },
+        {
+          payload: { ver: '22.0.0', weakAlgorithmsRemoved: true },
+          chain: [
+            cert('leaf', 'sha384'),
+            cert('intermediate', 'sha256'),
+            cert('root', 'sha384')
+          ],
+          expected: ['intermediate "intermediate-ca"', 'signed with sha256']
+        },
+        {
+          payload: { ver: '22.0.0', weakAlgorithmsRemoved: true },
+          chain: [cert('leaf', 'sha384'), cert('root', 'sha256')],
+          expected: ['root "root-ca"', 'signed with sha256']
+        },
+        {
+          payload: { ver: '22.0.0', weakAlgorithmsRemoved: true },
+          chain: [
+            cert('leaf', 'sha384'),
+            cert('intermediate', 'sha384', 2048),
+            cert('root', 'sha384')
+          ],
+          expected: [
+            'intermediate "intermediate-ca"',
+            '2048-bit RSA key',
+            '3072 bits required'
+          ]
+        },
+        {
+          payload: { ver: '22.0.0' },
+          chain: [cert('leaf', null), cert('root', 'sha384')],
+          expected: ['leaf "leaf-ca"', 'unknown digest']
+        },
+        // A chain that is not RSA has no modulus to check, only its digest.
+        {
+          payload: { ver: '22.0.0', weakAlgorithmsRemoved: true },
+          chain: [cert('leaf', 'sha384', null)],
+          expected: null
+        },
+        { payload: { ver: '22.0.0', weakAlgorithmsRemoved: true }, chain: goodChain(), expected: null },
+        // Other firmware accepts either digest and RSA-2048.
+        {
+          payload: { ver: '21.0.6' },
+          chain: [cert('leaf', 'sha256', 2048), cert('root', 'sha256', 2048)],
+          expected: null
+        },
+        {
+          payload: { ver: '22.0.0', weakAlgorithmsRemoved: false },
+          chain: [cert('leaf', 'sha256', 2048)],
+          expected: null
+        }
+      ])('reports $expected for $chain given $payload', ({ payload, chain, expected }) => {
         devices[clientId].ClientData = { payload } as any
-        expect(activation.rejectedProvisioningCertDigest(clientId, digest)).toBe(expected)
+        const reason = activation.rejectedProvisioningCert(clientId, { certificates: chain } as any)
+        if (expected == null) {
+          expect(reason).toBeNull()
+        } else {
+          for (const part of expected) expect(reason).toContain(part)
+        }
       })
 
-      // Runs the machine from COMPARE_DEVICE_HASHES, the point where the domain certificate is compared with the device.
-      const runCompareDeviceHashes = (
-        certDigest: string,
+      it('does not accept a chain on the certificates that could be read', () => {
+        devices[clientId].ClientData = { payload: { ver: '22.0.0', weakAlgorithmsRemoved: true } } as any
+        const reason = activation.rejectedProvisioningCert(clientId, {
+          certificates: goodChain(),
+          unreadableCertificates: 1
+        } as any)
+        expect(reason).toContain('1 certificate(s) in the chain cannot be read')
+        expect(
+          activation.rejectedProvisioningCert(clientId, { certificates: goodChain(), unreadableCertificates: 0 } as any)
+        ).toBeNull()
+      })
+
+      it('falls back to the leaf digest when no certificate details are available', () => {
+        devices[clientId].ClientData = { payload: { ver: '22.0.0', weakAlgorithmsRemoved: true } } as any
+        expect(activation.rejectedProvisioningCert(clientId, { hashAlgorithm: 'sha256' } as any)).toContain('sha256')
+        expect(activation.rejectedProvisioningCert(clientId, { hashAlgorithm: 'sha384' } as any)).toBeNull()
+      })
+
+      // Runs the machine from a state that evaluates the provisioning certificate, with the device stubbed out.
+      const runFrom = (
+        start: string,
+        chain: Info[],
         trusted: boolean
-      ): { states: string[]; error: string; status: string } => {
+      ): { states: string[]; error: string; status: string; sent: string[] } => {
         devices[clientId].ClientData = { payload: { ver: '22.0.0', weakAlgorithmsRemoved: true } } as any
         devices[clientId].certObj = (trusted ? {} : null) as any
+        const sent: string[] = []
         const machine = activation.machine.provide({
-          actions: { 'Compare Domain Cert Hashes': () => {}, 'Send Message to Device': () => {} }
+          actions: {
+            'Compare Domain Cert Hashes': () => {},
+            'Get Provisioning CertObj': () => {},
+            'Send Message to Device': () => {}
+          },
+          actors: {
+            // Reaching the tunnel means the check passed. The stub never settles, so nothing is sent to the device.
+            initializeTLSTunnel: fromPromise(async () => {
+              sent.push('initializeTLSTunnel')
+              return await new Promise<boolean>(() => {})
+            })
+          }
         })
         const snapshot = machine.resolveState({
-          value: 'COMPARE_DEVICE_HASHES',
-          context: { ...context, certChainPfx: { hashAlgorithm: certDigest } as any }
+          value: start,
+          context: { ...context, certChainPfx: { hashAlgorithm: chain[0]?.hashAlgorithm, certificates: chain } as any }
         })
         const states: string[] = []
         const actor = createActor(machine, { snapshot })
@@ -2746,30 +2856,50 @@ describe('Activation State Machine', () => {
         actor.send({ type: 'ACTIVATION', clientId, tenantId: '', friendlyName: null as any })
         const { errorMessage: error, status } = actor.getSnapshot().context
         actor.stop()
-        return { states, error, status }
+        return { states, error, status, sent }
       }
 
-      it('fails before any request is sent when the provisioning certificate digest is rejected', () => {
-        const { states, error, status } = runCompareDeviceHashes('sha256', true)
+      it.each([
+        ['COMPARE_DEVICE_HASHES', true],
+        // The check must not depend on the device trusting the root.
+        ['COMPARE_DEVICE_HASHES', false],
+        // A TLS-enforced activation checks before the device enters CCM.
+        ['CHECK_TLS_PROVISIONING_CERT_EXTRACT', true]
+      ])('fails before any request is sent from %s (trusted root: %s)', (start, trusted) => {
+        const chain = [
+          cert('leaf', 'sha384'),
+          cert('intermediate', 'sha256'),
+          cert('root', 'sha384')
+        ]
+        const { states, error, status, sent } = runFrom(start, chain, trusted)
 
         // FAILED is left through an eventless transition, so the run ends in FINAL with the error set.
-        expect(states).toEqual(['COMPARE_DEVICE_HASHES', 'FINAL'])
+        expect(states).toEqual([start, 'FINAL'])
         expect(status).toBe('error')
-        expect(error).toContain('requires a SHA-384 provisioning certificate')
+        expect(error).toContain('intermediate "intermediate-ca"')
         expect(error).toContain('sha256')
+        expect(sent).toEqual([])
       })
 
-      it('does not reject a SHA-384 provisioning certificate here', () => {
-        const { states, error } = runCompareDeviceHashes('sha384', true)
+      it('continues from the TLS-enforced check when the chain is acceptable', () => {
+        const { states, sent } = runFrom('CHECK_TLS_PROVISIONING_CERT_EXTRACT', goodChain(), true)
 
         expect(states).not.toContain('FINAL')
-        expect(error).toBe('')
+        expect(sent).toEqual(['initializeTLSTunnel'])
       })
 
-      it('leaves an untrusted certificate to its own error message', () => {
-        const { error } = runCompareDeviceHashes('sha256', false)
+      it('leaves an acceptable chain with an untrusted root to its own error message', () => {
+        const { error } = runFrom('COMPARE_DEVICE_HASHES', goodChain(), false)
 
-        expect(error).not.toContain('requires a SHA-384')
+        expect(error).toContain('hash does not exists in list of trusted root certificates')
+      })
+
+      it('routes a TLS-enforced ACM activation through the check before the tunnel', () => {
+        const states = activation.machine.config.states as any
+        expect(states.CHECK_PROFILE_TYPE.always.find((t: any) => t.guard === 'isTlsActivation').target).toBe(
+          'CHECK_TLS_PROVISIONING_CERT'
+        )
+        expect(states.CHECK_TLS_PROVISIONING_CERT_EXTRACT.always.at(-1).target).toBe('INIT_TLS_TUNNEL')
       })
     })
 
