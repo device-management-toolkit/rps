@@ -519,9 +519,13 @@ export class Activation {
       return false
     }
 
-    await this.configurator.secretsManager.writeSecretWithObject(`devices/${clientObj.uuid}`, data, {
+    const written = await this.configurator.secretsManager.writeSecretWithObject(`devices/${clientObj.uuid}`, data, {
       hostname: clientObj.hostname
     })
+    // Secret providers return null on a failed write; the device password must not be lost silently (#2946)
+    if (written == null) {
+      throw new globalThis.Error('Failed to save device credentials to secret provider')
+    }
     return true
   }
 
@@ -1128,9 +1132,12 @@ export class Activation {
       TLS_ISSUED_CERTIFICATE: clientObj.tls.issuedCertPEM
     }
 
-    await this.configurator.secretsManager.writeSecretWithObject(`devices/${clientObj.uuid}`, data, {
+    const written = await this.configurator.secretsManager.writeSecretWithObject(`devices/${clientObj.uuid}`, data, {
       hostname: clientObj.hostname
     })
+    if (written == null) {
+      throw new globalThis.Error('Failed to save device credentials to secret provider')
+    }
     this.logger.info(`Stored TLS leaf cert in vault for device ${clientObj.uuid}`)
     return true
   }
