@@ -24,14 +24,12 @@ import {
 } from '../../models/RCS.Config.js'
 import { CONSOLE_READ_ONLY, DEFAULT_SKIP, DEFAULT_TOP } from '../../utils/constants.js'
 import { Environment } from '../../utils/Environment.js'
+import { consoleServiceTokenHeaders } from '../../utils/serviceToken.js'
 import { RPSError } from '../../utils/RPSError.js'
 import Logger from '../../Logger.js'
 
 /** Console resolves the request tenant from this header; absent means the empty tenant. */
 export const TENANT_HEADER = 'x-tenant-id'
-
-/** Authenticates RPS to Console's service-only routes (e.g. profile secrets). See AUTH_SERVICE_TOKEN. */
-export const SERVICE_TOKEN_HEADER = 'x-service-token'
 
 /** Console caps `$top` at 500 (MaxPageSize), which bounds the domain suffix scan below. */
 const CONSOLE_MAX_TOP = 500
@@ -259,14 +257,10 @@ export default class ConsoleDb implements IDB {
 
   /** GET a Console admin object; returns null on 404. */
   async get<T>(path: string, tenantId = ''): Promise<T | null> {
-    const headers: Record<string, string> = {}
+    const headers: Record<string, string> = { ...consoleServiceTokenHeaders() }
     // Only send the tenant header when there is a tenant.
     if (tenantId) {
       headers[TENANT_HEADER] = tenantId
-    }
-    // Harmless on routes that ignore it; required on the service-token-gated ones (e.g. secrets).
-    if (Environment.Config.console_service_token) {
-      headers[SERVICE_TOKEN_HEADER] = Environment.Config.console_service_token
     }
     try {
       return await this.client.get(path, { headers }).json<T>()

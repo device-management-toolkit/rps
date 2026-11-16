@@ -10,6 +10,7 @@ import { doneFail, doneSuccess } from './doneResponse.js'
 import { devices } from '../../devices.js'
 import got from 'got'
 import { Environment } from '../../utils/Environment.js'
+import { consoleServiceTokenHeaders } from '../../utils/serviceToken.js'
 
 export interface DeviceInfo {
   ver: string
@@ -52,7 +53,7 @@ export class SyncDeviceInfo {
       deviceInfo: deviceinfo
     }
 
-    const rsp = await got.patch(url, { json: jsonData })
+    const rsp = await got.patch(url, { json: jsonData, headers: consoleServiceTokenHeaders() })
     if (rsp.statusCode !== 200) {
       throw new HttpResponseError(rsp.statusMessage ? rsp.statusMessage : '', rsp.statusCode)
     }

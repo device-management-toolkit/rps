@@ -10,6 +10,7 @@ import Logger from '../../Logger.js'
 import { doneFail, doneSuccess } from './doneResponse.js'
 import got from 'got'
 import { Environment } from '../../utils/Environment.js'
+import { consoleServiceTokenHeaders } from '../../utils/serviceToken.js'
 import { devices } from '../../devices.js'
 import { invokeWsmanCall } from '../common.js'
 import { Error as ErrorStateMachine } from './../error.js'
@@ -75,7 +76,7 @@ export class SyncHostName {
       hostname: input.hostNameInfo.hostname,
       dnsSuffix: input.hostNameInfo.dnsSuffixOS
     }
-    const rsp = await got.patch(url, { json: jsonData })
+    const rsp = await got.patch(url, { json: jsonData, headers: consoleServiceTokenHeaders() })
     if (rsp.statusCode !== 200) {
       throw new HttpResponseError(rsp.statusMessage != null ? rsp.statusMessage : '', rsp.statusCode)
     }

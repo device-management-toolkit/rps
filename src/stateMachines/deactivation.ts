@@ -13,6 +13,7 @@ import { Environment } from '../utils/Environment.js'
 import { devices } from '../devices.js'
 import { Error } from './error.js'
 import got, { type Got } from 'got'
+import { consoleServiceTokenHeaders } from '../utils/serviceToken.js'
 import { type CommonContext, invokeWsmanCall } from './common.js'
 
 export interface DeactivationContext extends CommonContext {
@@ -49,7 +50,8 @@ export class Deactivation {
     await got(
       `${Environment.Config.mps_server}/api/v1/devices/${devices[input.clientId].uuid}?tenantId=${input.tenantId}`,
       {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: consoleServiceTokenHeaders()
       }
     )
 
