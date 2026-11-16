@@ -1,3 +1,10 @@
+# [2.47.0](https://github.com/device-management-toolkit/rps/compare/v2.46.0...v2.47.0) (2026-11-16)
+
+
+### Features
+
+* **activation:** store host OS, serial number, and UPID in deviceInfo ([#3011](https://github.com/device-management-toolkit/rps/issues/3011)) ([173903f](https://github.com/device-management-toolkit/rps/commit/173903f65145db3858f7f3155154b6b8d052cbf2)), closes [device-management-toolkit/deployment#729](https://github.com/device-management-toolkit/deployment/issues/729)
+
 # [2.46.0](https://github.com/device-management-toolkit/rps/compare/v2.45.0...v2.46.0) (2026-11-16)
 
 
