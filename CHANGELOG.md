@@ -1,3 +1,10 @@
+# [2.44.0](https://github.com/device-management-toolkit/rps/compare/v2.43.1...v2.44.0) (2026-11-16)
+
+
+### Features
+
+* **activation:** use weakAlgorithmsRemoved crypto settings and an ECC-384 leaf via Node crypto ([#2987](https://github.com/device-management-toolkit/rps/issues/2987)) ([335f7a0](https://github.com/device-management-toolkit/rps/commit/335f7a0cf367f095a605c5a5675138512de0c602))
+
 ## [2.43.1](https://github.com/device-management-toolkit/rps/compare/v2.43.0...v2.43.1) (2026-11-03)
 
 
