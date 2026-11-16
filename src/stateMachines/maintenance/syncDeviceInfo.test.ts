@@ -144,6 +144,25 @@ describe('SyncDeviceInfo State Machine', () => {
     await implementation.saveToMPS({ input: context })
     expect(gotSpy).toHaveBeenCalled()
   })
+  it('should save to MPS when the client sends no ipConfiguration', async () => {
+    const { ipConfiguration, ...withoutIp } = deviceInfo
+    context.deviceInfo = withoutIp
+    gotSpy = vi.spyOn(got, 'patch').mockImplementation(() => mpsRsp)
+    await implementation.saveToMPS({ input: context })
+    const sent = (gotSpy.mock.calls[0][1] as any).json.deviceInfo
+    expect(sent.fwVersion).toBe('16.1.1')
+    expect(sent.ipAddress).toBeUndefined()
+  })
+  it('should keep the stored IP address when the client sends no ipConfiguration', async () => {
+    const { ipConfiguration, ...withoutIp } = deviceInfo
+    context.deviceInfo = withoutIp
+    context.existingDeviceInfo = { ipAddress: '10.0.0.5' }
+    gotSpy = vi.spyOn(got, 'patch').mockImplementation(() => mpsRsp)
+    await implementation.saveToMPS({ input: context })
+    const sent = (gotSpy.mock.calls[0][1] as any).json.deviceInfo
+    expect(sent.fwVersion).toBe('16.1.1')
+    expect(sent.ipAddress).toBe('10.0.0.5')
+  })
   it('should include host OS, serial number, and UPID in deviceInfo sent to MPS', async () => {
     const upid = { csmeId: '094BB130B1EB87DC', oemPlatformIdType: 'Not Set (0)' }
     context.deviceInfo = {
