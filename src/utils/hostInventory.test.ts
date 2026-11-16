@@ -1,0 +1,90 @@
+/*********************************************************************
+ * Copyright (c) Intel Corporation 2026
+ * SPDX-License-Identifier: Apache-2.0
+ **********************************************************************/
+
+import { getHostInventory, maxInventoryValueLength } from './hostInventory.js'
+
+describe('getHostInventory', () => {
+  const upid = { csmeId: 'ABCD', oemPlatformIdType: 'Not Set (0)' }
+
+  it('picks only the host inventory fields from the client payload', () => {
+    const payload = {
+      ver: '16.1.25',
+      uuid: '4c4c4544-0000-0000-0000-000000000000',
+      osName: 'windows',
+      osVersion: '10.0.26200.9711',
+      osDistro: 'Windows 11 Enterprise 25H2',
+      serialNumber: 'PF51TS9X',
+      upid
+    }
+    expect(getHostInventory(payload)).toEqual({
+      osName: 'windows',
+      osVersion: '10.0.26200.9711',
+      osDistro: 'Windows 11 Enterprise 25H2',
+      serialNumber: 'PF51TS9X',
+      upid
+    })
+  })
+
+  it('omits fields that are missing, empty, or blank', () => {
+    expect(getHostInventory({ osName: 'linux', serialNumber: '  ', upid: {} })).toEqual({ osName: 'linux' })
+    expect(getHostInventory({})).toEqual({})
+    expect(getHostInventory(undefined)).toEqual({})
+    expect(getHostInventory(null, null)).toEqual({})
+  })
+
+  it('treats values of the wrong type as absent', () => {
+    const payload: any = { osName: 42, serialNumber: ['PF51TS9X'], upid: 'ABCD' }
+    expect(getHostInventory(payload)).toEqual({})
+  })
+
+  it('treats values longer than the cap as absent', () => {
+    const atCap = 'a'.repeat(maxInventoryValueLength)
+    const tooLong = 'a'.repeat(maxInventoryValueLength + 1)
+    const stored = { serialNumber: 'OLD123', upid: { csmeId: 'STORED' } }
+    expect(getHostInventory({ serialNumber: atCap })).toEqual({ serialNumber: atCap })
+    expect(getHostInventory({ osName: tooLong, serialNumber: tooLong, upid: { csmeId: tooLong } }, stored)).toEqual(
+      stored
+    )
+  })
+  it('keeps only the known, non-blank UPID fields', () => {
+    const payload: any = { upid: { csmeId: 'ABCD', oemId: '', oemPlatformIdType: 7, extra: 'x' } }
+    expect(getHostInventory(payload)).toEqual({ upid: { csmeId: 'ABCD' } })
+    expect(getHostInventory({ upid: { csmeId: '', oemId: ' ' } })).toEqual({})
+  })
+
+  it('falls back to values already stored in MPS when the client omits them', () => {
+    const existing = {
+      osName: 'linux',
+      osVersion: '6.8.0',
+      serialNumber: 'OLD123',
+      upid,
+      activatedAt: '2025-01-01T00:00:00.000Z'
+    }
+    expect(getHostInventory({}, existing)).toEqual({
+      osName: 'linux',
+      osVersion: '6.8.0',
+      serialNumber: 'OLD123',
+      upid
+    })
+    expect(getHostInventory({ serialNumber: 'NEW456' }, existing)).toMatchObject({ serialNumber: 'NEW456', upid })
+  })
+
+  it('takes the OS fields as a unit so a reimaged host never mixes two operating systems', () => {
+    const existing = { osName: 'windows', osVersion: '10.0.26200', osDistro: 'Windows 11 Enterprise 25H2' }
+    expect(getHostInventory({ osName: 'linux', osVersion: '6.8.0', osDistro: '' }, existing)).toEqual({
+      osName: 'linux',
+      osVersion: '6.8.0'
+    })
+  })
+
+  it('takes the UPID as a unit so a reported UPID is never mixed with stored fields', () => {
+    const existing = { upid: { csmeId: 'OLD', oemId: 'OLDOEM', oemPlatformIdType: 'Binary (1)' } }
+    expect(getHostInventory({ upid: { csmeId: 'NEW' } }, existing)).toEqual({ upid: { csmeId: 'NEW' } })
+  })
+
+  it('does not let a blank UPID from the client replace the one MPS holds', () => {
+    expect(getHostInventory({ upid: { csmeId: '', oemId: '' } }, { upid })).toEqual({ upid })
+  })
+})
