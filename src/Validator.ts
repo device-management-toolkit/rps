@@ -13,6 +13,7 @@ import { CommandParser } from './CommandParser.js'
 import { VersionChecker } from './VersionChecker.js'
 import { AMTUserName } from './utils/constants.js'
 import { Environment } from './utils/Environment.js'
+import { consoleServiceTokenHeaders } from './utils/serviceToken.js'
 import got from 'got'
 import { devices } from './devices.js'
 import { type AMTConfiguration } from './models/index.js'
@@ -204,7 +205,8 @@ export class Validator implements IValidator {
         json: {
           guid: uuid,
           tags
-        }
+        },
+        headers: consoleServiceTokenHeaders()
       })
     }
   }

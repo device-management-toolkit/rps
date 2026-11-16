@@ -23,6 +23,7 @@ import { SecretManagerCreatorFactory } from '../../factories/SecretManagerCreato
 import { getPTStatusName, PTStatus } from '../../utils/PTStatus.js'
 import got from 'got'
 import { Environment } from '../../utils/Environment.js'
+import { consoleServiceTokenHeaders } from '../../utils/serviceToken.js'
 import { Error as ErrorStateMachine } from './../error.js'
 export interface SetAdminACLEntryExResponse {
   Envelope: {
@@ -119,7 +120,7 @@ export class ChangePassword {
     let rsp: any
     let rsperr: any
     try {
-      rsp = await got.delete(url)
+      rsp = await got.delete(url, { headers: consoleServiceTokenHeaders() })
     } catch (error) {
       rsperr = error
     }

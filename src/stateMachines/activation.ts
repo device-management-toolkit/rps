@@ -23,6 +23,7 @@ import { Configurator } from '../Configurator.js'
 import { Validator } from '../Validator.js'
 import { DbCreatorFactory } from '../factories/DbCreatorFactory.js'
 import { AMTUserName, GATEWAY_TIMEOUT_ERROR, RPS_MODE_CONSOLE, asArray } from '../utils/constants.js'
+import { consoleServiceTokenHeaders } from '../utils/serviceToken.js'
 import { CIRAConfiguration } from './ciraConfiguration.js'
 import { TLS } from './tls.js'
 import { TimeSync } from './timeMachine.js'
@@ -121,7 +122,8 @@ export class Activation {
         const result = await got(
           `${Environment.Config.mps_server}/api/v1/devices/${clientObj.uuid}?tenantId=${input.profile.tenantId}`,
           {
-            method: 'GET'
+            method: 'GET',
+            headers: consoleServiceTokenHeaders()
           }
         )
 

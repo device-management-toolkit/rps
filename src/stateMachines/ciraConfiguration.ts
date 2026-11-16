@@ -10,6 +10,7 @@ import { Configurator } from '../Configurator.js'
 import Logger from '../Logger.js'
 import got from 'got'
 import { UNEXPECTED_PARSE_ERROR, RPS_MODE_CONSOLE } from '../utils/constants.js'
+import { consoleServiceTokenHeaders } from '../utils/serviceToken.js'
 import { type CIRAConfig, ClientAction } from '../models/RCS.Config.js'
 import { NodeForge } from '../NodeForge.js'
 import { DbCreatorFactory } from '../factories/DbCreatorFactory.js'
@@ -109,7 +110,8 @@ export class CIRAConfiguration {
     }
     const data = await got(`${Environment.Config.mps_server}/api/v1/devices`, {
       method: 'POST',
-      json
+      json,
+      headers: consoleServiceTokenHeaders()
     })
     return data
   }
