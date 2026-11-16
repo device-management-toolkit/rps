@@ -1,3 +1,10 @@
+# [2.45.0](https://github.com/device-management-toolkit/rps/compare/v2.44.0...v2.45.0) (2026-11-16)
+
+
+### Features
+
+* **activation:** reject an incompatible provisioning certificate chain before activation ([#3014](https://github.com/device-management-toolkit/rps/issues/3014)) ([484266d](https://github.com/device-management-toolkit/rps/commit/484266d741b8f174c0dc13fc8d563ae7f6692efa))
+
 # [2.44.0](https://github.com/device-management-toolkit/rps/compare/v2.43.1...v2.44.0) (2026-11-16)
 
 
