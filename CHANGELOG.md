@@ -1,3 +1,10 @@
+# [2.46.0](https://github.com/device-management-toolkit/rps/compare/v2.45.0...v2.46.0) (2026-11-16)
+
+
+### Features
+
+* **activation:** verify AMT 22 DICE chains against the DCP DICE root ([#3009](https://github.com/device-management-toolkit/rps/issues/3009)) ([dda5f60](https://github.com/device-management-toolkit/rps/commit/dda5f60c992ef4b9b55d8356076c90288fdef94e))
+
 # [2.45.0](https://github.com/device-management-toolkit/rps/compare/v2.44.0...v2.45.0) (2026-11-16)
 
 
