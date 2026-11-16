@@ -1,3 +1,10 @@
+# [2.48.0](https://github.com/device-management-toolkit/rps/compare/v2.47.0...v2.48.0) (2026-11-16)
+
+
+### Features
+
+* provision cert validation checks for root certificate self-signed and CA flags ([#2953](https://github.com/device-management-toolkit/rps/issues/2953)) ([fe57455](https://github.com/device-management-toolkit/rps/commit/fe5745543e369c9d36ba0b10770301b030c77bd6))
+
 # [2.47.0](https://github.com/device-management-toolkit/rps/compare/v2.46.0...v2.47.0) (2026-11-16)
 
 
