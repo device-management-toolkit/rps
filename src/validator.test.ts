@@ -324,39 +324,6 @@ describe('validator', () => {
       expect(rpsError).toBeInstanceOf(RPSError)
       expect(rpsError.message).toEqual(`Device ${msg.payload.uuid} activation failed. Missing password.`)
     })
-    test.each([
-      { ver: '22.0.0', weakAlgorithmsRemoved: true }, // reported
-      { ver: '22.0.0', weakAlgorithmsRemoved: undefined }, // older rpc-go, inferred from the version
-      { ver: '21.0.6', weakAlgorithmsRemoved: true } // reported on an older version
-    ])('should reject hardened firmware: %j', async ({ ver, weakAlgorithmsRemoved }) => {
-      msg.payload.ver = ver
-      msg.payload.weakAlgorithmsRemoved = weakAlgorithmsRemoved
-      await expect(validator.validateActivationMsg(msg, clientId)).rejects.toThrow(
-        `Device ${msg.payload.uuid} activation failed. AMT 22 firmware (weak algorithms removed) is not supported by RPS yet ` +
-          `(version=${ver}, weakAlgorithmsRemoved=${weakAlgorithmsRemoved ?? 'not reported'}).`
-      )
-    })
-    test('should log the provisioning status of a rejected AMT 22 device', async () => {
-      devices[clientId].status = {} as any
-      msg.payload.ver = '22.0.0'
-      msg.payload.weakAlgorithmsRemoved = true
-      const infoSpy = vi.spyOn((validator as any).logger, 'info')
-
-      await expect(validator.validateActivationMsg(msg, clientId)).rejects.toThrow()
-
-      const statusLog = infoSpy.mock.calls
-        .map((call) => String(call[0]))
-        .find((line) => line.startsWith('Provisioning status:'))
-      expect(JSON.parse(statusLog.replace('Provisioning status: ', ''))).toEqual({
-        status: {
-          Activation: {
-            Result: 'Failure',
-            Details:
-              'AMT 22 firmware (weak algorithms removed) is not supported by RPS yet (version=22.0.0, weakAlgorithmsRemoved=true)'
-          }
-        }
-      })
-    })
     test('should throw an exception if profile does not match', async () => {
       const getAMTProfileSpy = vi.spyOn(configurator.profileManager, 'getAmtProfile').mockReturnValue(null as any)
       let rpsError: any = null

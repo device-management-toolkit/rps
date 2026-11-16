@@ -16,7 +16,6 @@ import { AMTUserName } from './utils/constants.js'
 import { Environment } from './utils/Environment.js'
 import got from 'got'
 import { devices } from './devices.js'
-import { applicableComponents, finalizeComponentResults, recordComponentResult } from './stateMachines/common.js'
 import { type AMTConfiguration } from './models/index.js'
 import { type Configurator } from './Configurator.js'
 import { type DeviceCredentials } from './interfaces/ISecretManagerService.js'
@@ -75,28 +74,14 @@ export class Validator implements IValidator {
     if (!payload.password) {
       throw new RPSError(`Device ${payload.uuid} activation failed. Missing password.`)
     }
-    const { deviceKeyPair } = getAMTCertificatePolicy(payload.weakAlgorithmsRemoved, payload.ver)
+    const policy = getAMTCertificatePolicy(payload.weakAlgorithmsRemoved, payload.ver)
     this.logger.info(
       `Device ${payload.uuid} AMT certificate policy: version=${payload.ver ?? 'unknown'} ` +
         `weakAlgorithmsRemoved=${payload.weakAlgorithmsRemoved ?? 'not reported'} ` +
-        `deviceKey=${deviceKeyPair.KeyAlgorithm === 1 ? 'ECC' : 'RSA'}-${deviceKeyPair.KeyLength}`
+        `hashAlgorithm=${policy.hashAlgorithm} rsaKeySize(RPS root)=${policy.rsaKeySize} ` +
+        `deviceKey=${policy.deviceKeyPair.KeyAlgorithm === 1 ? 'ECC' : 'RSA'}-${policy.deviceKeyPair.KeyLength} ` +
+        `requiresSha384ProvisioningCert=${policy.requiresSha384ProvisioningCert}`
     )
-    // Hardened firmware (AMT 22: reported by the device, or inferred from the version by an older
-    // rpc-go) needs SHA-384 provisioning, which RPS does not support yet. Fail here rather than
-    // part-way through activation.
-    if (deviceKeyPair.KeyAlgorithm === 1) {
-      const reason =
-        `AMT 22 firmware (weak algorithms removed) is not supported by RPS yet ` +
-        `(version=${payload.ver}, weakAlgorithmsRemoved=${payload.weakAlgorithmsRemoved ?? 'not reported'})`
-      // No activation state machine runs for a rejected device, so log the same per-component
-      // status it would have logged on completion.
-      recordComponentResult(clientId, 'Activation', { Result: 'Failure', Details: reason })
-      finalizeComponentResults(clientId, false)
-      this.logger.info(
-        `Provisioning status: ${JSON.stringify({ status: applicableComponents(clientObj.status?.Components) }, null, '\t')}`
-      )
-      throw new RPSError(`Device ${payload.uuid} activation failed. ${reason}.`)
-    }
     // Extract TLS enforcement flag from payload
     if (msg.payload.tlsEnforced != null) {
       clientObj.tlsEnforced = msg.payload.tlsEnforced === true

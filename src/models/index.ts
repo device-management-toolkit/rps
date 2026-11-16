@@ -63,7 +63,8 @@ export interface RootCertFingerprint {
 
 export interface CertCreationResult {
   h: any
-  cert: pki.Certificate
+  // null for a leaf that carries an ECC device key, which node-forge cannot represent; use pem or certbin
+  cert: pki.Certificate | null
   pem: string
   certbin: string
   privateKey: string
