@@ -8,8 +8,6 @@
  * AMT 22 devices present a DICE-rooted device identity chain rather than the
  * ODCA-rooted chain used by AMT 21 and earlier, so those chains do not terminate
  * at any certificate in AMT_ODCA_ROOT_CERTS.
- *
- * Certificate source: https://tsci.intel.com/content/DICE/certs/
  */
 
 /**
@@ -20,7 +18,7 @@
 export const AMT_DICE_ROOT_CERTS: string[] = [
   // DCP DICE Global Root CA, release edition (ECC P-384, valid 2022-11-08 to 9999-12-31)
   // Subject: O=Digital Content Protection LLC, OU=www.digital-cp.com, CN=DCP DICE Global Root CA
-  // Source: DCP_DICE_Global_RootCA.cer (tsci.intel.com), signs production hardware
+  // Source: https://tsci.intel.com/content/DICE/certs/DCP_DICE_Global_RootCA.cer, signs production hardware
   `-----BEGIN CERTIFICATE-----
 MIICvzCCAkWgAwIBAgIBATAKBggqhkjOPQQDAzCBljELMAkGA1UEBhMCVVMxCzAJ
 BgNVBAgMAk9SMRIwEAYDVQQHDAlCZWF2ZXJ0b24xJzAlBgNVBAoMHkRpZ2l0YWwg
@@ -48,7 +46,7 @@ zbCnJ+VYsurSFyJdAfiBEU8BbFpJoVHqc+S84Awlqn3jW3c=
 export const AMT_DICE_DEBUG_ROOT_CERTS: string[] = [
   // DCP DICE Global Root CA, debug edition (ECC P-384, valid 2024-01-01 to 9999-12-31)
   // Subject: O=Digital Content Protection LLC, OU=www.digital-cp.com, CN=DCP DICE Global Root CA
-  // Source: DCP_DICE_Global_RootCA.cer (tsde.intel.com), signs pre-production hardware
+  // Source: DCP_DICE_Global_RootCA.cer (pre-production version), signs pre-production hardware
   `-----BEGIN CERTIFICATE-----
 MIICwDCCAkWgAwIBAgIBATAKBggqhkjOPQQDAzCBljELMAkGA1UEBgwCVVMxCzAJ
 BgNVBAgMAk9SMRIwEAYDVQQHDAlCZWF2ZXJ0b24xJzAlBgNVBAoMHkRpZ2l0YWwg
