@@ -185,7 +185,8 @@ export class SyncTime {
                 failAt('ENABLE_LOCAL_TIME_SYNC', 'Maintenance', {
                   message: ({ event }) => coalesceMessage('at ENABLE_LOCAL_TIME_SYNC', event.error),
                   error: ({ event }) => event.error,
-                  returnValue: ({ event }) => (event.error as any)?.returnValue
+                  returnValue: ({ event }) => (event.error as any)?.returnValue,
+                  table: 'PT_STATUS'
                 })
               )
             ],
@@ -218,7 +219,8 @@ export class SyncTime {
                 failAt('GET_LOW_ACCURACY_TIME_SYNCH', 'Maintenance', {
                   message: ({ event }) => coalesceMessage('at GET_LOW_ACCURACY_TIME_SYNCH', event.error),
                   error: ({ event }) => event.error,
-                  returnValue: ({ event }) => (event.error as any)?.returnValue
+                  returnValue: ({ event }) => (event.error as any)?.returnValue,
+                  table: 'PT_STATUS'
                 })
               )
             ],
@@ -243,7 +245,8 @@ export class SyncTime {
               failAt('SET_HIGH_ACCURACY_TIME_SYNCH', 'Maintenance', {
                 message: ({ event }) => coalesceMessage('at SET_HIGH_ACCURACY_TIME_SYNCH', event.error),
                 error: ({ event }) => event.error,
-                returnValue: ({ event }) => (event.error as any)?.returnValue
+                returnValue: ({ event }) => (event.error as any)?.returnValue,
+                table: 'PT_STATUS'
               })
             ),
             target: 'FAILED'

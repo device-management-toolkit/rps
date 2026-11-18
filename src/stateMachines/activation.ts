@@ -2221,7 +2221,8 @@ export class Activation {
               failAt('CHECK_CERT_CHAIN_RESPONSE', 'Activation', {
                 message: ({ context }) =>
                   `Device ${devices[context.clientId].uuid} activation failed. Error while adding the certificates to AMT.`,
-                returnValue: ({ context }) => returnValueOf(context.message, 'AddNextCertInChain')
+                returnValue: ({ context }) => returnValueOf(context.message, 'AddNextCertInChain'),
+                table: 'ADD_NEXT_CERT_IN_CHAIN'
               })
             ),
             target: 'FAILED'
@@ -2323,7 +2324,8 @@ export class Activation {
                 stepFailure('CHECK_ADMIN_SETUP', 'Activation', {
                   code: 'RPS_ACTIVATION_FAILED',
                   error: () => undefined,
-                  returnValue: ({ context }) => returnValueOf(context.message, 'AdminSetup')
+                  returnValue: ({ context }) => returnValueOf(context.message, 'AdminSetup'),
+                  table: 'HOST_BASED_SETUP'
                 })
               )
             }),
@@ -2335,7 +2337,8 @@ export class Activation {
                 failAt('CHECK_ADMIN_SETUP', 'Activation', {
                   code: 'RPS_ACTIVATION_FAILED',
                   message: 'Failed to activate in admin control mode.',
-                  returnValue: ({ context }) => returnValueOf(context.message, 'AdminSetup')
+                  returnValue: ({ context }) => returnValueOf(context.message, 'AdminSetup'),
+                  table: 'HOST_BASED_SETUP'
                 })
               )
             ),
@@ -2430,7 +2433,8 @@ export class Activation {
                 stepFailure('CHECK_UPGRADE', 'Activation', {
                   code: 'RPS_ACTIVATION_FAILED',
                   error: () => undefined,
-                  returnValue: ({ context }) => returnValueOf(context.message, 'UpgradeClientToAdmin')
+                  returnValue: ({ context }) => returnValueOf(context.message, 'UpgradeClientToAdmin'),
+                  table: 'HOST_BASED_SETUP'
                 })
               )
             }),
@@ -2442,7 +2446,8 @@ export class Activation {
                 failAt('CHECK_UPGRADE', 'Activation', {
                   code: 'RPS_ACTIVATION_FAILED',
                   message: 'Failed to upgrade to admin control mode.',
-                  returnValue: ({ context }) => returnValueOf(context.message, 'UpgradeClientToAdmin')
+                  returnValue: ({ context }) => returnValueOf(context.message, 'UpgradeClientToAdmin'),
+                  table: 'HOST_BASED_SETUP'
                 })
               )
             ),
@@ -2580,7 +2585,8 @@ export class Activation {
                 failAt('CHECK_SETUP', 'Activation', {
                   code: 'RPS_ACTIVATION_FAILED',
                   message: 'Failed to activate in client control mode.',
-                  returnValue: ({ context }) => returnValueOf(context.message, 'Setup')
+                  returnValue: ({ context }) => returnValueOf(context.message, 'Setup'),
+                  table: 'HOST_BASED_SETUP'
                 })
               )
             ),

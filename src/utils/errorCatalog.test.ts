@@ -4,7 +4,7 @@
  **********************************************************************/
 
 import { describe, expect, it } from 'vitest'
-import { describeCode, ErrorCodes, fromError, isDeviceOriginCode } from './errorCatalog.js'
+import { describeCode, ErrorCodes, fromError, fromReturnValue, isDeviceOriginCode } from './errorCatalog.js'
 import {
   CONNECTION_RESET_ERROR,
   EA_TIMEOUT_ERROR,
@@ -34,6 +34,29 @@ describe('errorCatalog', () => {
       expect(isDeviceOriginCode(ErrorCodes.AMT_METHOD_FAILED)).toBe(true)
       expect(isDeviceOriginCode(ErrorCodes.WSMAN_TIMEOUT)).toBe(true)
       expect(isDeviceOriginCode(ErrorCodes.RPS_SECRETS_READ_FAILED)).toBe(false)
+      expect(isDeviceOriginCode('CIM_RV_NOT_SUPPORTED')).toBe(true)
+      expect(isDeviceOriginCode('IPS_RV_INVALID_STATE')).toBe(true)
+    })
+  })
+
+  describe('fromReturnValue', () => {
+    it('maps a value its table lists to a code, name and reason', () => {
+      expect(fromReturnValue('PT_STATUS', 2066)).toEqual({
+        code: 'AMT_PT_UNSUPPORTED',
+        name: 'PT_STATUS_UNSUPPORTED',
+        reason: 'Operation or value is not supported by this AMT firmware',
+        value: 2066
+      })
+      expect(fromReturnValue('CIM', 1)?.code).toBe('CIM_RV_NOT_SUPPORTED')
+      expect(fromReturnValue('HOST_BASED_SETUP', 5)?.code).toBe('IPS_RV_AUTHENTICATION_FAILED')
+      expect(fromReturnValue('OPT_IN', 2066)?.code).toBe('IPS_RV_OPT_IN_INVALID_CREDENTIALS')
+      expect(fromReturnValue('WIFI_PORT_CONFIGURATION', 4)?.code).toBe('AMT_WIFI_INVALID_REFERENCE')
+    })
+
+    it('returns undefined for a value the table does not list', () => {
+      expect(fromReturnValue('PT_STATUS', 31337)).toBeUndefined()
+      expect(fromReturnValue('HOST_BASED_SETUP', 2054)).toBeUndefined()
+      expect(fromReturnValue('CIM', Number.NaN)).toBeUndefined()
     })
   })
 
