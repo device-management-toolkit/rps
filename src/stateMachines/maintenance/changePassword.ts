@@ -223,7 +223,8 @@ export class ChangePassword {
               failAt('SET_ADMIN_ACL_ENTRY', 'Maintenance', {
                 message: ({ event }) => coalesceMessage('at SET_ADMIN_ACL_ENTRY', event.error),
                 error: ({ event }) => event.error,
-                returnValue: ({ event }) => (event.error as any)?.returnValue
+                returnValue: ({ event }) => (event.error as any)?.returnValue,
+                table: 'PT_STATUS'
               })
             ),
             target: 'FAILED'

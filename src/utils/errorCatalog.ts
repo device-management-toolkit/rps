@@ -11,13 +11,18 @@
  * row here; the state machines never change when a code is introduced.
  *
  * Code families:
- *   AMT_*      the device answered a method call with a non-zero ReturnValue
+ *   AMT_PT_*   AMT PT_STATUS method return values
+ *   AMT_WIFI_* AMT_WiFiPortConfigurationService method return values
+ *   CIM_RV_*   CIM method return values (RequestStateChange etc.)
+ *   IPS_RV_*   IPS_HostBasedSetupService and IPS_OptInService method return values
+ *   AMT_METHOD_FAILED  a non-zero ReturnValue with no table, or a value its table does not list
  *   WSMAN_*    WSMAN transport layer (timeouts, TLS tunnel, HTTP status, parse)
  *   RPS_*      RPS-side failures (database, secrets, MPS, Enterprise Assistant, configuration)
  *
- * A method ReturnValue is not decoded here: the raw number is carried in AmtReturnValue.
+ * The return value tables live in wsman-messages (Common.ReturnValues), shared with MPS.
  */
 
+import { Common } from '@device-management-toolkit/wsman-messages'
 import {
   CONNECTION_RESET_ERROR,
   EA_TIMEOUT_ERROR,
@@ -30,6 +35,15 @@ import { RPSError } from './RPSError.js'
 export interface ResolvedCode {
   code: string
   reason: string
+}
+
+/** The wsman-messages table that documents the method whose ReturnValue is being decoded. */
+export type ReturnValueTable = Common.ReturnValues.ReturnValueTable
+
+export interface ResolvedReturnValue extends ResolvedCode {
+  /** Firmware-side symbolic name, e.g. PT_STATUS_UNSUPPORTED or CIM_NOT_SUPPORTED */
+  name: string
+  value: number
 }
 
 export interface ResolvedError extends ResolvedCode {
@@ -148,6 +162,26 @@ export function describeCode(code: string): string {
   return `Unrecognized failure code ${code}`
 }
 
+/** RPS code for a firmware-side name: PT_STATUS_X -> AMT_PT_X, CIM_X -> CIM_RV_X, IPS_X -> IPS_RV_X. */
+const codeForName = (name: string): string =>
+  name
+    .replace(/^PT_STATUS_/, 'AMT_PT_')
+    .replace(/^CIM_/, 'CIM_RV_')
+    .replace(/^IPS_/, 'IPS_RV_')
+
+/**
+ * Maps a method ReturnValue to a code, symbolic name and description using the named table.
+ * Returns undefined for a value the table does not list: the caller then keeps its own code and
+ * carries the raw number.
+ */
+export function fromReturnValue(table: ReturnValueTable, value: number): ResolvedReturnValue | undefined {
+  const described = Common.ReturnValues.describeReturnValue(table, value)
+  if (described.name === 'UNKNOWN') {
+    return undefined
+  }
+  return { code: codeForName(described.name), name: described.name, reason: described.description, value }
+}
+
 /**
  * True when the code describes something the device itself reported (a method return value or a
  * WSMAN / HTTP-level failure talking to AMT). The underlying error text of these is safe to show
@@ -155,7 +189,7 @@ export function describeCode(code: string): string {
  * paths and stays in the RPS logs.
  */
 export function isDeviceOriginCode(code: string): boolean {
-  return /^(WSMAN_|AMT_)/.test(code)
+  return /^(WSMAN_|AMT_|CIM_RV_|IPS_RV_)/.test(code)
 }
 
 /**

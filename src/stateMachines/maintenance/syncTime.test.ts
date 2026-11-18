@@ -164,10 +164,10 @@ describe('SyncTime State Machine', () => {
     expect(state.context.errorMessage).toBe('at SET_HIGH_ACCURACY_TIME_SYNCH ReturnValue PT_STATUS_INVALID_TIME')
     // ...and the structured failure carries the AMT ReturnValue, the step and the raw return value.
     expect(state.context.failure).toEqual({
-      Code: 'AMT_METHOD_FAILED',
+      Code: 'AMT_PT_INVALID_TIME',
       Component: 'Maintenance',
       Step: 'SET_HIGH_ACCURACY_TIME_SYNCH',
-      Reason: 'AMT answered the request with a non-zero return value',
+      Reason: 'Time value is invalid',
       AmtReturnValue: PTStatus.INVALID_TIME.value,
       Detail: 'ReturnValue PT_STATUS_INVALID_TIME'
     })
@@ -183,7 +183,7 @@ describe('SyncTime State Machine', () => {
     const state = await waitFor(actor, (s) => s.status === 'done')
     expect(state.output.status).toBe(StatusFailed)
     expect(state.context.failure).toMatchObject({
-      Code: 'AMT_METHOD_FAILED',
+      Code: 'AMT_PT_INTERNAL_ERROR',
       Step: 'GET_LOW_ACCURACY_TIME_SYNCH',
       AmtReturnValue: PTStatus.INTERNAL_ERROR.value
     })

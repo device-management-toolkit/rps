@@ -169,7 +169,7 @@ describe('TLS State Machine', () => {
     expect(output.status).toBe('error')
     expect(output.errorMessage).toContain('Failed to ENABLE_LOCAL_TIME_SYNC')
     expect(output.failure).toMatchObject({
-      Code: 'AMT_METHOD_FAILED',
+      Code: 'AMT_PT_INTERNAL_ERROR',
       Component: 'TimeSync',
       Step: 'ENABLE_LOCAL_TIME_SYNC_RESPONSE',
       AmtReturnValue: 1
@@ -219,10 +219,10 @@ describe('TLS State Machine', () => {
     expect(output.errorMessage).toBe('Failed to SET_HIGH_ACCURACY_TIME_SYNCH')
     // ... with the AMT ReturnValue captured instead of dropped.
     expect(output.failure).toEqual({
-      Code: 'AMT_METHOD_FAILED',
+      Code: 'AMT_PT_INVALID_TIME',
       Component: 'TimeSync',
       Step: 'SET_HIGH_ACCURACY_TIME_SYNCH_RESPONSE',
-      Reason: 'AMT answered the request with a non-zero return value',
+      Reason: 'Time value is invalid',
       AmtReturnValue: 34
     })
   })
