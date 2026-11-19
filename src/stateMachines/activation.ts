@@ -2493,6 +2493,16 @@ export class Activation {
           ],
           onError: [
             {
+              // A 401 after the ACM commit is a stale digest challenge: re-authenticate and retry
+              // this step before treating the TLS ACM phase as failed.
+              guard: ({ event }) => hasStatusCode(event.error) && event.error.statusCode === 401,
+              actions: assign({
+                message: ({ event }) => event.error,
+                targetAfterError: () => 'SET_MEBX_PASSWORD'
+              }),
+              target: 'ERROR'
+            },
+            {
               guard: 'isTlsACMPhase',
               actions: assign({
                 errorMessage: ({ context }) => `TLS ACM setup failed for device ${devices[context.clientId].uuid}`
@@ -3201,16 +3211,18 @@ export class Activation {
       NEXT_STATE: {
         always: [
           {
+            // A recovered digest challenge on the MEBx step retries it; the TLS ACM phase
+            // deactivates only when the error machine gives up (ONFAILED) or another step fails.
+            guard: 'isMebxPassword',
+            target: 'SET_MEBX_PASSWORD'
+          },
+          {
             guard: 'shouldDeactivate',
             target: 'DEACTIVATION'
           },
           {
             guard: 'isGeneralSettings',
             target: 'GET_GENERAL_SETTINGS'
-          },
-          {
-            guard: 'isMebxPassword',
-            target: 'SET_MEBX_PASSWORD'
           },
           {
             guard: 'isCheckActivationOnAMT',
