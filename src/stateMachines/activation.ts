@@ -22,7 +22,7 @@ import { NodeForge } from '../NodeForge.js'
 import { Configurator } from '../Configurator.js'
 import { Validator } from '../Validator.js'
 import { DbCreatorFactory } from '../factories/DbCreatorFactory.js'
-import { AMTUserName, GATEWAY_TIMEOUT_ERROR, asArray } from '../utils/constants.js'
+import { AMTUserName, GATEWAY_TIMEOUT_ERROR, asArray, hasStatusCode } from '../utils/constants.js'
 import { getHostInventory } from '../utils/hostInventory.js'
 import { CIRAConfiguration } from './ciraConfiguration.js'
 import { TLS } from './tls.js'
@@ -51,6 +51,62 @@ import {
   resolveProvisioningSignature
 } from '../utils/amtCertificatePolicy.js'
 import crypto from 'node:crypto'
+import { canReuseTlsIdentity, getTlsTrustMaterial } from './tlsReuse.js'
+
+interface TlsProbeSnapshot {
+  settings: AMT.Models.TLSSettingData[]
+  credentialContexts: AMT.Models.TLSCredentialContext[]
+  sessionId: string
+  capturedAt: number
+}
+
+interface TlsValidationSnapshot {
+  certificates: AMT.Models.PublicKeyCertificate[]
+  activeHandles: string[]
+  sessionId: string
+}
+
+interface TlsProbeResult {
+  tlsEnabled: boolean
+  hasCredentialContext: boolean
+  snapshot?: TlsProbeSnapshot
+}
+
+interface TlsIdentityValidationResult {
+  valid: boolean
+  reuseApproved: boolean
+  fingerprint?: string
+  sessionId?: string
+}
+
+const tlsProbeMaxAgeMs = 30_000
+const clientControlMode = 1
+const adminControlMode = 2
+
+interface MpsCertificateSecret {
+  root_key?: string
+  web_tls_config?: { ca?: string }
+  mps_tls_config?: { ca?: string }
+  root_ca?: string
+  ca?: string
+}
+
+interface VaultTlsIdentity {
+  fingerprint: string
+  pem: string
+  root?: string
+  rootKey?: string
+}
+
+interface TlsCertificateValidationResult {
+  valid: boolean
+  identity?: VaultTlsIdentity
+  snapshot?: TlsValidationSnapshot
+}
+
+interface EnumerationResult {
+  Envelope?: { Body?: { PullResponse?: { EndOfSequence?: unknown; EnumerationContext?: unknown } } }
+}
 
 export interface ActivationContext extends CommonContext {
   profile: AMTConfiguration
@@ -71,6 +127,8 @@ export interface ActivationContext extends CommonContext {
   tlsTunnelCCMComplete: boolean
   tlsNeedsProvisioning: boolean
   friendlyName?: string | null
+  tlsProbeSnapshot?: TlsProbeSnapshot
+  tlsReuse?: { fingerprint: string; sessionId: string }
 }
 
 export interface ActivationEvent {
@@ -321,7 +379,6 @@ export class Activation {
         !isAlreadyActivated,
         Environment.Config.amt_legacy_tls_compatibility === true
       )
-
       clientObj.tlsTunnelSessionId = clientObj.tlsTunnelManager.getSessionId()
 
       // Connect (initiates TLS handshake)
@@ -878,7 +935,13 @@ export class Activation {
 
   private normalizeFingerprint = (fingerprint: string): string => fingerprint.replace(/:/g, '').toLowerCase()
 
-  private getVaultTlsFingerprint = async (clientId: string): Promise<string | null> => {
+  private fingerprintOf = (certificate: string): string =>
+    this.normalizeFingerprint(this.parseX509Certificate(certificate).fingerprint256)
+
+  private isTunnelStable = (device: ClientObject, sessionId: string | undefined): boolean =>
+    sessionId === device.tlsTunnelSessionId && !device.tlsTunnelNeedsReset && !device.amtReconfiguring
+
+  private getVaultTlsFingerprint = async (clientId: string, includeRoot = false): Promise<VaultTlsIdentity | null> => {
     const clientObj = devices[clientId]
 
     // Fetch device secret and MPSCerts in parallel — they are independent.
@@ -886,7 +949,7 @@ export class Activation {
       this.configurator.secretsManager.getSecretAtPath(
         `devices/${clientObj.uuid}`
       ) as Promise<DeviceCredentials | null>,
-      clientObj.tls?.mpsRootCertPEM == null
+      includeRoot || clientObj.tls?.mpsRootCertPEM == null
         ? this.configurator.secretsManager.getSecretAtPath('MPSCerts')
         : Promise.resolve(null)
     ])
@@ -906,7 +969,13 @@ export class Activation {
     }
 
     const x509 = this.parseX509Certificate(existing.TLS_ISSUED_CERTIFICATE)
-    return this.normalizeFingerprint(x509.fingerprint256)
+    const certs = mpsCerts as MpsCertificateSecret | null
+    return {
+      fingerprint: this.normalizeFingerprint(x509.fingerprint256),
+      pem: existing.TLS_ISSUED_CERTIFICATE,
+      root: certs == null ? undefined : this.selectMpsRootCa(certs, certs.root_key),
+      rootKey: certs?.root_key
+    }
   }
 
   private enumerateAndPull = async (
@@ -1078,11 +1147,16 @@ export class Activation {
     return 'Admin control mode.'
   }
 
-  private getActiveTlsCertificateFingerprints = async (input: ActivationContext): Promise<string[]> => {
-    const credentialResult = await this.enumerateAndPull(input, input.amt.TLSCredentialContext)
-    const credentialContexts = asArray<AMT.Models.TLSCredentialContext>(
-      credentialResult?.Envelope?.Body?.PullResponse?.Items?.AMT_TLSCredentialContext
-    )
+  private getActiveTlsCertificateFingerprints = async (
+    input: ActivationContext
+  ): Promise<{ fingerprints: string[]; snapshot?: TlsValidationSnapshot }> => {
+    const cached = this.isTlsProbeSnapshotCurrent(input) ? input.tlsProbeSnapshot : undefined
+    const credentialResult = cached ? undefined : await this.enumerateAndPull(input, input.amt.TLSCredentialContext)
+    const credentialContexts =
+      cached?.credentialContexts ??
+      asArray<AMT.Models.TLSCredentialContext>(
+        credentialResult?.Envelope?.Body?.PullResponse?.Items?.AMT_TLSCredentialContext
+      )
 
     const activeHandles = new Set(
       credentialContexts
@@ -1091,7 +1165,7 @@ export class Activation {
     )
 
     if (activeHandles.size === 0) {
-      return []
+      return { fingerprints: [] }
     }
 
     const certificateResult = await this.enumerateAndPull(input, input.amt.PublicKeyCertificate)
@@ -1099,12 +1173,27 @@ export class Activation {
       certificateResult?.Envelope?.Body?.PullResponse?.Items?.AMT_PublicKeyCertificate
     )
 
+    if (cached && !this.isTlsProbeSnapshotCurrent(input)) {
+      throw new globalThis.Error('TLS session changed during certificate validation')
+    }
+    const snapshot =
+      this.isTlsProbeSnapshotCurrent(input) && this.isCompletePull(certificateResult)
+        ? {
+            certificates: publicCertificates,
+            activeHandles: [...activeHandles],
+            sessionId: input.tlsProbeSnapshot.sessionId
+          }
+        : undefined
+
     // Best effort: cache active AMT trusted root cert for post-port-switch tunnel verification.
     this.stashActiveTlsRootCa(input.clientId, activeHandles, publicCertificates)
 
-    return publicCertificates
-      .filter((cert) => activeHandles.has(cert.InstanceID) && !cert.TrustedRootCertficate)
-      .map((cert) => this.normalizeFingerprint(this.parseX509Certificate(cert.X509Certificate).fingerprint256))
+    return {
+      fingerprints: publicCertificates
+        .filter((cert) => activeHandles.has(cert.InstanceID) && !cert.TrustedRootCertficate)
+        .map((cert) => this.fingerprintOf(cert.X509Certificate)),
+      snapshot
+    }
   }
 
   private stashActiveTlsRootCa(
@@ -1135,48 +1224,51 @@ export class Activation {
     }
   }
 
-  validateDeviceTlsCert = async ({ input }: { input: ActivationContext }): Promise<boolean> => {
+  validateDeviceTlsCert = async ({ input }: { input: ActivationContext }): Promise<boolean> =>
+    (await this.getDeviceTlsValidation(input)).valid
+
+  getDeviceTlsValidation = async (
+    input: ActivationContext,
+    includeRoot = false
+  ): Promise<TlsCertificateValidationResult> => {
     const clientObj = devices[input.clientId]
     this.logger.info(`Validating live AMT TLS certificate for device ${clientObj.uuid}`)
 
     try {
-      const vaultFingerprint = await this.getVaultTlsFingerprint(input.clientId)
-      if (vaultFingerprint == null) {
+      const identity = await this.getVaultTlsFingerprint(input.clientId, includeRoot)
+      if (identity == null) {
         this.logger.info(`No TLS leaf cert stored in vault for device ${clientObj.uuid}, reprovisioning`)
-        return false
+        return { valid: false }
       }
 
-      const deviceFingerprints = await this.getActiveTlsCertificateFingerprints(input)
+      const { fingerprints: deviceFingerprints, snapshot } = await this.getActiveTlsCertificateFingerprints(input)
       if (deviceFingerprints.length === 0) {
         this.logger.info(`No active AMT TLS leaf cert found for device ${clientObj.uuid}, reprovisioning`)
-        return false
+        return { valid: false }
       }
 
-      const isMatch = deviceFingerprints.includes(vaultFingerprint)
+      const isMatch = deviceFingerprints.includes(identity.fingerprint)
       if (isMatch) {
         this.logger.info(`Live AMT TLS leaf matches vault leaf for device ${clientObj.uuid}, skipping reprovision`)
       } else {
         this.logger.info(`Live AMT TLS leaf does not match vault leaf for device ${clientObj.uuid}, reprovisioning`)
-        this.logger.debug(`  Vault fingerprint256: ${vaultFingerprint}`)
+        this.logger.debug(`  Vault fingerprint256: ${identity.fingerprint}`)
         for (const [index, fingerprint] of deviceFingerprints.entries()) {
           this.logger.debug(`  Device fingerprint256[${index}]: ${fingerprint}`)
         }
       }
 
-      return isMatch
+      return { valid: isMatch, identity, snapshot }
     } catch (err: unknown) {
       const errMsg = err instanceof globalThis.Error ? err.message : String(err)
       this.logger.debug(`Error validating live AMT TLS cert for device ${clientObj.uuid}: ${errMsg}, reprovisioning`)
-      return false
+      return { valid: false }
     }
   }
 
-  checkAmtTlsState = async ({
-    input
-  }: {
-    input: ActivationContext
-  }): Promise<{ tlsEnabled: boolean; hasCredentialContext: boolean }> => {
+  checkAmtTlsState = async ({ input }: { input: ActivationContext }): Promise<TlsProbeResult> => {
     const clientObj = devices[input.clientId]
+    const sessionId = clientObj.tlsTunnelSessionId
     this.logger.info(`Checking AMT TLS state for device ${clientObj.uuid}`)
 
     try {
@@ -1199,11 +1291,118 @@ export class Activation {
       this.logger.info(
         `Device ${clientObj.uuid} TLS state: enabled=${tlsEnabled}, credentialContext=${hasCredentialContext}`
       )
-      return { tlsEnabled, hasCredentialContext }
+      const snapshot =
+        sessionId &&
+        this.isTunnelStable(clientObj, sessionId) &&
+        this.isCompletePull(tlsResult) &&
+        this.isCompletePull(credResult)
+          ? {
+              settings: tlsEntries,
+              credentialContexts: asArray<AMT.Models.TLSCredentialContext>(credentialContext),
+              sessionId,
+              capturedAt: Date.now()
+            }
+          : undefined
+      return { tlsEnabled, hasCredentialContext, snapshot }
     } catch (err: unknown) {
       const errMsg = err instanceof globalThis.Error ? err.message : String(err)
       this.logger.error(`Failed to check TLS state for device ${clientObj.uuid}: ${errMsg}`)
       return { tlsEnabled: false, hasCredentialContext: false }
+    }
+  }
+
+  private isCompletePull = (result: EnumerationResult | null | undefined): boolean => {
+    const pull = result?.Envelope?.Body?.PullResponse
+    return pull != null && (pull.EndOfSequence != null || pull.EnumerationContext == null)
+  }
+
+  private isTlsProbeSnapshotCurrent = (
+    input: ActivationContext
+  ): input is ActivationContext & { tlsProbeSnapshot: TlsProbeSnapshot } => {
+    const device = devices[input.clientId]
+    const snapshot = input.tlsProbeSnapshot
+    const ageMs = snapshot == null ? undefined : Date.now() - snapshot.capturedAt
+    return (
+      snapshot != null &&
+      device?.tlsEnforced === true &&
+      this.isTunnelStable(device, snapshot.sessionId) &&
+      ageMs != null &&
+      ageMs >= 0 &&
+      ageMs < tlsProbeMaxAgeMs
+    )
+  }
+
+  validateActivatedTlsIdentity = async ({
+    input
+  }: {
+    input: ActivationContext
+  }): Promise<TlsIdentityValidationResult> => {
+    const device = devices[input.clientId]
+    const validation = await this.getDeviceTlsValidation(input, true).finally(() => {
+      // A previous approval cannot survive a new validation that declines reuse or throws.
+      if (device?.tls) delete device.tls.validatedCertPEM
+    })
+    if (!validation.valid) return { valid: false, reuseApproved: false }
+    const { identity, snapshot } = validation
+    const hostname = device.hostname ?? device.uuid
+    const targetMode = input.profile.activation === ClientAction.ADMINCTLMODE ? adminControlMode : clientControlMode
+    if (
+      input.isActivated !== true ||
+      device.ClientData.payload.currentMode !== targetMode ||
+      !this.isTlsProbeSnapshotCurrent(input) ||
+      snapshot == null ||
+      identity == null ||
+      hostname == null
+    ) {
+      return { valid: true, reuseApproved: false }
+    }
+    try {
+      // The expected root was read from Vault in this validation pass, not from the live-store cache.
+      const { root, rootKey, fingerprint } = identity
+      if (!root || (rootKey && !this.certMatchesPrivateKey(root, rootKey))) {
+        return { valid: true, reuseApproved: false }
+      }
+      const active = snapshot.certificates.find(
+        (cert) =>
+          snapshot.activeHandles.includes(cert.InstanceID) &&
+          !cert.TrustedRootCertficate &&
+          this.fingerprintOf(cert.X509Certificate) === fingerprint
+      )
+      const reuseApproved =
+        active == null
+          ? false
+          : canReuseTlsIdentity(input.profile, input.tlsProbeSnapshot.settings, active.X509Certificate, root, hostname)
+      if (reuseApproved && active != null) {
+        device.tls.mpsRootCertPEM = root
+        device.tls.validatedCertPEM = ensurePemCertificate(active.X509Certificate)
+        this.logger.info('Existing TLS identity and settings satisfy the requested profile')
+      }
+      return {
+        valid: true,
+        reuseApproved,
+        fingerprint: reuseApproved ? fingerprint : undefined,
+        sessionId: reuseApproved ? snapshot.sessionId : undefined
+      }
+    } catch {
+      return { valid: true, reuseApproved: false }
+    }
+  }
+
+  verifyReusableTlsIdentity = async ({ input }: { input: ActivationContext }): Promise<boolean> => {
+    // Cleanup/network work may reconnect or mutate device state. Revalidate immediately before skipping TLS.
+    let verified = false
+    try {
+      const result = await this.checkAmtTlsState({ input })
+      if (!result.tlsEnabled || !result.hasCredentialContext || !result.snapshot) return false
+      const validation = await this.validateActivatedTlsIdentity({
+        input: { ...input, tlsProbeSnapshot: result.snapshot }
+      })
+      verified = validation.reuseApproved && validation.fingerprint === input.tlsReuse?.fingerprint
+      return verified
+    } finally {
+      // Even a newly validated certificate must be discarded if it differs from the approved identity.
+      const device = devices[input.clientId]
+      if (!verified && device?.tls) delete device.tls.validatedCertPEM
     }
   }
 
@@ -1241,10 +1440,8 @@ export class Activation {
     // not an explicit rpc-go port switch command.
     const alreadyOnTlsPort = clientObj.connectionParams?.port === 16993
     if (alreadyOnTlsPort && clientObj.tlsEnforced === true && clientObj.tlsTunnelActivation !== true) {
-      this.logger.info(
-        `Skipping port_switch for device ${clientObj.uuid}: already using TLS path; waiting ${delaySeconds}s for AMT TLS rollover`
-      )
-
+      const canSkipWait =
+        input.tlsReuse != null && input.isActivated === true && this.isTunnelStable(clientObj, input.tlsReuse.sessionId)
       // The existing tunnel may be pre-rollover; close it so post-rollover steps create a fresh channel.
       clientObj.tlsTunnelManager?.close()
       clientObj.tlsTunnelManager = undefined
@@ -1252,7 +1449,16 @@ export class Activation {
       clientObj.tlsTunnelNeedsReset = true
       clientObj.tlsResponseBuffer = undefined
 
-      await new Promise((resolve) => setTimeout(resolve, delaySeconds * 1000))
+      if (canSkipWait) {
+        this.logger.info(
+          'Validated unchanged TLS identity: skipping rollover wait; fresh verified tunnel still required'
+        )
+      } else {
+        this.logger.info(
+          `Skipping port_switch for device ${clientObj.uuid}: already using TLS path; waiting ${delaySeconds}s for AMT TLS rollover`
+        )
+        await new Promise((resolve) => setTimeout(resolve, delaySeconds * 1000))
+      }
 
       if (clientObj.connectionParams != null) {
         clientObj.connectionParams.port = 16993
@@ -1315,20 +1521,21 @@ export class Activation {
       // Post-CCM: the device presents the cert RPS just generated and uploaded. Pin
       // against issuedCertPEM (self-signed case). If the cert was signed by an MPS root
       // CA, mpsRootCertPEM holds that CA and wins.
-      const hasIssuedCert = clientObj.tls?.issuedCertPEM != null && clientObj.tls.issuedCertPEM !== ''
-      const caCert: string | undefined = clientObj.tls?.mpsRootCertPEM ?? clientObj.tls?.issuedCertPEM
+      const { hasManagedIdentity, hasRetainedIdentity, caCert } = getTlsTrustMaterial(clientObj.tls)
       const hasTrustAnchor = caCert != null && caCert !== ''
-      const inPostCcmTransitionSelfSignedPhase = clientObj.activationStatus === true && !hasIssuedCert && hasTrustAnchor
+      const inPostCcmTransitionSelfSignedPhase =
+        clientObj.activationStatus === true && !hasManagedIdentity && hasTrustAnchor
+      // Retained identities must authenticate the new handshake before reuse continues.
+      const rejectUnauthorized = hasRetainedIdentity || Environment.Config.amt_post_tls_reject === true
 
       clientObj.tlsTunnelManager = new TLSTunnelManager(
         clientObj.ClientSocket,
         input.clientId,
-        Environment.Config.amt_post_tls_reject === true,
+        rejectUnauthorized,
         Environment.Config.amt_legacy_tls_compatibility === true,
         caCert,
         {
-          allowPostCcmTransitionSelfSigned:
-            inPostCcmTransitionSelfSignedPhase && Environment.Config.amt_post_tls_reject === true
+          allowPostCcmTransitionSelfSigned: inPostCcmTransitionSelfSignedPhase && rejectUnauthorized
         }
       )
       clientObj.tlsTunnelSessionId = clientObj.tlsTunnelManager.getSessionId()
@@ -1383,8 +1590,10 @@ export class Activation {
       saveDeviceInfoToMPS: fromPromise(this.saveDeviceInfoToMPS.bind(this)),
       changeAMTPassword: fromPromise(this.changeAMTPassword.bind(this)),
       invokeUnprovision: fromPromise(this.invokeUnprovision),
-      checkAmtTlsState: fromPromise(this.checkAmtTlsState.bind(this)),
+      checkAmtTlsState: fromPromise<TlsProbeResult, ActivationContext>(this.checkAmtTlsState.bind(this)),
       validateDeviceTlsCert: fromPromise(this.validateDeviceTlsCert.bind(this)),
+      validateActivatedTlsIdentity: fromPromise(this.validateActivatedTlsIdentity),
+      verifyReusableTlsIdentity: fromPromise(this.verifyReusableTlsIdentity),
       fetchMPSRootKey: fromPromise(this.fetchMPSRootKey.bind(this)),
       saveTlsTunnelCerts: fromPromise(this.saveTlsTunnelCerts.bind(this)),
       signalPortSwitch: fromPromise(this.signalPortSwitch.bind(this)),
@@ -1549,6 +1758,8 @@ export class Activation {
       tlsACMComplete: input.tlsACMComplete,
       tlsTunnelCCMComplete: input.tlsTunnelCCMComplete,
       tlsNeedsProvisioning: false,
+      tlsProbeSnapshot: undefined,
+      tlsReuse: undefined,
       generalSettings: input.generalSettings,
       targetAfterError: input.targetAfterError,
       httpHandler: new HttpHandler(),
@@ -1565,21 +1776,25 @@ export class Activation {
       UNPROVISIONED: {
         on: {
           ACTIVATION: {
-            actions: assign({
-              clientId: ({ event }) => event.clientId,
-              isActivated: () => false,
-              tenantId: ({ event }) => event.tenantId,
-              friendlyName: ({ event }) => event.friendlyName
-            }),
+            actions: [
+              assign({
+                clientId: ({ event }) => event.clientId,
+                isActivated: () => false,
+                tenantId: ({ event }) => event.tenantId,
+                friendlyName: ({ event }) => event.friendlyName
+              })
+            ],
             target: 'GET_AMT_PROFILE'
           },
           ACTIVATED: {
-            actions: assign({
-              clientId: ({ event }) => event.clientId,
-              isActivated: () => true,
-              tenantId: ({ event }) => event.tenantId,
-              friendlyName: ({ event }) => event.friendlyName
-            }),
+            actions: [
+              assign({
+                clientId: ({ event }) => event.clientId,
+                isActivated: () => true,
+                tenantId: ({ event }) => event.tenantId,
+                friendlyName: ({ event }) => event.friendlyName
+              })
+            ],
             target: 'GET_AMT_PROFILE'
           }
         }
@@ -1809,6 +2024,15 @@ export class Activation {
           {
             guard: 'isDigestRealmInvalid',
             target: 'INVALID_DIGEST_REALM'
+          },
+          {
+            // TLS activation Phase 2: this run already activated CCM over TLS, installed the
+            // certificate and rebuilt the tunnel after the rollover. Peer verification on
+            // this issued-identity path follows amt_post_tls_reject. Continue the ACM upgrade
+            // without repeating completed TLS setup or the rollover wait.
+            guard: 'isTlsACMPhase',
+            actions: assign({ tlsNeedsProvisioning: () => false }),
+            target: 'IPS_HOST_BASED_SETUP_SERVICE'
           },
           {
             // Already activated: check TLS state first so reconfigure flows (ACM->ACM,
@@ -2303,11 +2527,15 @@ export class Activation {
             {
               // Trigger TLS provisioning when explicitly using tls-tunnel activation, or when
               // activated reconfigure flow detected TLS is missing/mismatched.
+              // The RPC-reported mode identifies whether this request started unprovisioned;
+              // isActivated may already be true after this run commits CCM setup.
               // tlsTunnelCCMComplete flips to true after the first INIT_TLS_TUNNEL_CONNECTION,
               // so this guard fires exactly once per activation and won't re-enter after the
               // post-upgrade SET_MEBX_PASSWORD pass through this state.
               guard: ({ context }) =>
-                (devices[context.clientId]?.tlsTunnelActivation === true && !context.tlsTunnelCCMComplete) ||
+                (devices[context.clientId]?.tlsTunnelActivation === true &&
+                  !context.tlsTunnelCCMComplete &&
+                  devices[context.clientId]?.ClientData.payload.currentMode === 0) ||
                 (context.isActivated === true &&
                   context.tlsNeedsProvisioning === true &&
                   !this.isLmsNonTlsAllowed(context.clientId) &&
@@ -2344,9 +2572,13 @@ export class Activation {
             {
               // TLS is configured on AMT — validate cert before switching to 16993
               guard: ({ event }) => {
-                const result = (event as any).output
+                const result = event.output
                 return result?.tlsEnabled === true && result?.hasCredentialContext === true
               },
+              actions: assign({
+                tlsProbeSnapshot: ({ event }) => event.output?.snapshot,
+                tlsReuse: () => undefined
+              }),
               target: 'VALIDATE_ACTIVATED_DEVICE_TLS_CERT'
             },
             {
@@ -2365,18 +2597,21 @@ export class Activation {
             {
               // Can't determine TLS state + upgrade pending — proceed with HBS over 16992
               guard: 'canUpgrade',
+              actions: assign({ tlsNeedsProvisioning: () => true }),
               target: 'IPS_HOST_BASED_SETUP_SERVICE'
             },
             {
               // Can't determine TLS state — proceed without TLS (best effort)
+              actions: assign({ tlsNeedsProvisioning: () => true }),
               target: 'CHANGE_AMT_PASSWORD'
             }
           ]
         }
       },
       VALIDATE_ACTIVATED_DEVICE_TLS_CERT: {
+        exit: assign({ tlsProbeSnapshot: () => undefined }),
         invoke: {
-          src: 'validateDeviceTlsCert',
+          src: 'validateActivatedTlsIdentity',
           input: ({ context }) => context,
           id: 'validate-activated-device-tls-cert',
           onDone: [
@@ -2393,9 +2628,16 @@ export class Activation {
               target: 'ROUTE_ACTIVATED_NON_TLS'
             },
             {
-              guard: ({ event }) => (event as any).output === true,
+              guard: ({ event }) => event.output?.valid === true,
               actions: [
-                assign({ tlsNeedsProvisioning: () => false }),
+                assign({
+                  tlsNeedsProvisioning: () => false,
+                  tlsReuse: ({ event }) =>
+                    event.output?.reuseApproved === true
+                      ? { fingerprint: event.output.fingerprint!, sessionId: event.output.sessionId! }
+                      : undefined,
+                  tlsProbeSnapshot: () => undefined
+                }),
                 ({ context }) => {
                   devices[context.clientId].status.TLSConfiguration = 'Already configured'
                 }
@@ -2422,6 +2664,10 @@ export class Activation {
         }
       },
       ROUTE_ACTIVATED_NON_TLS: {
+        entry: assign({
+          tlsProbeSnapshot: () => undefined,
+          tlsReuse: () => undefined
+        }),
         always: [
           {
             guard: 'canUpgrade',
@@ -2726,6 +2972,10 @@ export class Activation {
           }),
           onDone: [
             {
+              guard: ({ context }) => context.tlsReuse != null && context.isActivated === true,
+              target: 'VERIFY_REUSABLE_TLS_IDENTITY'
+            },
+            {
               // AMT 19+: add DMT self-signed cert post-provisioning (before CIRA).
               // Skipped for TLS-based activation — cert was already generated before the ACM upgrade.
               guard: 'needsPostProvisioningTLS',
@@ -2746,6 +2996,31 @@ export class Activation {
             }
           ]
         }
+      },
+      VERIFY_REUSABLE_TLS_IDENTITY: {
+        invoke: {
+          src: 'verifyReusableTlsIdentity',
+          input: ({ context }) => context,
+          onDone: [
+            {
+              guard: ({ event }) => event.output === true,
+              target: 'ROUTE_REUSED_TLS'
+            },
+            { target: 'FETCH_POST_PROVISIONING_ROOT_KEY' }
+          ],
+          onError: { target: 'FETCH_POST_PROVISIONING_ROOT_KEY' }
+        }
+      },
+      ROUTE_REUSED_TLS: {
+        entry: ({ context }) => {
+          devices[context.clientId].status.TLSConfiguration = 'Already configured'
+          recordComponentResult(context.clientId, 'TLS', { Result: 'Success', Details: 'Already configured' })
+          this.logger.info('Reusing verified existing TLS identity after configuration')
+        },
+        always: [
+          { guard: 'hasCIRAProfile', target: 'CIRA' },
+          { target: 'SYNC_ACTIVATION_TIME' }
+        ]
       },
       CIRA: {
         entry: [
