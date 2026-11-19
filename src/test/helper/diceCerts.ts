@@ -3,7 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-/** Intel_DICE_SubCA_CAID343_1_001.cer (tsci.intel.com): the production SubCA, issued by the release DCP root. */
+/**
+ * Intel_DICE_SubCA_CAID343_1_001.cer: the production SubCA, issued by the
+ * release DCP root.
+ *
+ * Source:
+ * https://tsci.intel.com/content/DICE/certs/Intel_DICE_SubCA_CAID343_1_001.cer
+ */
 export const PUBLISHED_DICE_SUBCA_PEM = `-----BEGIN CERTIFICATE-----
 MIIDNTCCArygAwIBAgIBATAKBggqhkjOPQQDAzCBljELMAkGA1UEBhMCVVMxCzAJ
 BgNVBAgMAk9SMRIwEAYDVQQHDAlCZWF2ZXJ0b24xJzAlBgNVBAoMHkRpZ2l0YWwg
@@ -28,6 +34,10 @@ JBKbBt0vlSE6
 /**
  * Top certificate of the chain an AMT 22 pre-production (debug) device presented: an
  * "Intel DICE SubCA CAID:343_1" issued by the DCP DICE debug root, not the release root.
+ *
+ * Source: captured from the TLS chain of an AMT 22 pre-production device. It is
+ * not the published production SubCA above. Its issuer is the debug root,
+ * DCP_DICE_Global_RootCA.cer (pre-production version).
  */
 export const DEBUG_DEVICE_TOP_PEM = `-----BEGIN CERTIFICATE-----
 MIIDNzCCArygAwIBAgIBATAKBggqhkjOPQQDAzCBljELMAkGA1UEBgwCVVMxCzAJ
