@@ -322,12 +322,15 @@ export class Activation {
         Environment.Config.amt_legacy_tls_compatibility === true
       )
 
+      clientObj.tlsTunnelSessionId = clientObj.tlsTunnelManager.getSessionId()
+
       // Connect (initiates TLS handshake)
       await clientObj.tlsTunnelManager.connect()
 
       // Set up data handler to process responses
+      const sessionId = clientObj.tlsTunnelSessionId
       clientObj.tlsTunnelManager.onData((data: Buffer) => {
-        processTLSTunnelResponse(input.clientId, data, input.httpHandler)
+        processTLSTunnelResponse(input.clientId, data, input.httpHandler, sessionId)
       })
 
       this.logger.info(`TLS tunnel established for device ${clientObj.uuid}`)
@@ -336,6 +339,7 @@ export class Activation {
       const errMsg = err instanceof globalThis.Error ? err.message : String(err)
       this.logger.error(`Failed to establish TLS tunnel for device ${clientObj.uuid}: ${errMsg}`)
       clientObj.tlsTunnelManager = undefined
+      clientObj.tlsTunnelSessionId = undefined
       throw err
     }
   }
@@ -1333,8 +1337,9 @@ export class Activation {
       await clientObj.tlsTunnelManager.connect()
 
       // Set up data handler to process responses
+      const sessionId = clientObj.tlsTunnelSessionId
       clientObj.tlsTunnelManager.onData((data: Buffer) => {
-        processTLSTunnelResponse(input.clientId, data, input.httpHandler)
+        processTLSTunnelResponse(input.clientId, data, input.httpHandler, sessionId)
       })
 
       // Flip to TLS mode so all subsequent WSMAN calls route through the tunnel

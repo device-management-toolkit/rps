@@ -320,6 +320,8 @@ export interface ClientMsg {
   message: string
   payload: any
   tenantId: string
+  tlsSessionId?: string
+  streamClosed?: boolean
 }
 
 // Host inventory reported by rpc-go on activation and syncdeviceinfo. Every field is optional:
