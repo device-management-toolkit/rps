@@ -2135,10 +2135,19 @@ export class Activation {
           input: ({ context }) => context,
           id: 'send-adminsetup',
           onDone: {
-            actions: assign({ message: ({ event }) => event.output }),
+            actions: [assign({ message: ({ event }) => event.output }), 'Reset Unauth Count'],
             target: 'CHECK_ADMIN_SETUP'
           },
           onError: [
+            {
+              // A rejected digest challenge can be retried before TLS ACM failure handling.
+              guard: ({ event }) => hasStatusCode(event.error) && event.error.statusCode === 401,
+              actions: assign({
+                message: ({ event }) => event.error,
+                targetAfterError: () => 'ADMIN_SETUP'
+              }),
+              target: 'ERROR'
+            },
             {
               guard: ({ context, event }) =>
                 event.error instanceof GATEWAY_TIMEOUT_ERROR &&
@@ -2214,11 +2223,20 @@ export class Activation {
           id: 'send-upgrade-to-admin',
           onDone: [
             {
-              actions: assign({ message: ({ event }) => event.output }),
+              actions: [assign({ message: ({ event }) => event.output }), 'Reset Unauth Count'],
               target: 'CHECK_UPGRADE'
             }
           ],
           onError: [
+            {
+              // A rejected digest challenge can be retried before TLS ACM failure handling.
+              guard: ({ event }) => hasStatusCode(event.error) && event.error.statusCode === 401,
+              actions: assign({
+                message: ({ event }) => event.error,
+                targetAfterError: () => 'UPGRADE_TO_ADMIN_SETUP'
+              }),
+              target: 'ERROR'
+            },
             {
               guard: ({ context, event }) =>
                 event.error instanceof GATEWAY_TIMEOUT_ERROR &&
@@ -2481,9 +2499,7 @@ export class Activation {
           onDone: [
             {
               guard: 'isTlsCCMComplete',
-              actions: assign({
-                tlsACMComplete: () => true
-              }),
+              actions: [assign({ tlsACMComplete: () => true }), 'Reset Unauth Count'],
               target: 'SAVE_DEVICE_TO_SECRET_PROVIDER'
             },
             {
@@ -2493,8 +2509,7 @@ export class Activation {
           ],
           onError: [
             {
-              // A 401 after the ACM commit is a stale digest challenge: re-authenticate and retry
-              // this step before treating the TLS ACM phase as failed.
+              // Recover a 401 through the bounded digest retry flow before TLS ACM failure handling.
               guard: ({ event }) => hasStatusCode(event.error) && event.error.statusCode === 401,
               actions: assign({
                 message: ({ event }) => event.error,
@@ -2899,10 +2914,19 @@ export class Activation {
           input: ({ context }) => context,
           id: 'send-to-change-amt-password',
           onDone: {
-            actions: assign({ message: ({ event }) => event.output }),
+            actions: [assign({ message: ({ event }) => event.output }), 'Reset Unauth Count'],
             target: 'UPDATE_CREDENTIALS'
           },
           onError: [
+            {
+              // A rejected digest challenge can be retried before TLS ACM failure handling.
+              guard: ({ event }) => hasStatusCode(event.error) && event.error.statusCode === 401,
+              actions: assign({
+                message: ({ event }) => event.error,
+                targetAfterError: () => 'CHANGE_AMT_PASSWORD'
+              }),
+              target: 'ERROR'
+            },
             {
               guard: 'isTlsACMPhase',
               actions: assign({
@@ -3211,10 +3235,21 @@ export class Activation {
       NEXT_STATE: {
         always: [
           {
-            // A recovered digest challenge on the MEBx step retries it; the TLS ACM phase
-            // deactivates only when the error machine gives up (ONFAILED) or another step fails.
+            // Retry recovered authentication challenges before TLS ACM failure handling.
             guard: 'isMebxPassword',
             target: 'SET_MEBX_PASSWORD'
+          },
+          {
+            guard: ({ context }) => context.targetAfterError === 'ADMIN_SETUP',
+            target: 'ADMIN_SETUP'
+          },
+          {
+            guard: ({ context }) => context.targetAfterError === 'UPGRADE_TO_ADMIN_SETUP',
+            target: 'UPGRADE_TO_ADMIN_SETUP'
+          },
+          {
+            guard: ({ context }) => context.targetAfterError === 'CHANGE_AMT_PASSWORD',
+            target: 'CHANGE_AMT_PASSWORD'
           },
           {
             guard: 'shouldDeactivate',
