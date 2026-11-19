@@ -6,7 +6,7 @@
 import type WebSocket from 'ws'
 
 import type { ILogger } from './interfaces/ILogger.js'
-import { ClientMethods, type ClientMsg } from './models/RCS.Config.js'
+import { ClientMethods, type ClientMsg, type ClientObject } from './models/RCS.Config.js'
 import { RPSError } from './utils/RPSError.js'
 import type { IValidator } from './interfaces/IValidator.js'
 import { HttpHandler } from './HttpHandler.js'
@@ -244,6 +244,11 @@ export class DataProcessor {
   async handleTLSData(clientMsg: ClientMsg, clientId: string): Promise<void> {
     const clientObj = devices[clientId]
 
+    if (clientMsg.tlsSessionId != null && clientMsg.tlsSessionId !== clientObj?.tlsTunnelSessionId) {
+      this.logger.debug('Ignoring TLS data from an obsolete tunnel session')
+      return
+    }
+
     if (clientObj?.tlsTunnelNeedsReset === true) {
       return
     }
@@ -265,23 +270,40 @@ export class DataProcessor {
 
   async handleConnectionReset(clientMsg: ClientMsg, clientId: string): Promise<void> {
     const clientObj = devices[clientId]
-    this.logger.warn(`CONNECTION RESET from rpc-go`)
 
     if (clientObj == null) {
       return
     }
 
-    if (clientObj.tlsTunnelManager != null) {
-      clientObj.tlsTunnelManager.close()
-      clientObj.tlsTunnelManager = undefined
-      clientObj.tlsTunnelSessionId = undefined
+    if (clientMsg.tlsSessionId != null && clientMsg.tlsSessionId !== clientObj.tlsTunnelSessionId) {
+      this.logger.debug('Ignoring closure from an obsolete tunnel session')
+      return
     }
+    if (clientMsg.streamClosed === true && clientObj.tlsTunnelManager != null) {
+      const manager = clientObj.tlsTunnelManager
+      // Draining the final response may start another request before the EOF callback.
+      clientObj.tlsTunnelNeedsReset = true
+      manager.endInput(() => {
+        // A retry may already have created another session while the old input drained.
+        if (clientObj.tlsTunnelManager !== manager) return
+        this.resetTunnel(clientObj, clientObj.pendingPromise != null)
+      })
+      return
+    }
+    this.logger.warn(`CONNECTION RESET from rpc-go`)
 
+    this.resetTunnel(clientObj, true)
+  }
+
+  private resetTunnel(clientObj: ClientObject, interrupted: boolean): void {
+    clientObj.tlsTunnelManager?.close()
+    clientObj.tlsTunnelManager = undefined
+    clientObj.tlsTunnelSessionId = undefined
     clientObj.tlsResponseBuffer = undefined
     clientObj.tlsTunnelNeedsReset = true
-    clientObj.amtReconfiguring = true // Signal that AMT may be reconfiguring - need delay before reconnect
-
-    if (clientObj.pendingPromise != null && clientObj.reject != null) {
+    // Preserve an existing reconfiguration signal, including a prior gateway timeout.
+    clientObj.amtReconfiguring ||= interrupted
+    if (interrupted && clientObj.pendingPromise != null && clientObj.reject != null) {
       clientObj.reject(new CONNECTION_RESET_ERROR())
     }
   }
