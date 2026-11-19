@@ -175,6 +175,9 @@ const invokeWsmanCallViaTLSTunnel = async <T>(context: any, message: string): Pr
     clientObj.tlsTunnelSessionId = clientObj.tlsTunnelManager.getSessionId()
     clientObj.tlsTunnelNeedsReset = false
 
+    invokeWsmanLogger.debug(
+      `TLS tunnel connecting: port=${clientObj.connectionParams?.port ?? '?'}, session=${clientObj.tlsTunnelSessionId}, verify=${rejectUnauthorized}`
+    )
     try {
       await clientObj.tlsTunnelManager.connect()
       const sessionId = clientObj.tlsTunnelSessionId
