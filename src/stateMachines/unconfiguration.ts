@@ -1275,6 +1275,7 @@ export class Unconfiguration {
 // Recovery only removes confirmed abandoned provisioning objects. Its machine
 // is separate from broad unconfiguration so it never disables active features.
 interface CleanupContext extends CommonContext {
+  message: any
   tlsExpected?: boolean
   amt: AMT.Messages
   secretsManager: ISecretManagerService
@@ -1287,6 +1288,7 @@ interface CleanupContext extends CommonContext {
   lastDeleted?: string
   trustedChain?: string[]
   persistedCertificate?: string
+  retryState?: 'ENUMERATE' | 'PULL' | 'DELETE_OBJECT'
   errorMessage: string
 }
 
@@ -1357,13 +1359,26 @@ function cleanupIdentities() {
 }
 
 const cleanupInput = ({ context }: { context: CleanupContext }): CleanupContext => context
-const cleanupInvoke = (src: 'load' | 'enumerate' | 'pull' | 'select' | 'deleteObject' | 'retire') => ({
+const cleanupInvoke = <T extends 'load' | 'enumerate' | 'pull' | 'select' | 'deleteObject' | 'retire'>(
+  src: T,
+  retryState?: CleanupContext['retryState']
+) => ({
   src,
   input: cleanupInput,
-  onError: 'FAILED' as const
+  onError: retryState
+    ? [
+        {
+          guard: 'isUnauthorized' as const,
+          actions: { type: 'rememberAuthRetry' as const, params: { retryState } },
+          target: 'AUTHENTICATE'
+        },
+        { target: 'FAILED' }
+      ]
+    : ('FAILED' as const)
 })
 
 export class TLSCleanup {
+  private error = new Error()
   // Remote access mutual authentication also consumes leaf certificates. The
   // dependency's generic Base provides Enumerate/Pull for this association.
   remoteCredentials = (): Base => {
@@ -1529,7 +1544,18 @@ export class TLSCleanup {
       pull: fromPromise(this.pull),
       select: fromPromise(this.select),
       deleteObject: fromPromise(this.deleteObject),
-      retire: fromPromise(this.retire)
+      retire: fromPromise(this.retire),
+      errorMachine: this.error.machine
+    },
+    guards: {
+      isUnauthorized: ({ event }) => event.error?.statusCode === 401
+    },
+    actions: {
+      resetAuthCount: this.error.resetAuthCount,
+      rememberAuthRetry: assign(({ event }, params: { retryState: CleanupContext['retryState'] }) => ({
+        message: event.error,
+        retryState: params.retryState
+      }))
     }
   }).createMachine({
     id: 'tls-cleanup',
@@ -1544,6 +1570,7 @@ export class TLSCleanup {
         this.remoteCredentials()
       ], resourceIndex: 0, inventory: {}, message: null, xmlMessage: '', errorMessage: '' }),
     initial: 'LOAD',
+    entry: 'resetAuthCount',
     output: ({ context }) => ({ errorMessage: context.errorMessage }),
     states: {
       LOAD: {
@@ -1562,19 +1589,22 @@ export class TLSCleanup {
       RESET_INVENTORY: { entry: assign({ inventory: {}, resourceIndex: 0 }), always: 'ENUMERATE' },
       ENUMERATE: {
         invoke: {
-          ...cleanupInvoke('enumerate'),
+          ...cleanupInvoke('enumerate', 'ENUMERATE'),
           onDone: {
-            actions: assign({
-              enumerationContext: ({ event }) => event.output?.Envelope?.Body?.EnumerateResponse?.EnumerationContext
-            }),
+            actions: [
+              'resetAuthCount',
+              assign({
+                enumerationContext: ({ event }) => event.output?.Envelope?.Body?.EnumerateResponse?.EnumerationContext
+              })
+            ],
             target: 'PULL'
           }
         }
       },
       PULL: {
         invoke: {
-          ...cleanupInvoke('pull'),
-          onDone: { actions: assign({ message: ({ event }) => event.output }), target: 'READ_PAGE' }
+          ...cleanupInvoke('pull', 'PULL'),
+          onDone: { actions: ['resetAuthCount', assign({ message: ({ event }) => event.output })], target: 'READ_PAGE' }
         }
       },
       READ_PAGE: {
@@ -1617,11 +1647,14 @@ export class TLSCleanup {
       },
       DELETE_OBJECT: {
         invoke: {
-          ...cleanupInvoke('deleteObject'),
+          ...cleanupInvoke('deleteObject', 'DELETE_OBJECT'),
           onDone: {
-            actions: assign({
-              lastDeleted: ({ context }) => (context.candidate!.certificate ?? context.candidate!.key).InstanceID
-            }),
+            actions: [
+              'resetAuthCount',
+              assign({
+                lastDeleted: ({ context }) => (context.candidate!.certificate ?? context.candidate!.key).InstanceID
+              })
+            ],
             target: 'RESET_INVENTORY'
           }
         }
@@ -1633,6 +1666,26 @@ export class TLSCleanup {
             { guard: ({ context }) => !!context.candidate, target: 'LOAD' },
             'SUCCESS'
           ]
+        }
+      },
+      AUTHENTICATE: {
+        entry: sendTo('cleanup-authentication', { type: 'PARSE' }),
+        invoke: {
+          src: 'errorMachine',
+          id: 'cleanup-authentication',
+          input: ({ context }) => ({ message: context.message, clientId: context.clientId }),
+          onDone: [
+            { guard: ({ context }) => context.retryState === 'ENUMERATE', target: 'ENUMERATE' },
+            { guard: ({ context }) => context.retryState === 'PULL', target: 'PULL' },
+            { target: 'DELETE_OBJECT' }
+          ],
+          onError: 'FAILED'
+        },
+        on: {
+          ONFAILED: {
+            actions: assign({ errorMessage: ({ event }) => event.output }),
+            target: 'FAILED'
+          }
         }
       },
       SUCCESS: { type: 'final' },

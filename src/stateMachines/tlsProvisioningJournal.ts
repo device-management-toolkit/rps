@@ -10,7 +10,7 @@ import { ensurePemCertificate, parseX509Certificate } from '../utils/certHelpers
 export const certificateIdentity = (pem: string): string => parseX509Certificate(pem).fingerprint256
 
 export async function readJournal(secrets: ISecretManagerService, uuid: string): Promise<TLSProvisioningJournal> {
-  const stored = await secrets.getSecretAtPath(`tls-provisioning/${uuid}`)
+  const stored = await secrets.getSecretAtPath(`tls-provisioning/${uuid.toLowerCase()}`)
   if (stored == null) return { certificates: [] }
   if (!('certificates' in stored) || !Array.isArray(stored.certificates)) {
     throw new Error('Invalid TLS provisioning journal')
@@ -30,7 +30,7 @@ export async function writeJournal(
   if (!Number.isSafeInteger(cas) || cas < 0) throw new Error('Invalid TLS journal version')
   if (!secrets.writeSecretWithObjectIfVersion) throw new Error('Conditional TLS ownership writes are unavailable')
   const write = async (): Promise<any> =>
-    await secrets.writeSecretWithObjectIfVersion!(`tls-provisioning/${uuid}`, { certificates }, cas)
+    await secrets.writeSecretWithObjectIfVersion!(`tls-provisioning/${uuid.toLowerCase()}`, { certificates }, cas)
   const result = handler?.trackProvisioningWrite ? await handler.trackProvisioningWrite(write) : await write()
   if (result == null) throw new Error('Failed to persist TLS provisioning journal')
 }

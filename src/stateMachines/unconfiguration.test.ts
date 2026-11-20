@@ -1306,6 +1306,148 @@ describe('Interrupted TLS provisioning reconciliation', () => {
   const deletes = (): string[] => operations.filter((op) => op.startsWith('Delete'))
   const ids = (name: string): string[] => inventory[name].map((item) => item.InstanceID)
 
+  it.each([true, false])(
+    'recovers ownership across UUID casing changes (uppercase interruption: %s)',
+    async (uppercase) => {
+      const upper = 'AABBCCDD-1234-5678-ABCD-0123456789AB'
+      const lower = upper.toLowerCase()
+      await recordCertificate(secrets, uppercase ? upper : lower, abandoned)
+      const recoveryUuid = uppercase ? lower : upper
+      devices[uuid].uuid = recoveryUuid
+      stored[`devices/${recoveryUuid}`] = { TLS_ISSUED_CERTIFICATE: replacement }
+      expect(await recover()).toEqual({ errorMessage: '' })
+      expect(ids('AMT_PublicKeyCertificate')).not.toContain('abandoned')
+      expect(ids('AMT_PublicPrivateKeyPair')).not.toContain('old-key')
+      expect(stored[`tls-provisioning/${lower}`].certificates).toEqual([])
+      expect(stored[`tls-provisioning/${upper}`]).toBeUndefined()
+    }
+  )
+
+  const challenge = {
+    statusCode: 401,
+    headers: [
+      { name: 'Www-Authenticate', value: 'Digest realm="AMT", nonce="refreshed", stale="true", qop="auth"' },
+      { name: 'Connection', value: 'close' }
+    ]
+  }
+  const matchesOperation = (xml: string, operation: string): boolean => {
+    const [
+      action,
+      resource,
+      next
+    ] = operation.split(':')
+    return (
+      xml.includes(`/${action}</a:Action>`) &&
+      xml.includes(`/${resource}</w:ResourceURI>`) &&
+      (!next || xml.includes(`${resource}:next`))
+    )
+  }
+  const requestWithoutMessageId = (xml: string): string => xml.replace(/<a:MessageID>[^<]*<\/a:MessageID>/, '')
+
+  it.each([
+    'Enumerate:AMT_PublicKeyCertificate',
+    'Pull:AMT_PublicKeyCertificate',
+    'Pull:AMT_PublicKeyCertificate:next',
+    'Delete:AMT_PublicKeyCertificate',
+    'Delete:AMT_PublicPrivateKeyPair'
+  ])('refreshes digest authentication and resumes %s', async (operation) => {
+    await recordCertificate(secrets, uuid, abandoned)
+    pages = true
+    const close = vi.fn()
+    Object.assign(devices[uuid], {
+      connectionParams: { digestChallenge: { nonce: 'expired' } },
+      tlsEnforced: true,
+      tlsTunnelManager: { close }
+    })
+    const perform = invokeWsmanCallSpy.getMockImplementation()!
+    const attempts: { xml: string; nonce: string }[] = []
+    invokeWsmanCallSpy.mockImplementation(async (input) => {
+      if (matchesOperation(input.xmlMessage, operation)) {
+        attempts.push({
+          xml: requestWithoutMessageId(input.xmlMessage),
+          nonce: devices[uuid].connectionParams!.digestChallenge!.nonce
+        })
+        if (attempts.length === 1) throw challenge
+      }
+      return await perform(input)
+    })
+    expect(await recover()).toEqual({ errorMessage: '' })
+    expect(attempts.length).toBeGreaterThanOrEqual(2)
+    expect(attempts[1]).toEqual({ xml: attempts[0].xml, nonce: 'refreshed' })
+    expect(close).toHaveBeenCalledOnce()
+    expect(devices[uuid].tlsTunnelNeedsReset).toBe(true)
+    expect(ids('AMT_PublicKeyCertificate')).toEqual([
+      'root',
+      'active',
+      'unknown'
+    ])
+    expect(ids('AMT_PublicPrivateKeyPair')).toEqual(['active-key', 'unknown-key'])
+    expect(stored[`tls-provisioning/${uuid}`].certificates).toEqual([])
+  })
+
+  it.each([
+    'Enumerate:AMT_PublicKeyCertificate',
+    'Pull:AMT_PublicKeyCertificate',
+    'Delete:AMT_PublicKeyCertificate',
+    'Delete:AMT_PublicPrivateKeyPair'
+  ])('bounds repeated 401 challenges during %s and preserves pending ownership', async (operation) => {
+    await recordCertificate(secrets, uuid, abandoned)
+    devices[uuid].connectionParams = {} as any
+    const perform = invokeWsmanCallSpy.getMockImplementation()!
+    let attempts = 0
+    invokeWsmanCallSpy.mockImplementation(async (input) => {
+      if (matchesOperation(input.xmlMessage, operation)) {
+        attempts++
+        throw challenge
+      }
+      return await perform(input)
+    })
+    expect((await recover()).errorMessage).toContain('Unable to authenticate with AMT')
+    expect(attempts).toBe(3)
+    expect(stored[`tls-provisioning/${uuid}`].certificates).toEqual([abandoned])
+    expect(ids('AMT_PublicPrivateKeyPair')).toContain('old-key')
+    expect(ids('AMT_PublicKeyCertificate')).toEqual(
+      operation.endsWith('PublicPrivateKeyPair') ? [
+            'root',
+            'active',
+            'unknown'
+          ] : [
+            'root',
+            'abandoned',
+            'active',
+            'unknown'
+          ]
+    )
+    invokeWsmanCallSpy.mockImplementation(perform)
+    expect(await recover()).toEqual({ errorMessage: '' })
+    expect(stored[`tls-provisioning/${uuid}`].certificates).toEqual([])
+  })
+
+  it('resets the authentication retry budget after successful operations', async () => {
+    await recordCertificate(secrets, uuid, abandoned)
+    devices[uuid].connectionParams = {} as any
+    const perform = invokeWsmanCallSpy.getMockImplementation()!
+    const challenged = new Set<string>()
+    invokeWsmanCallSpy.mockImplementation(async (input) => {
+      const request = requestWithoutMessageId(input.xmlMessage)
+      if (!challenged.has(request)) {
+        challenged.add(request)
+        throw challenge
+      }
+      return await perform(input)
+    })
+    expect(await recover()).toEqual({ errorMessage: '' })
+    expect(challenged.size).toBeGreaterThan(3)
+    expect(stored[`tls-provisioning/${uuid}`].certificates).toEqual([])
+  })
+
+  it('does not treat a Vault 401 as an AMT digest challenge', async () => {
+    secrets.getSecretAtPath.mockRejectedValue(challenge)
+    expect((await recover()).errorMessage).not.toBe('')
+    expect(operations).toEqual([])
+    expect(devices[uuid].unauthCount).toBe(0)
+  })
+
   it('records an interrupted TLS installation, then recovers and removes only its leaf and key', async () => {
     let issued = abandoned
     inventory.AMT_PublicKeyCertificate = [certObject(root, 'root', true), certObject(unknown, 'unknown')]
