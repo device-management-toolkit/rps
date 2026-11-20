@@ -2900,6 +2900,10 @@ export class Activation {
         invoke: {
           src: 'tlsCleanup',
           input: ({ context }) => ({
+            tlsExpected:
+              devices[context.clientId].tlsEnforced === true ||
+              devices[context.clientId].tlsTunnelActivation === true ||
+              (context.profile?.tlsMode ?? 0) > 0,
             clientId: context.clientId,
             amt: context.amt,
             httpHandler: context.httpHandler,

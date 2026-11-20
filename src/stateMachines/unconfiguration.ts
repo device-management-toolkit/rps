@@ -13,7 +13,7 @@ import {
 } from '../interfaces/ISecretManagerService.js'
 import { certificateIdentity, readJournal, writeJournal } from './tlsProvisioningJournal.js'
 import { parseX509Certificate as x509 } from '../utils/certHelpers.js'
-import { CIM, AMT, type IPS } from '@device-management-toolkit/wsman-messages'
+import { CIM, AMT, IPS } from '@device-management-toolkit/wsman-messages'
 import { assign, fromPromise, sendTo, setup } from 'xstate'
 import { CertManager } from '../certManager.js'
 import { Configurator } from '../Configurator.js'
@@ -1275,6 +1275,7 @@ export class Unconfiguration {
 // Recovery only removes confirmed abandoned provisioning objects. Its machine
 // is separate from broad unconfiguration so it never disables active features.
 interface CleanupContext extends CommonContext {
+  tlsExpected?: boolean
   amt: AMT.Messages
   secretsManager: ISecretManagerService
   journal: TLSProvisioningJournal
@@ -1356,7 +1357,7 @@ function cleanupIdentities() {
 }
 
 const cleanupInput = ({ context }: { context: CleanupContext }): CleanupContext => context
-const cleanupInvoke = (src: 'load' | 'enumerate' | 'pull' | 'deleteObject' | 'retire') => ({
+const cleanupInvoke = (src: 'load' | 'enumerate' | 'pull' | 'select' | 'deleteObject' | 'retire') => ({
   src,
   input: cleanupInput,
   onError: 'FAILED' as const
@@ -1374,7 +1375,11 @@ export class TLSCleanup {
   load = async ({ input }: { input: CleanupContext }): Promise<any> => {
     const uuid = devices[input.clientId].uuid
     if (!uuid) throw new globalThis.Error('Missing device UUID for TLS cleanup')
-    if (devices[input.clientId].cleanupAllowed === false || !input.secretsManager.writeSecretWithObjectIfVersion)
+    if (
+      input.tlsExpected === false ||
+      devices[input.clientId].cleanupAllowed === false ||
+      !input.secretsManager.writeSecretWithObjectIfVersion
+    )
       return { journal: { certificates: [] } }
     const journal = await readJournal(input.secretsManager, uuid)
     // No durable ownership evidence: leave all device objects alone.
@@ -1516,7 +1521,7 @@ export class TLSCleanup {
   machine = setup({
     types: {} as {
       context: CleanupContext
-      input: Pick<CleanupContext, 'clientId' | 'amt' | 'httpHandler' | 'secretsManager'>
+      input: Pick<CleanupContext, 'clientId' | 'amt' | 'httpHandler' | 'secretsManager' | 'tlsExpected'>
     },
     actors: {
       load: fromPromise(this.load),
@@ -1534,6 +1539,7 @@ export class TLSCleanup {
         input.amt.TLSCredentialContext,
         input.amt.TLSSettingData,
         input.amt.IEEE8021xCredentialContext,
+        new IPS.Messages().IEEE8021xCredentialContext,
         new CIM.Messages().CredentialContext,
         this.remoteCredentials()
       ], resourceIndex: 0, inventory: {}, message: null, xmlMessage: '', errorMessage: '' }),
@@ -1596,10 +1602,8 @@ export class TLSCleanup {
       },
       SELECT: {
         invoke: {
-          src: 'select',
-          input: cleanupInput,
-          onDone: { actions: assign({ candidate: ({ event }) => event.output }), target: 'CHECK_CANDIDATE' },
-          onError: 'FAILED'
+          ...cleanupInvoke('select'),
+          onDone: { actions: assign({ candidate: ({ event }) => event.output }), target: 'CHECK_CANDIDATE' }
         }
       },
       CHECK_CANDIDATE: {

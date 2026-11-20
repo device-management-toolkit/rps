@@ -3301,6 +3301,52 @@ describe('Activation State Machine', () => {
     })
   })
 
+  it.each([
+    [
+      false,
+      false,
+      0,
+      false
+    ],
+    [
+      true,
+      false,
+      0,
+      true
+    ],
+    [
+      false,
+      true,
+      0,
+      true
+    ],
+    [
+      false,
+      false,
+      1,
+      true
+    ]
+  ])('passes TLS intent to recovery (enforced=%s, tunnel=%s, mode=%s)', async (enforced, tunnel, mode, expected) => {
+    const { createMachine, waitFor } = await import('xstate')
+    devices[clientId].tlsEnforced = enforced as boolean
+    devices[clientId].tlsTunnelActivation = tunnel as boolean
+    const cleanup = vi.fn(async () => ({ errorMessage: '' }))
+    const machine = activation.machine.provide({ actors: { tlsCleanup: fromPromise(cleanup) } })
+    const segment = createMachine(
+      {
+        ...machine.config,
+        initial: 'RECONCILE_TLS_OBJECTS',
+        context: { ...context, profile: { ...context.profile, tlsMode: mode } },
+        states: { ...machine.config.states, PROVISIONED: { type: 'final' } }
+      },
+      machine.implementations
+    )
+    const actor = createActor(segment)
+    actor.start()
+    await waitFor(actor, (snapshot) => snapshot.status === 'done')
+    expect(cleanup.mock.calls[0][0].input.tlsExpected).toBe(expected)
+  })
+
   it('reports cleanup failure without deactivating the usable identity', async () => {
     const { createMachine, waitFor } = await import('xstate')
     const machine = activation.machine.provide({

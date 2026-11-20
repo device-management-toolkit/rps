@@ -1246,6 +1246,7 @@ describe('Interrupted TLS provisioning reconciliation', () => {
       AMT_TLSCredentialContext: [association('active')],
       AMT_TLSSettingData: [{ Enabled: true }],
       AMT_8021xCredentialContext: [],
+      IPS_8021xCredentialContext: [],
       CIM_CredentialContext: [],
       AMT_RemoteAccessCredentialContext: []
     }
@@ -1390,6 +1391,7 @@ describe('Interrupted TLS provisioning reconciliation', () => {
   it.each([
     'AMT_TLSCredentialContext',
     'AMT_8021xCredentialContext',
+    'IPS_8021xCredentialContext',
     'CIM_CredentialContext',
     'AMT_RemoteAccessCredentialContext'
   ])('preserves leaves used by %s', async (resource) => {
@@ -1644,6 +1646,16 @@ describe('Interrupted TLS provisioning reconciliation', () => {
     await recordCertificate(secrets, uuid, abandoned)
     expect((await recover()).errorMessage).toContain('cannot be verified')
     expect(deletes()).toEqual([])
+    expect(stored[`tls-provisioning/${uuid}`].certificates).toEqual([abandoned])
+  })
+
+  it('preserves the journal after deactivation followed by intentional non-TLS activation', async () => {
+    await recordCertificate(secrets, uuid, abandoned)
+    delete stored[`devices/${uuid}`]
+    const actor = createActor(new TLSCleanup().machine, { input: { ...input(), tlsExpected: false } })
+    actor.start()
+    expect(await toPromise(actor)).toEqual({ errorMessage: '' })
+    expect(operations).toEqual([])
     expect(stored[`tls-provisioning/${uuid}`].certificates).toEqual([abandoned])
   })
 
