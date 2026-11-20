@@ -111,32 +111,53 @@ export class DataProcessor {
     const device = devices[clientId]
     if (device.stopProvisioning) throw new RPSError('An activation is already running on this connection')
     let release: (() => void) | undefined
-    const stop = (): void => {
-      if (device.provisioningStopped) {
-        release?.()
-        return
+    const controller = new AbortController()
+    const handler = new HttpHandler()
+    handler.provisioning = { signal: controller.signal, pendingWrites: new Set() }
+    const releaseWhenDrained = (): void => {
+      const finish = (): void => {
+        const unlock = release
+        release = undefined
+        unlock?.()
+        if (device.stopProvisioning === stop) device.stopProvisioning = undefined
       }
-      device.provisioningStopped = true
-      activation.service.stop()
-      device.reject?.(new Error('Provisioning session ended'))
-      device.tlsTunnelManager?.close()
-      release?.()
-      device.stopProvisioning = undefined
+      const pending = [...handler.provisioning!.pendingWrites]
+      if (pending.length) void Promise.allSettled(pending).then(finish)
+      else finish()
+    }
+    const stop = (): void => {
+      if (!controller.signal.aborted) {
+        controller.abort()
+        device.provisioningStopped = true
+        activation.service.stop()
+        device.reject?.(new Error('Provisioning session ended'))
+        device.tlsTunnelManager?.close()
+        device.tlsTunnelManager = undefined
+        device.tlsTunnelSessionId = undefined
+        device.tlsResponseBuffer = undefined
+        device.tlsTunnelNeedsReset = true
+      }
+      releaseWhenDrained()
+    }
+    const lockLost = (): void => {
+      stop()
+      // Actor.stop() bypasses final-state responses; close RPC so it cannot wait forever.
+      device.ClientSocket?.close(1011, 'Provisioning lock lost')
     }
     device.stopProvisioning = stop
     device.provisioningStopped = false
     try {
       await this.validator.validateActivationMsg(clientMsg, clientId)
-      if (devices[clientId] !== device || device.provisioningStopped) {
+      if (devices[clientId] !== device || controller.signal.aborted) {
         throw new RPSError('Provisioning connection ended during validation')
       }
       const db = await new DbCreatorFactory().getDb()
       if (db.acquireProvisioningLock) {
-        const lock = await db.acquireProvisioningLock(clientMsg.payload.uuid, stop)
+        const lock = await db.acquireProvisioningLock(clientMsg.payload.uuid, lockLost)
         if (!lock) throw new RPSError('Another activation is running for this device UUID')
         release = lock
       }
-      if (device.provisioningStopped) throw new RPSError('Provisioning connection ended while acquiring its lock')
+      if (controller.signal.aborted) throw new RPSError('Provisioning connection ended while acquiring its lock')
       activation.service.subscribe({ complete: stop, error: stop })
       this.setConnectionParams(clientId)
       activation.service.start()
@@ -144,12 +165,15 @@ export class DataProcessor {
         type: device.activationStatus ? 'ACTIVATED' : 'ACTIVATION',
         clientId,
         tenantId: clientMsg.tenantId,
-        friendlyName: clientMsg.payload.friendlyName
+        friendlyName: clientMsg.payload.friendlyName,
+        httpHandler: handler
       }
       activation.service.send(event)
     } catch (error) {
       stop()
-      throw error
+      if (error instanceof RPSError) throw error
+      this.logger.error(`Failed to start provisioning: ${String(error)}`)
+      throw new RPSError('Failed to acquire provisioning session; retry activation')
     }
   }
 

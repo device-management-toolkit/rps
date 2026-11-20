@@ -137,6 +137,7 @@ export interface ActivationEvent {
   output?: any
   tenantId: string
   friendlyName: string
+  httpHandler?: HttpHandler
 }
 
 export class Activation {
@@ -383,6 +384,7 @@ export class Activation {
 
       // Connect (initiates TLS handshake)
       await clientObj.tlsTunnelManager.connect()
+      input.httpHandler.assertProvisioningActive()
 
       // Set up data handler to process responses
       const sessionId = clientObj.tlsTunnelSessionId
@@ -393,6 +395,7 @@ export class Activation {
       this.logger.info(`TLS tunnel established for device ${clientObj.uuid}`)
       return true
     } catch (err: unknown) {
+      input.httpHandler.assertProvisioningActive()
       const errMsg = err instanceof globalThis.Error ? err.message : String(err)
       this.logger.error(`Failed to establish TLS tunnel for device ${clientObj.uuid}: ${errMsg}`)
       clientObj.tlsTunnelManager = undefined
@@ -428,12 +431,14 @@ export class Activation {
       input.profile.profileName,
       input.tenantId
     )
+    input.httpHandler.assertProvisioningActive()
     devices[input.clientId].amtPassword = amtPassword
     if (input.profile.activation === ClientAction.ADMINCTLMODE) {
       const mebxPassword: string | null = await this.configurator.profileManager.getMEBxPassword(
         input.profile.profileName,
         input.tenantId
       )
+      input.httpHandler.assertProvisioningActive()
       devices[input.clientId].mebxPassword = mebxPassword
     }
     const data = `admin:${devices[input.clientId].ClientData.payload.digestRealm}:${amtPassword}`
@@ -456,6 +461,7 @@ export class Activation {
     const ips: IPS.Messages = input.ips
     const { clientId, certChainPfx } = input
     const password = await this.getPassword(input)
+    input.httpHandler.assertProvisioningActive()
     const { hashAlgorithm, signingAlgorithm } = resolveProvisioningSignature(
       certChainPfx.hashAlgorithm,
       devices[clientId]?.ClientData?.payload?.weakAlgorithmsRemoved,
@@ -513,6 +519,7 @@ export class Activation {
   sendClientSetup = async ({ input }: { input: ActivationContext }): Promise<any> => {
     const ips: IPS.Messages = input.ips
     const password = await this.getPassword(input)
+    input.httpHandler.assertProvisioningActive()
     input.xmlMessage = ips.HostBasedSetupService.Setup(2, password)
     return await invokeWsmanCall(input)
   }
@@ -520,6 +527,7 @@ export class Activation {
   changeAMTPassword = async ({ input }: { input: ActivationContext }): Promise<any> => {
     const amt: AMT.Messages = input.amt
     const password = await this.getPassword(input)
+    input.httpHandler.assertProvisioningActive()
     // Convert MD5 hash to raw string which utf16
     const passwordMatch = password.match(/../g) ?? []
     const result = passwordMatch.map((v) => String.fromCharCode(parseInt(v, 16))).join('')
@@ -671,9 +679,11 @@ export class Activation {
       return false
     }
 
-    await this.configurator.secretsManager.writeSecretWithObject(`devices/${clientObj.uuid}`, data, {
-      hostname: clientObj.hostname
-    })
+    await input.httpHandler.trackProvisioningWrite(() =>
+      this.configurator.secretsManager.writeSecretWithObject(`devices/${clientObj.uuid}`, data, {
+        hostname: clientObj.hostname
+      })
+    )
     return true
   }
 
@@ -1424,9 +1434,11 @@ export class Activation {
       TLS_ISSUED_CERTIFICATE: clientObj.tls.issuedCertPEM
     }
 
-    await this.configurator.secretsManager.writeSecretWithObject(`devices/${clientObj.uuid}`, data, {
-      hostname: clientObj.hostname
-    })
+    await input.httpHandler.trackProvisioningWrite(() =>
+      this.configurator.secretsManager.writeSecretWithObject(`devices/${clientObj.uuid}`, data, {
+        hostname: clientObj.hostname
+      })
+    )
     this.logger.info(`Stored TLS leaf cert in vault for device ${clientObj.uuid}`)
     return true
   }
@@ -1542,6 +1554,7 @@ export class Activation {
 
       // Connect (initiates TLS handshake)
       await clientObj.tlsTunnelManager.connect()
+      input.httpHandler.assertProvisioningActive()
 
       // Set up data handler to process responses
       const sessionId = clientObj.tlsTunnelSessionId
@@ -1556,6 +1569,7 @@ export class Activation {
       this.logger.info(`TLS tunnel established for device ${clientObj.uuid} - switching to TLS mode`)
       return true
     } catch (err: unknown) {
+      input.httpHandler.assertProvisioningActive()
       const errMsg = err instanceof globalThis.Error ? err.message : String(err)
       this.logger.error(`Failed to establish TLS tunnel for device ${clientObj.uuid}: ${errMsg}`)
       clientObj.tlsTunnelManager = undefined
@@ -1776,25 +1790,23 @@ export class Activation {
       UNPROVISIONED: {
         on: {
           ACTIVATION: {
-            actions: [
-              assign({
-                clientId: ({ event }) => event.clientId,
-                isActivated: () => false,
-                tenantId: ({ event }) => event.tenantId,
-                friendlyName: ({ event }) => event.friendlyName
-              })
-            ],
+            actions: assign({
+              clientId: ({ event }) => event.clientId,
+              isActivated: () => false,
+              tenantId: ({ event }) => event.tenantId,
+              friendlyName: ({ event }) => event.friendlyName,
+              httpHandler: ({ context, event }) => event.httpHandler ?? context.httpHandler
+            }),
             target: 'GET_AMT_PROFILE'
           },
           ACTIVATED: {
-            actions: [
-              assign({
-                clientId: ({ event }) => event.clientId,
-                isActivated: () => true,
-                tenantId: ({ event }) => event.tenantId,
-                friendlyName: ({ event }) => event.friendlyName
-              })
-            ],
+            actions: assign({
+              clientId: ({ event }) => event.clientId,
+              isActivated: () => true,
+              tenantId: ({ event }) => event.tenantId,
+              friendlyName: ({ event }) => event.friendlyName,
+              httpHandler: ({ context, event }) => event.httpHandler ?? context.httpHandler
+            }),
             target: 'GET_AMT_PROFILE'
           }
         }

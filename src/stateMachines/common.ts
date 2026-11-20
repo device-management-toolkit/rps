@@ -70,6 +70,7 @@ export class HttpResponseError extends Error {
 const invokeWsmanCallInternal = async <T>(context: any): Promise<T> => {
   const { clientId, xmlMessage, httpHandler } = context
   const clientObj = devices[clientId]
+  context.httpHandler.assertProvisioningActive?.()
   if (clientObj == null || clientObj.provisioningStopped) throw new Error('Provisioning session ended')
   if (xmlMessage == null) {
     throw new Error('xmlMessage is null - cannot send WSMAN request')
@@ -178,12 +179,14 @@ const invokeWsmanCallViaTLSTunnel = async <T>(context: any, message: string): Pr
 
     try {
       await clientObj.tlsTunnelManager.connect()
+      httpHandler.assertProvisioningActive?.()
       const sessionId = clientObj.tlsTunnelSessionId
       clientObj.tlsTunnelManager.onData((data: Buffer) => {
         processTLSTunnelResponse(clientId, data, httpHandler, sessionId)
       })
       invokeWsmanLogger.info(`TLS tunnel established`)
     } catch (err) {
+      httpHandler.assertProvisioningActive?.()
       invokeWsmanLogger.error(`TLS tunnel connect failed: ${(err as Error).message}`)
       clientObj.tlsTunnelManager = undefined
       clientObj.tlsTunnelSessionId = undefined
@@ -193,6 +196,7 @@ const invokeWsmanCallViaTLSTunnel = async <T>(context: any, message: string): Pr
     }
   }
 
+  httpHandler.assertProvisioningActive?.()
   clientObj.tlsResponseBuffer = undefined
   const responsePromise = new Promise<T>((resolve, reject) => {
     clientObj.resolve = (value: T): void => {
@@ -324,7 +328,6 @@ const timeout = async (ms: number): Promise<void> => {
 const invokeWsmanCall = async <T>(context: any, maxRetries = 0, timeoutMs?: number, oneShot = false): Promise<T> => {
   const { clientId } = context
   const clientObj = devices[clientId]
-  const session = clientObj?.stopProvisioning
 
   // If AMT is reconfiguring (connection_reset received), wait BEFORE starting the operation.
   // This must happen outside the timeout race so the wait doesn't count against operation timeout.
@@ -342,7 +345,8 @@ const invokeWsmanCall = async <T>(context: any, maxRetries = 0, timeoutMs?: numb
   const retryDelayMs = Environment.Config.delay_tls_timer * 1000
 
   while (retriesUsed < maxAttempts) {
-    if (clientObj?.provisioningStopped || (session && session !== clientObj?.stopProvisioning)) {
+    context.httpHandler.assertProvisioningActive?.()
+    if (clientObj?.provisioningStopped) {
       throw new Error('Provisioning session ended')
     }
     try {

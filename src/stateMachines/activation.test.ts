@@ -3536,6 +3536,53 @@ describe('Activation State Machine', () => {
       })
     })
   })
+  describe('Cancelled provisioning actors', () => {
+    it.each(['saveDeviceInfoToSecretProvider', 'saveTlsTunnelCerts'] as const)(
+      'does not submit %s after its Vault read completes on a stopped session',
+      async (method) => {
+        const controller = new AbortController()
+        context.httpHandler = new HttpHandler()
+        context.httpHandler.provisioning = { signal: controller.signal, pendingWrites: new Set() }
+        devices[clientId].tls = { issuedCertPEM: 'issued' }
+        let resume: (value: any) => void
+        vi.spyOn(activation.configurator.secretsManager, 'getSecretAtPath').mockImplementation(
+          () =>
+            new Promise((resolve) => {
+              resume = resolve
+            })
+        )
+        const write = vi.spyOn(activation.configurator.secretsManager, 'writeSecretWithObject')
+        const pending = activation[method]({ input: context })
+        controller.abort()
+        resume!({ AMT_PASSWORD: 'stored' })
+        await expect(pending).rejects.toThrow('Provisioning session ended')
+        expect(write).not.toHaveBeenCalled()
+      }
+    )
+
+    it.each(['sendClientSetup', 'changeAMTPassword'] as const)(
+      'does not send %s when password lookup finishes after cancellation',
+      async (method) => {
+        const controller = new AbortController()
+        context.httpHandler = new HttpHandler()
+        context.httpHandler.provisioning = { signal: controller.signal, pendingWrites: new Set() }
+        let resume: (value: string) => void
+        vi.spyOn(activation, 'getPassword').mockImplementation(
+          () =>
+            new Promise((resolve) => {
+              resume = resolve
+            })
+        )
+        const pending = activation[method]({ input: context })
+        controller.abort()
+        devices[clientId].provisioningStopped = false
+        devices[clientId].stopProvisioning = vi.fn()
+        resume!('0123456789abcdef')
+        await expect(pending).rejects.toThrow('Provisioning session ended')
+        expect(invokeWsmanCallSpy).not.toHaveBeenCalled()
+      }
+    )
+  })
 })
 
 // Run real SDK reads and validation actors with synthetic device responses.

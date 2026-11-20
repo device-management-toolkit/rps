@@ -9,7 +9,29 @@ import { type DigestChallenge } from '@device-management-toolkit/wsman-messages/
 import Logger from './Logger.js'
 import { type connectionParams } from './models/RCS.Config.js'
 
+export interface ProvisioningSession {
+  signal: AbortSignal
+  pendingWrites: Set<Promise<unknown>>
+}
+
 export class HttpHandler {
+  provisioning?: ProvisioningSession
+
+  assertProvisioningActive(): void {
+    if (this.provisioning?.signal.aborted) throw new Error('Provisioning session ended')
+  }
+
+  async trackProvisioningWrite<T>(write: () => Promise<T>): Promise<T> {
+    this.assertProvisioningActive()
+    const pending = write()
+    this.provisioning?.pendingWrites.add(pending)
+    try {
+      return await pending
+    } finally {
+      this.provisioning?.pendingWrites.delete(pending)
+    }
+  }
+
   authResolve: any
   isAuthInProgress: any
   // The purpose of this directive is to allow the server to detect request replays by maintaining its own copy of this count.
