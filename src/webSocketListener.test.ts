@@ -69,7 +69,10 @@ describe('Websocket Listener', () => {
   })
 
   it('Should remove client from devices on disconnect', () => {
+    devices[clientid] = { stopProvisioning: vi.fn() } as any
+    const stop = devices[clientid].stopProvisioning
     server.onClientDisconnected(clientid)
+    expect(stop).toHaveBeenCalledOnce()
     expect(devices[clientid]).toBeUndefined()
   })
 

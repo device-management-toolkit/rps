@@ -22,6 +22,7 @@ import { ChangePasswordEventType } from './stateMachines/maintenance/changePassw
 import { SyncHostNameEventType } from './stateMachines/maintenance/syncHostName.js'
 import { SyncIPEventType } from './stateMachines/maintenance/syncIP.js'
 import { SyncDeviceInfoEventType } from './stateMachines/maintenance/syncDeviceInfo.js'
+import { DbCreatorFactory } from './factories/DbCreatorFactory.js'
 import { devices } from './devices.js'
 
 export class DataProcessor {
@@ -107,16 +108,49 @@ export class DataProcessor {
     this.logger.debug(
       `ProcessData: Parsed Message received from device ${clientMsg.payload.uuid}: ${JSON.stringify(clientMsg, null, '\t')}`
     )
-    await this.validator.validateActivationMsg(clientMsg, clientId) // Validate the activation message payload
-    this.setConnectionParams(clientId)
-    activation.service.start()
-    const event: ActivationEvent = {
-      type: devices[clientId].activationStatus ? 'ACTIVATED' : 'ACTIVATION',
-      clientId,
-      tenantId: clientMsg.tenantId,
-      friendlyName: clientMsg.payload.friendlyName
+    const device = devices[clientId]
+    if (device.stopProvisioning) throw new RPSError('An activation is already running on this connection')
+    let release: (() => void) | undefined
+    const stop = (): void => {
+      if (device.provisioningStopped) {
+        release?.()
+        return
+      }
+      device.provisioningStopped = true
+      activation.service.stop()
+      device.reject?.(new Error('Provisioning session ended'))
+      device.tlsTunnelManager?.close()
+      release?.()
+      device.stopProvisioning = undefined
     }
-    activation.service.send(event)
+    device.stopProvisioning = stop
+    device.provisioningStopped = false
+    try {
+      await this.validator.validateActivationMsg(clientMsg, clientId)
+      if (devices[clientId] !== device || device.provisioningStopped) {
+        throw new RPSError('Provisioning connection ended during validation')
+      }
+      const db = await new DbCreatorFactory().getDb()
+      if (db.acquireProvisioningLock) {
+        const lock = await db.acquireProvisioningLock(clientMsg.payload.uuid, stop)
+        if (!lock) throw new RPSError('Another activation is running for this device UUID')
+        release = lock
+      }
+      if (device.provisioningStopped) throw new RPSError('Provisioning connection ended while acquiring its lock')
+      activation.service.subscribe({ complete: stop, error: stop })
+      this.setConnectionParams(clientId)
+      activation.service.start()
+      const event: ActivationEvent = {
+        type: device.activationStatus ? 'ACTIVATED' : 'ACTIVATION',
+        clientId,
+        tenantId: clientMsg.tenantId,
+        friendlyName: clientMsg.payload.friendlyName
+      }
+      activation.service.send(event)
+    } catch (error) {
+      stop()
+      throw error
+    }
   }
 
   async deactivateDevice(
@@ -233,6 +267,7 @@ export class DataProcessor {
     uuid: string | null = null
   ): void {
     const clientObj = devices[clientId]
+    if (!clientObj.stopProvisioning) clientObj.provisioningStopped = false
     clientObj.connectionParams = {
       port: clientObj.tlsEnforced === true ? 16993 : 16992,
       guid: uuid ?? clientObj.ClientData.payload.uuid,

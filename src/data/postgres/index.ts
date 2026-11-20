@@ -4,7 +4,8 @@
  **********************************************************************/
 
 import { type IDB } from '../../interfaces/database/IDb.js'
-import { Pool, type QueryResultRow, type QueryResult, type PoolConfig } from 'pg'
+import { createHash } from 'node:crypto'
+import { Client, Pool, type QueryResultRow, type QueryResult, type PoolConfig } from 'pg'
 import Logger from '../../Logger.js'
 import { CiraConfigTable } from './tables/ciraConfigs.js'
 import { ProfilesTable } from './tables/profiles.js'
@@ -85,6 +86,46 @@ export default class Db implements IDB {
     this.ieee8021xProfiles = new IEEE8021xProfilesTable(this)
     this.proxyConfigs = new ProxyConfigsTable(this)
     this.profileProxyConfigs = new ProfileProxyConfigsTable(this)
+  }
+
+  private provisioningClient(): Client {
+    return new Client(this.pool.options)
+  }
+
+  // A dedicated session owns the lock through provisioning and reconciliation.
+  // Closing the session releases it on completion, disconnection or process exit.
+  async acquireProvisioningLock(uuid: string, onLost: () => void): Promise<(() => void) | null> {
+    const client = this.provisioningClient()
+    const key = createHash('sha256')
+      .update(`rps-provisioning:${uuid.toLowerCase()}`)
+      .digest()
+      .readBigInt64BE()
+      .toString()
+    let released = false
+    const release = (): void => {
+      if (released) return
+      released = true
+      void client.end().catch((error) => this.log.warn(`Failed to close provisioning lock session: ${error}`))
+    }
+    const lost = (): void => {
+      if (released) return
+      onLost()
+      release()
+    }
+    client.on('error', lost)
+    client.on('end', lost)
+    try {
+      await client.connect()
+      const result = await client.query('SELECT pg_try_advisory_lock($1::bigint) AS acquired', [key])
+      if (!result.rows[0]?.acquired || released) {
+        release()
+        return null
+      }
+      return release
+    } catch (error) {
+      release()
+      throw error
+    }
   }
 
   async query<T extends QueryResultRow>(text: string, params?: any): Promise<QueryResult<T>> {

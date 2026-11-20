@@ -22,5 +22,7 @@ export interface IDB {
   proxyConfigs: IProxyConfigsTable
   profileProxyConfigs: IProfileProxyConfigsTable
 
+  acquireProvisioningLock?: (uuid: string, onLost: () => void) => Promise<(() => void) | null>
+
   query: (text: string, params?: any) => Promise<any>
 }
