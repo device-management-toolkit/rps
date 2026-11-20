@@ -76,6 +76,7 @@ export class WebSocketListener {
    * @param {string} clientId Index of the connected client
    */
   onClientDisconnected(clientId: string): void {
+    devices[clientId]?.stopProvisioning?.()
     delete devices[clientId]
     this.logger.debug(`Connection ended for client : ${clientId}`)
   }

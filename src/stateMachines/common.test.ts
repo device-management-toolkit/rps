@@ -112,6 +112,17 @@ describe('Common', () => {
     devices[clientId].resolve(expected)
     await expect(wsmanPromise).resolves.toEqual(expected)
   })
+  it.each(['stopped', 'replaced'])('does not retry WSMAN after its provisioning session is %s', async (mode) => {
+    devices[clientId].stopProvisioning = vi.fn()
+    sendSpy.mockImplementation(() => {
+      if (mode === 'stopped') devices[clientId].provisioningStopped = true
+      else devices[clientId].stopProvisioning = vi.fn()
+      devices[clientId].reject(new UNEXPECTED_PARSE_ERROR())
+    })
+    await expect(invokeWsmanCall(context, 2)).rejects.toThrow('Provisioning session ended')
+    expect(sendSpy).toHaveBeenCalledOnce()
+  })
+
   it('should successfully resolve after one UNEXPECTED_PARSE_ERROR', async () => {
     const expected = '123'
     let invokeWsmanCallInternalCallCount = 0
