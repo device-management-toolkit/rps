@@ -43,6 +43,16 @@ vi.mock('./common.js', async () => {
     deriveControlMode: actual.deriveControlMode,
     finalizeComponentResults: actual.finalizeComponentResults,
     applicableComponents: actual.applicableComponents,
+    componentFailureResult: actual.componentFailureResult,
+    resolveStatusError: actual.resolveStatusError,
+    reportProvisioningFailure: actual.reportProvisioningFailure,
+    failAt: actual.failAt,
+    returnValueOf: actual.returnValueOf,
+    buildFailure: actual.buildFailure,
+
+    stepFailure: actual.stepFailure,
+
+    failureAfterErrorMachine: actual.failureAfterErrorMachine,
     HttpResponseError,
     isDigestRealmValid,
     coalesceMessage
@@ -1592,7 +1602,7 @@ describe('Activation State Machine', () => {
         testClientId: string
         amtDomainOutput: any
         tlsCCMComplete?: boolean
-      }): Promise<{ errorMessage: string; statusMessage: string; statesVisited: string[] }> => {
+      }): Promise<{ errorMessage: string; statusMessage: string; statesVisited: string[]; failure?: any }> => {
         return await new Promise((resolve, reject) => {
           const statesVisited: string[] = []
           const providedMachine = activation.machine.provide({
@@ -1637,7 +1647,8 @@ describe('Activation State Machine', () => {
               resolve({
                 errorMessage: state.context.errorMessage,
                 statusMessage,
-                statesVisited
+                statesVisited,
+                failure: state.context.failure
               })
             }
           })
@@ -1724,6 +1735,40 @@ describe('Activation State Machine', () => {
           'Device test-uuid-1234 activation failed. Specified AMT domain suffix: dontmatch.com does not match list of available AMT domain suffixes.ACM activation failed.'
         )
         expect(result.statusMessage).toBe(result.errorMessage)
+      })
+
+      it('records the domain suffix mismatch as a structured failure', async () => {
+        const testClientId = 'extract-domain-cert-client'
+        devices[testClientId] = createExtractDomainCertTestDevice(testClientId)
+
+        const result = await runExtractDomainCertFailureFlow({ testClientId, amtDomainOutput: null })
+
+        expect(result.failure).toEqual({
+          Code: 'RPS_CERT_DOMAIN_SUFFIX_MISMATCH',
+          Component: 'Activation',
+          Step: 'EXTRACT_DOMAIN_CERT',
+          Reason: 'Device DNS suffix does not match any configured AMT domain'
+        })
+        expect(devices[testClientId].status.Error).toEqual(result.failure)
+      })
+
+      it('keeps the original structured failure when the deactivation path is taken', async () => {
+        const testClientId = 'extract-domain-cert-client'
+        devices[testClientId] = createExtractDomainCertTestDevice(testClientId)
+
+        const result = await runExtractDomainCertFailureFlow({
+          testClientId,
+          amtDomainOutput: null,
+          tlsCCMComplete: true
+        })
+
+        expect(result.statesVisited).toContain('DEACTIVATION')
+        // The legacy text gains the ACM suffix, but the structured failure still names the root cause.
+        expect(result.errorMessage.endsWith('.ACM activation failed.')).toBe(true)
+        expect(result.failure).toMatchObject({
+          Code: 'RPS_CERT_DOMAIN_SUFFIX_MISMATCH',
+          Step: 'EXTRACT_DOMAIN_CERT'
+        })
       })
     })
     it('should eventually reach FAILED if not in ACM mode', () =>
@@ -2403,6 +2448,363 @@ describe('Activation State Machine', () => {
         acmActivationService.send({ type: 'ACTIVATION', clientId, tenantId: '', friendlyName: null as any })
       }))
 
+    it('records a structured failure with step GET_AMT_PROFILE when the profile lookup fails', () =>
+      new Promise<void>((resolve, reject) => {
+        config.guards = {
+          isAdminMode: () => true,
+          maxCertLength: () => false
+        }
+        config.actors!.getAMTProfile = fromPromise(
+          async ({ input }) => await Promise.reject(new Error('connection refused'))
+        )
+        const mockActivationMachine = activation.machine.provide(config)
+        const acmActivationService = createActor(mockActivationMachine, { input: context })
+        acmActivationService.subscribe((state) => {
+          if (state.matches('FINAL')) {
+            try {
+              expect(state.context.errorMessage).toBe('Failed to get amt profile from database')
+              expect(state.context.failure).toEqual({
+                Code: 'RPS_DB_PROFILE_NOT_FOUND',
+                Component: 'Activation',
+                Step: 'GET_AMT_PROFILE',
+                Reason: 'AMT profile could not be read from the database',
+                Detail: 'connection refused'
+              })
+              resolve()
+            } catch (err) {
+              reject(err)
+            }
+          }
+        })
+        acmActivationService.start()
+        acmActivationService.send({ type: 'ACTIVATION', clientId, tenantId: '', friendlyName: null as any })
+      }))
+
+    it('maps a gateway timeout in an onError branch to WSMAN_TIMEOUT', () =>
+      new Promise<void>((resolve, reject) => {
+        config.guards = {
+          isAdminMode: () => true,
+          maxCertLength: () => false
+        }
+        config.actors!.getAMTDomainCert = fromPromise(
+          async ({ input }) => await Promise.reject(new GATEWAY_TIMEOUT_ERROR())
+        )
+        const mockActivationMachine = activation.machine.provide(config)
+        const acmActivationService = createActor(mockActivationMachine, { input: context })
+        acmActivationService.subscribe((state) => {
+          if (state.matches('FINAL')) {
+            try {
+              expect(state.context.errorMessage).toBe('Failed to get amt domain certificate from database')
+              expect(state.context.failure).toEqual({
+                Code: 'WSMAN_TIMEOUT',
+                Component: 'Activation',
+                Step: 'GET_AMT_DOMAIN_CERT',
+                Reason: 'Timed out waiting for a WSMAN response from AMT',
+                Detail: 'Gateway Timeout'
+              })
+              resolve()
+            } catch (err) {
+              reject(err)
+            }
+          }
+        })
+        acmActivationService.start()
+        acmActivationService.send({ type: 'ACTIVATION', clientId, tenantId: '', friendlyName: null as any })
+      }))
+
+    it('carries the AdminSetup ReturnValue when it is non-zero', () =>
+      new Promise<void>((resolve, reject) => {
+        context.certChainPfx = {
+          provisioningCertificateObj: { certChain: [
+              'leaf',
+              'inter1',
+              'root'
+            ], privateKey: null },
+          fingerprint: {
+            sha256: '82f2ed575db4abe462499cf550dbff9584980d70a0272894639c3653b9ad932c',
+            sha384: 'bb00173b0fb55bc1b24fff5a32a02d210d2bbe16dc6ba4f8300729c1d545313a66930bcd1bcf9ed5a76e82ce602ef04a',
+            sha1: '47d7b7db23f3e300189f54802482b1bd18b945ef'
+          },
+          hashAlgorithm: 'sha256'
+        }
+        devices[context.clientId].certObj = context.certChainPfx.provisioningCertificateObj
+        context.tlsCCMComplete = false
+        config.guards = {
+          isAdminMode: () => true,
+          isCertNotAdded: () => false,
+          maxCertLength: () => false,
+          isDeviceActivatedInACM: () => false,
+          shouldDeactivate: () => false
+        }
+        // AMT rejects AdminSetup with a non-zero ReturnValue; the real isDeviceAdminModeActivated guard reads it.
+        config.actors!.sendAdminSetup = fromPromise(
+          async ({ input }) =>
+            await Promise.resolve({ Envelope: { Body: { AdminSetup_OUTPUT: { ReturnValue: 2054 } } } })
+        )
+        const mockActivationMachine = activation.machine.provide(config)
+        const acmActivationService = createActor(mockActivationMachine, { input: context })
+        acmActivationService.subscribe((state) => {
+          if (state.matches('FINAL')) {
+            try {
+              expect(state.context.errorMessage).toBe('Failed to activate in admin control mode.')
+              expect(state.context.failure).toEqual({
+                Code: 'RPS_ACTIVATION_FAILED',
+                Component: 'Activation',
+                Step: 'CHECK_ADMIN_SETUP',
+                Reason: 'Device activation failed',
+                AmtReturnValue: 2054
+              })
+              resolve()
+            } catch (err) {
+              reject(err)
+            }
+          }
+        })
+        acmActivationService.start()
+        acmActivationService.send({ type: 'ACTIVATION', clientId, tenantId: '', friendlyName: null as any })
+      }))
+
+    it('assigns the structured failure forwarded by the error machine on ONFAILED', () =>
+      new Promise<void>((resolve, reject) => {
+        config.guards = { shouldDeactivate: () => false }
+        const failure = {
+          Code: 'WSMAN_BAD_REQUEST',
+          Component: 'Activation' as const,
+          Step: 'BADREQUEST',
+          Reason: 'AMT rejected the WSMAN request as malformed (HTTP 400)',
+          HttpStatus: 400
+        }
+        const mockActivationMachine = activation.machine.provide(config)
+        const snapshot = mockActivationMachine.resolveState({ value: 'ERROR', context })
+        const acmActivationService = createActor(mockActivationMachine, { snapshot })
+        acmActivationService.subscribe((state) => {
+          if (state.matches('FINAL')) {
+            try {
+              expect(state.context.errorMessage).toBe('Bad Request')
+              expect(state.context.failure).toEqual(failure)
+              resolve()
+            } catch (err) {
+              reject(err)
+            }
+          }
+        })
+        acmActivationService.start()
+        acmActivationService.send({ type: 'ONFAILED', output: 'Bad Request', failure } as any)
+      }))
+
+    it.each([
+      [
+        'ADMIN_SETUP',
+        'send-adminsetup',
+        'AdminSetup',
+        'CHECK_ADMIN_SETUP'
+      ],
+      [
+        'UPGRADE_TO_ADMIN_SETUP',
+        'send-upgrade-to-admin',
+        'UpgradeClientToAdmin',
+        'CHECK_UPGRADE'
+      ]
+    ])('keeps the %s return value as the cause when the failure leads to deactivation', (state, id, method, step) => {
+      config.guards = {
+        isTlsCCMComplete: () => false,
+        isTlsUpgradeSuccessful: () => false,
+        isDeviceAdminModeActivated: () => false,
+        isDeviceActivatedInACM: () => false,
+        isUpgraded: () => false,
+        shouldDeactivate: () => true
+      }
+      const mockActivationMachine = activation.machine.provide(config)
+      const snapshot = mockActivationMachine.resolveState({ value: state, context })
+      const next = getNextSnapshot(mockActivationMachine, snapshot, {
+        type: `xstate.done.actor.${id}`,
+        output: { Envelope: { Body: { [`${method}_OUTPUT`]: { ReturnValue: 2 } } } }
+      } as any)
+      expect(next.value).toBe('DEACTIVATION')
+      expect(next.context.failure).toMatchObject({
+        Code: 'RPS_ACTIVATION_FAILED',
+        Component: 'Activation',
+        Step: step,
+        AmtReturnValue: 2
+      })
+    })
+
+    describe('activation call that timed out and is verified on AMT', () => {
+      const notActivated = { Envelope: { Body: { IPS_HostBasedSetupService: { CurrentControlMode: 0 } } } }
+      const timeOutThenCheck = (state: string, id: string, call: string, guards: Record<string, () => boolean>) => {
+        config.guards = {
+          isTlsACMPhase: () => false,
+          isTlsCCMComplete: () => false,
+          isTlsUpgradeSuccessful: () => false,
+          isDeviceAdminModeActivated: () => false,
+          isDeviceClientModeActivated: () => false,
+          isDeviceActivatedInACM: () => false,
+          isDeviceActivatedInCCM: () => false,
+          isDeviceCommittedInCCM: () => false,
+          isDeviceCommittedInCCMMode: () => false,
+          isUpgraded: () => false,
+          shouldDeactivate: () => false,
+          ...guards
+        }
+        const machine = activation.machine.provide(config)
+        // The call throws on the gateway timeout.
+        devices[clientId].lastWsmanCall = call
+        devices[clientId].wsmanCallFailed = true
+        const checking = getNextSnapshot(machine, machine.resolveState({ value: state, context }), {
+          type: `xstate.error.actor.${id}`,
+          error: new GATEWAY_TIMEOUT_ERROR()
+        } as any)
+        expect(checking.value).toBe('CHECK_ACTIVATION_ON_AMT')
+        // The check is answered, and shows the device is still not activated.
+        devices[clientId].lastWsmanCall = 'IPS_HostBasedSetupService.Get'
+        devices[clientId].wsmanCallFailed = false
+        return getNextSnapshot(machine, checking, {
+          type: 'xstate.done.actor.get-activationstatus',
+          output: notActivated
+        } as any)
+      }
+
+      it.each([
+        [
+          'ADMIN_SETUP',
+          'send-adminsetup',
+          'IPS_HostBasedSetupService.AdminSetup',
+          { hasToUpgrade: () => false, isAdminMode: () => true },
+          'Failed to activate in admin control mode.'
+        ],
+        [
+          'UPGRADE_TO_ADMIN_SETUP',
+          'send-upgrade-to-admin',
+          'IPS_HostBasedSetupService.UpgradeClientToAdmin',
+          { hasToUpgrade: () => true },
+          'Failed to upgrade to admin control mode.'
+        ],
+        [
+          'SETUP',
+          'send-setup',
+          'IPS_HostBasedSetupService.Setup',
+          { hasToUpgrade: () => false, isAdminMode: () => false },
+          'Failed to activate in client control mode.'
+        ],
+        [
+          'COMMIT_CHANGES',
+          'commit-changes',
+          'AMT_SetupAndConfigurationService.CommitChanges',
+          { hasToUpgrade: () => false, isAdminMode: () => false },
+          'Failed to activate in client control mode.'
+        ]
+      ])('reports the %s timeout when the check shows the device is not activated', (state, id, call, guards, text) => {
+        const final = timeOutThenCheck(state, id, call, guards)
+        expect(final.value).toBe('FINAL')
+        expect(final.context.errorMessage).toBe(text)
+        expect(final.context.failure).toEqual({
+          Code: 'WSMAN_TIMEOUT',
+          Component: 'Activation',
+          Step: state,
+          Reason: 'Timed out waiting for a WSMAN response from AMT',
+          Detail: 'Gateway Timeout',
+          WsmanCall: call
+        })
+      })
+
+      it.each([
+        [
+          'ADMIN_SETUP',
+          'send-adminsetup',
+          'IPS_HostBasedSetupService.AdminSetup',
+          { hasToUpgrade: () => false, isAdminMode: () => true }
+        ],
+        [
+          'UPGRADE_TO_ADMIN_SETUP',
+          'send-upgrade-to-admin',
+          'IPS_HostBasedSetupService.UpgradeClientToAdmin',
+          { hasToUpgrade: () => true }
+        ]
+      ])('keeps the %s timeout as the cause when the failure leads to deactivation', (state, id, call, guards) => {
+        const next = timeOutThenCheck(state, id, call, { ...guards, shouldDeactivate: () => true })
+        expect(next.value).toBe('DEACTIVATION')
+        expect(next.context.failure).toMatchObject({ Code: 'WSMAN_TIMEOUT', Step: state, WsmanCall: call })
+      })
+
+      it('does not report a timeout from an earlier call once the call is sent again', () => {
+        config.guards = {
+          isCertNotAdded: () => false,
+          maxCertLength: () => false,
+          canUpgrade: () => false,
+          isTlsCCMComplete: () => false,
+          isDeviceAdminModeActivated: () => false,
+          isDeviceActivatedInACM: () => false,
+          shouldDeactivate: () => false
+        }
+        const machine = activation.machine.provide(config)
+        const stale = {
+          Code: 'WSMAN_TIMEOUT',
+          Component: 'Activation' as const,
+          Step: 'COMMIT_CHANGES',
+          Reason: 'Timed out waiting for a WSMAN response from AMT'
+        }
+        const before = machine.resolveState({
+          value: 'ADD_NEXT_CERT_IN_CHAIN',
+          context: { ...context, pendingTimeout: stale }
+        })
+        const sending = getNextSnapshot(machine, before, {
+          type: 'xstate.done.actor.send-certificate',
+          output: { Envelope: { Body: { AddNextCertInChain_OUTPUT: { ReturnValue: 0 } } } }
+        } as any)
+        expect(sending.value).toBe('ADMIN_SETUP')
+        expect(sending.context.pendingTimeout).toBeUndefined()
+        const final = getNextSnapshot(machine, sending, {
+          type: 'xstate.done.actor.send-adminsetup',
+          output: { Envelope: { Body: { AdminSetup_OUTPUT: { ReturnValue: 2054 } } } }
+        } as any)
+        expect(final.value).toBe('FINAL')
+        expect(final.context.failure).toMatchObject({
+          Code: 'RPS_ACTIVATION_FAILED',
+          Step: 'CHECK_ADMIN_SETUP',
+          AmtReturnValue: 2054
+        })
+      })
+    })
+
+    it('reports the step that entered the error machine, not the error machine state', () =>
+      new Promise<void>((resolve, reject) => {
+        config.guards = { shouldDeactivate: () => false }
+        const recorded = {
+          Code: 'WSMAN_TIMEOUT',
+          Component: 'Activation' as const,
+          Step: 'ADD_NEXT_CERT_IN_CHAIN',
+          Reason: 'Timed out waiting for a WSMAN response from AMT'
+        }
+        const fromErrorMachine = {
+          Code: 'WSMAN_REQUEST_FAILED',
+          Component: 'Activation' as const,
+          Step: 'UNKNOWN',
+          Reason: 'WSMAN request to AMT failed'
+        }
+        const mockActivationMachine = activation.machine.provide(config)
+        const snapshot = mockActivationMachine.resolveState({
+          value: 'ERROR',
+          context: { ...context, failure: recorded }
+        })
+        const acmActivationService = createActor(mockActivationMachine, { snapshot })
+        acmActivationService.subscribe((state) => {
+          if (state.matches('FINAL')) {
+            try {
+              expect(state.context.failure).toEqual(recorded)
+              resolve()
+            } catch (err) {
+              reject(err)
+            }
+          }
+        })
+        acmActivationService.start()
+        acmActivationService.send({
+          type: 'ONFAILED',
+          output: 'Unknown error has occured',
+          failure: fromErrorMachine
+        } as any)
+      }))
+
     it('should eventually reach FAILED at GET_AMT_PROFILE if ACTIVATED', () =>
       new Promise<void>((resolve, reject) => {
         config.guards = {
@@ -2534,6 +2936,80 @@ describe('Activation State Machine', () => {
       expect(sentPayload.ComponentsVersion).toBeUndefined()
       expect(devices[clientId].status.Components?.Activation?.Result).toEqual('Failure')
       expect(sendSpy).toHaveBeenCalled()
+    })
+
+    it('sends a structured Error block carrying the failing step and code on error', () => {
+      context.status = 'error'
+      context.message = null
+      context.errorMessage = 'Failed to get amt profile from database'
+      context.failure = {
+        Code: 'RPS_DB_PROFILE_NOT_FOUND',
+        Component: 'Activation',
+        Step: 'GET_AMT_PROFILE',
+        Reason: 'AMT profile could not be read from the database'
+      }
+      devices[clientId].activationStatus = false
+      const errorLogSpy = vi.spyOn(activation.logger, 'error')
+      activation.sendMessageToDevice({ context })
+
+      const sentPayload = JSON.parse(responseMessageSpy.mock.calls[0][4])
+      // Legacy flat text is unchanged; the structured block rides alongside it.
+      expect(sentPayload.Status).toEqual('Failed to get amt profile from database')
+      expect(sentPayload.Error).toEqual(context.failure)
+      expect(sentPayload.Components.Activation).toMatchObject({
+        Result: 'Failure',
+        Code: 'RPS_DB_PROFILE_NOT_FOUND',
+        Step: 'GET_AMT_PROFILE'
+      })
+      // One structured log line carries the same content as the wire block.
+      const failureLine = errorLogSpy.mock.calls
+        .map((c) => c[0] as string)
+        .find((l) => l.startsWith('Provisioning failure: '))
+      expect(failureLine).toBeDefined()
+      expect(JSON.parse(failureLine!.replace('Provisioning failure: ', ''))).toMatchObject({
+        flow: 'activation',
+        clientId,
+        ...context.failure
+      })
+    })
+
+    it('does not resend the Error block of an earlier failed attempt on success', () => {
+      context.status = 'success'
+      devices[clientId].activationStatus = true
+      devices[clientId].status = {
+        Status: 'Admin control mode.',
+        Error: { Code: 'WSMAN_TIMEOUT', Component: 'Activation', Step: 'ADMIN_SETUP', Reason: 'Timed out' }
+      }
+      activation.sendMessageToDevice({ context })
+      const sentPayload = JSON.parse(responseMessageSpy.mock.calls[0][4])
+      expect(sentPayload.Error).toBeUndefined()
+    })
+
+    it('does not blame a non-fatal component failure when the root context has no failure', () => {
+      context.status = 'error'
+      context.message = null
+      context.failure = undefined
+      devices[clientId].activationStatus = true
+      devices[clientId].status = {
+        Components: {
+          Activation: { Result: 'Success', Mode: 'ACM' },
+          WirelessNetwork: {
+            Result: 'Failure',
+            Details: 'Failed to add corp-wifi',
+            Code: 'AMT_METHOD_FAILED',
+            Step: 'ADD_WIFI_SETTINGS',
+            AmtReturnValue: 2066
+          }
+        }
+      }
+      activation.sendMessageToDevice({ context })
+      const sentPayload = JSON.parse(responseMessageSpy.mock.calls[0][4])
+      expect(sentPayload.Error).toMatchObject({
+        Code: 'RPS_ACTIVATION_FAILED',
+        Component: 'Activation',
+        Step: 'UNKNOWN'
+      })
+      expect(sentPayload.Error.AmtReturnValue).toBeUndefined()
     })
 
     it('on a component failure, sends the full NotApplicable set to RPC but logs only the components that ran', () => {
