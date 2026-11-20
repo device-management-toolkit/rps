@@ -32,6 +32,15 @@ vi.mock('./common.js', async () => {
     // wired/wifi/proxy machines call this during their flows; mock it so the
     // partial common.js mock still provides the export they import.
     sendProgressToDevice: vi.fn(),
+    recordComponentResult: actual.recordComponentResult,
+    failAt: actual.failAt,
+    buildFailure: actual.buildFailure,
+
+    stepFailure: actual.stepFailure,
+
+    failureAfterErrorMachine: actual.failureAfterErrorMachine,
+    returnValueOf: actual.returnValueOf,
+    componentFailureResult: actual.componentFailureResult,
     HttpResponseError,
     isDigestRealmValid,
     coalesceMessage
@@ -240,6 +249,13 @@ describe('Network Configuration', () => {
               if (state.matches('FAILED') && currentStateIndex === flowStates.length) {
                 const status = devices[clientId].status.Network
                 expect(status).toEqual('Failed to update amt general settings on device')
+                // The shared step runs before the interfaces are known: it is reported as Network
+                // and is not blamed on the wired component.
+                expect(devices[clientId].status.Components?.Network).toMatchObject({
+                  Result: 'Failure',
+                  Step: 'PUT_GENERAL_SETTINGS'
+                })
+                expect(devices[clientId].status.Components?.WiredNetwork).toBeUndefined()
                 resolve()
               }
             } catch (err) {

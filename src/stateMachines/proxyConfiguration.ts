@@ -17,7 +17,11 @@ import {
   invokeWsmanCall,
   sendProgressToDevice,
   recordComponentResult,
-  updateNetworkStatus
+  updateNetworkStatus,
+  failAt,
+  buildFailure,
+  returnValueOf,
+  componentFailureResult
 } from './common.js'
 import { addUnique, removeItem, addFailure } from '../utils/statusList.js'
 import { UNEXPECTED_PARSE_ERROR } from '../utils/constants.js'
@@ -123,10 +127,12 @@ export class ProxyConfiguration {
             sendProgressToDevice(clientId, 'Proxies configuration completed')
           }
         }
-        recordComponentResult(clientId, 'CIRAProxy', {
-          Result: failed ? 'Failure' : 'Success',
-          Details: message
-        })
+        recordComponentResult(
+          clientId,
+          'CIRAProxy',
+          failed ? componentFailureResult(context.failure, message) : { Result: 'Success', Details: message },
+          context.failure
+        )
       },
       'Reset Retry Count': assign({ retryCount: () => 0 }),
       'Increment Retry Count': assign({ retryCount: ({ context }) => context.retryCount + 1 }),
@@ -138,11 +144,28 @@ export class ProxyConfiguration {
         proxyConfigFailed: ({ context, event }) =>
           event.output.Envelope?.Body?.AddProxyAccessPoint_OUTPUT?.ReturnValue === 0
             ? removeItem(context.proxyConfigFailed, context.proxyConfigName)
-            : addFailure(context.proxyConfigFailed, context.proxyConfigAdded, context.proxyConfigName)
+            : addFailure(context.proxyConfigFailed, context.proxyConfigAdded, context.proxyConfigName),
+        // Structured failure for the last proxy AMT rejected (code, step, return value). A
+        // success leaves any earlier failure in place so partial failures stay reportable.
+        failure: ({ context, event }) => {
+          const returnValue = returnValueOf(event.output, 'AddProxyAccessPoint')
+          if (returnValue == null || returnValue === 0) {
+            return context.failure
+          }
+          return buildFailure(
+            'ADD_PROXY_CONFIGS',
+            'CIRAProxy',
+            {
+              returnValue: () => returnValue,
+              message: `Failed to add proxy configuration ${context.proxyConfigName}`
+            },
+            { context, event }
+          ).failure
+        }
       }),
       'Send Proxy Progress': ({ context, event }) => {
         // mirror 'Check Return Value' — keep in sync
-        const returnValue = event.output?.Envelope?.Body?.AddProxyAccessPoint_OUTPUT?.ReturnValue
+        const returnValue = returnValueOf(event.output, 'AddProxyAccessPoint')
         if (returnValue === 0) {
           sendProgressToDevice(context.clientId, `Added proxy configuration ${context.proxyConfigName}`)
         } else {
@@ -209,7 +232,13 @@ export class ProxyConfiguration {
             target: 'ADD_PROXY_CONFIGS'
           },
           onError: {
-            actions: assign({ errorMessage: 'Failed to get proxy config from DB' }),
+            actions: assign(
+              failAt('GET_PROXY_CONFIG', 'CIRAProxy', {
+                message: 'Failed to get proxy config from DB',
+                code: 'RPS_DB_PROXY_CONFIG_NOT_FOUND',
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -227,7 +256,17 @@ export class ProxyConfiguration {
             actions: [
               assign({
                 proxyConfigFailed: ({ context }) =>
-                  addFailure(context.proxyConfigFailed, context.proxyConfigAdded, context.proxyConfigName)
+                  addFailure(context.proxyConfigFailed, context.proxyConfigAdded, context.proxyConfigName),
+                failure: ({ context, event }) =>
+                  buildFailure(
+                    'ADD_PROXY_CONFIGS',
+                    'CIRAProxy',
+                    {
+                      error: () => event.error,
+                      message: `Failed to add proxy configuration ${context.proxyConfigName}`
+                    },
+                    { context, event }
+                  ).failure
               }),
               ({ context }) =>
                 sendProgressToDevice(context.clientId, `Failed to add proxy configuration ${context.proxyConfigName}`)

@@ -35,6 +35,7 @@ import { TLSTunnelManager } from '../TLSTunnelManager.js'
 
 const invokeWsmanLogger = new Logger('invokeWsmanCall')
 const progressLogger = new Logger('sendProgressToDevice')
+const componentLogger = new Logger('ComponentResult')
 
 // Best-effort progress note to rpc-go — emitted both at phase boundaries (state entry)
 // and for per-item milestones (e.g. each WiFi profile / proxy add) via transition actions.
@@ -475,7 +476,10 @@ export function coalesceMessage(prefixMsg: string, err: any): string {
 
 // Every component RPS can report on. Used to backfill 'NotApplicable' entries so the
 // Components block always carries the full, predictable key set (issue #2665).
-const ALL_COMPONENTS: (keyof ComponentResults)[] = [
+/** Components that are always present in the status message (NotApplicable when not attempted). */
+type CoreComponent = Exclude<keyof ComponentResults, 'Network' | 'Features' | 'Unconfiguration'>
+
+const ALL_COMPONENTS: CoreComponent[] = [
   'Activation',
   'WiredNetwork',
   'WirelessNetwork',
@@ -484,7 +488,7 @@ const ALL_COMPONENTS: (keyof ComponentResults)[] = [
   'CIRAConnection'
 ]
 
-const NOT_APPLICABLE_DETAILS: Record<keyof ComponentResults, string> = {
+const NOT_APPLICABLE_DETAILS: Record<CoreComponent, string> = {
   Activation: 'Activation not part of this configuration',
   WiredNetwork: 'Wired network not part of this configuration',
   WirelessNetwork: 'Wireless network not part of this configuration',
@@ -570,11 +574,16 @@ export function updateNetworkStatus(opts: {
  *
  * Shape invariants enforced here: Details are normalized to sentence-case (the failure reason rides
  * in Details), and undefined optional fields are omitted.
+ *
+ * Pass `failure` when the component itself failed: the same structured log line and MQTT event
+ * that a terminal failure gets are then emitted for it, since a component failure does not end the
+ * flow and would otherwise never be reported that way.
  */
 export function recordComponentResult(
   clientId: string,
   component: keyof ComponentResults,
-  result: ComponentResult
+  result: ComponentResult,
+  failure?: ProvisioningFailure
 ): void {
   const clientObj = devices[clientId]
   if (clientObj?.status == null) {
@@ -600,14 +609,30 @@ export function recordComponentResult(
     if (result.AmtReturnValue != null) {
       normalized.AmtReturnValue = result.AmtReturnValue
     }
+    if (result.Reason != null) {
+      normalized.Reason = result.Reason
+    }
+    if (result.HttpStatus != null) {
+      normalized.HttpStatus = result.HttpStatus
+    }
+    if (result.WsmanCall != null) {
+      normalized.WsmanCall = result.WsmanCall
+    }
+    if (result.Detail != null) {
+      normalized.Detail = result.Detail
+    }
   }
   clientObj.status.Components[component] = normalized
+  if (result.Result === 'Failure' && failure != null) {
+    emitProvisioningFailure(componentLogger, clientId, failure, 'activation')
+  }
 }
 
 /**
- * Builds a Failure component result from a structured failure, carrying the code, step and AMT
- * return value alongside the human-readable details. `details` defaults to the legacy text the
- * machine already produced so flat output is unchanged.
+ * Builds a Failure component result from a structured failure, carrying the same fields as the
+ * terminal `Status.Error` block (code, step, reason, AMT return value, HTTP status, WSMAN call,
+ * wire-safe detail) alongside the human-readable details. `details` defaults to the legacy text
+ * the machine already produced so flat output is unchanged.
  */
 export function componentFailureResult(failure: ProvisioningFailure | undefined, details?: string): ComponentResult {
   const result: ComponentResult = { Result: 'Failure' }
@@ -616,10 +641,21 @@ export function componentFailureResult(failure: ProvisioningFailure | undefined,
     result.Details = text
   }
   if (failure != null) {
-    result.Code = failure.Code
-    result.Step = failure.Step
-    if (failure.AmtReturnValue != null) {
-      result.AmtReturnValue = failure.AmtReturnValue
+    const wire = toWireFailure(failure)
+    result.Code = wire.Code
+    result.Step = wire.Step
+    result.Reason = wire.Reason
+    if (wire.AmtReturnValue != null) {
+      result.AmtReturnValue = wire.AmtReturnValue
+    }
+    if (wire.HttpStatus != null) {
+      result.HttpStatus = wire.HttpStatus
+    }
+    if (wire.WsmanCall != null) {
+      result.WsmanCall = wire.WsmanCall
+    }
+    if (wire.Detail != null) {
+      result.Detail = wire.Detail
     }
   }
   return result
@@ -665,11 +701,9 @@ export function toWireFailure(failure: ProvisioningFailure): ProvisioningFailure
 }
 
 /**
- * Records the final failure for a device: emits one structured log line carrying the full failure
- * plus the transport diagnostics captured by invokeWsmanCall, publishes the wire-safe version of
- * the same record as an MQTT event (MQTT consumers, like the device, do not get RPS-internal
- * detail), and returns the wire-safe failure (also set on `status.Error` when the device has a
- * status object) so it reaches rpc-go. Never throws.
+ * Records the failure that ended the flow: sets the wire-safe failure on `status.Error` (when the
+ * device has a status object) so it reaches rpc-go, emits it (see emitProvisioningFailure), and
+ * returns the wire-safe failure. Never throws.
  */
 export function reportProvisioningFailure(
   logger: Logger,
@@ -679,11 +713,30 @@ export function reportProvisioningFailure(
   task?: string
 ): ProvisioningFailure {
   const wire = toWireFailure(failure)
+  const clientObj = devices[clientId]
+  if (clientObj?.status != null) {
+    clientObj.status.Error = wire
+  }
+  emitProvisioningFailure(logger, clientId, failure, flow, task)
+  return wire
+}
+
+/**
+ * Emits one structured log line carrying the full failure plus the transport diagnostics captured
+ * by invokeWsmanCall, and publishes the wire-safe version of the same record as an MQTT event
+ * (MQTT consumers, like the device, do not get RPS-internal detail). Used for the failure that
+ * ended the flow and for each failed component. Does not touch `status.Error`. Never throws.
+ */
+export function emitProvisioningFailure(
+  logger: Logger,
+  clientId: string,
+  failure: ProvisioningFailure,
+  flow: 'activation' | 'deactivation' | 'maintenance',
+  task?: string
+): void {
+  const wire = toWireFailure(failure)
   try {
     const clientObj = devices[clientId]
-    if (clientObj?.status != null) {
-      clientObj.status.Error = wire
-    }
     const identity = {
       flow,
       ...(task != null ? { task } : {}),
@@ -705,7 +758,6 @@ export function reportProvisioningFailure(
   } catch (err) {
     logger.warn(`Failed to report provisioning failure for ${clientId}: ${(err as Error).message}`)
   }
-  return wire
 }
 
 /**
