@@ -138,7 +138,8 @@ export class TimeSync {
             actions: assign(
               failAt('ENABLE_LOCAL_TIME_SYNC_RESPONSE', 'TimeSync', {
                 message: 'Failed to ENABLE_LOCAL_TIME_SYNC',
-                returnValue: ({ context }) => returnValueOf(context.message, 'EnableLocalTimeSync')
+                returnValue: ({ context }) => returnValueOf(context.message, 'EnableLocalTimeSync'),
+                table: 'PT_STATUS'
               })
             ),
             target: 'FAILED'
@@ -179,7 +180,8 @@ export class TimeSync {
             actions: assign(
               failAt('GET_LOW_ACCURACY_TIME_SYNCH_RESPONSE', 'TimeSync', {
                 message: 'Failed to GET_LOW_ACCURACY_TIME_SYNC',
-                returnValue: ({ context }) => returnValueOf(context.message, 'GetLowAccuracyTimeSynch')
+                returnValue: ({ context }) => returnValueOf(context.message, 'GetLowAccuracyTimeSynch'),
+                table: 'PT_STATUS'
               })
             ),
             target: 'FAILED'
@@ -218,7 +220,8 @@ export class TimeSync {
             actions: assign(
               failAt('SET_HIGH_ACCURACY_TIME_SYNCH_RESPONSE', 'TimeSync', {
                 message: 'Failed to SET_HIGH_ACCURACY_TIME_SYNCH',
-                returnValue: ({ context }) => returnValueOf(context.message, 'SetHighAccuracyTimeSynch')
+                returnValue: ({ context }) => returnValueOf(context.message, 'SetHighAccuracyTimeSynch'),
+                table: 'PT_STATUS'
               })
             ),
             target: 'FAILED'

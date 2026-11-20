@@ -1185,7 +1185,7 @@ describe('WiFi Network Configuration', () => {
           MACAddress: '00-00-00-00-00-00'
         }
         config.actors!.addWifiConfigs = fromPromise(
-          async () => await Promise.resolve({ Envelope: { Body: { AddWiFiSettings_OUTPUT: { ReturnValue: 2066 } } } })
+          async () => await Promise.resolve({ Envelope: { Body: { AddWiFiSettings_OUTPUT: { ReturnValue: 1 } } } })
         )
         context.wifiProfileName = 'profile6'
         context.wifiProfileCount = 1
@@ -1199,23 +1199,23 @@ describe('WiFi Network Configuration', () => {
             try {
               if (state.matches('SUCCESS')) {
                 expect(state.context.failure).toEqual({
-                  Code: 'AMT_METHOD_FAILED',
+                  Code: 'AMT_WIFI_NOT_SUPPORTED',
                   Component: 'WirelessNetwork',
                   Step: 'ADD_WIFI_SETTINGS',
-                  Reason: 'AMT answered the request with a non-zero return value',
-                  AmtReturnValue: 2066
+                  Reason: 'Wireless settings are not supported by this device',
+                  AmtReturnValue: 1
                 })
                 expect(devices[clientId].status.Components?.WirelessNetwork).toEqual({
                   Result: 'Failure',
                   Details: 'Failed to add profile6',
-                  Code: 'AMT_METHOD_FAILED',
+                  Code: 'AMT_WIFI_NOT_SUPPORTED',
                   Step: 'ADD_WIFI_SETTINGS',
-                  AmtReturnValue: 2066,
-                  Reason: 'AMT answered the request with a non-zero return value'
+                  AmtReturnValue: 1,
+                  Reason: 'Wireless settings are not supported by this device'
                 })
                 expect(sendProgressToDeviceSpy).toHaveBeenCalledWith(
                   clientId,
-                  'Failed to add wireless profile profile6 (ReturnValue 2066)'
+                  'Failed to add wireless profile profile6 (ReturnValue 1)'
                 )
                 resolve()
               }

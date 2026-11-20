@@ -257,19 +257,19 @@ describe('Proxy Configuration State Machine', () => {
             try {
               if (state.matches('SUCCESS')) {
                 expect(state.context.failure).toEqual({
-                  Code: 'AMT_METHOD_FAILED',
+                  Code: 'AMT_PT_UNSUPPORTED',
                   Component: 'CIRAProxy',
                   Step: 'ADD_PROXY_CONFIGS',
-                  Reason: 'AMT answered the request with a non-zero return value',
+                  Reason: 'Operation or value is not supported by this AMT firmware',
                   AmtReturnValue: 2066
                 })
                 expect(devices[clientId].status.Components?.CIRAProxy).toEqual({
                   Result: 'Failure',
                   Details: 'Failed to add proxy1',
-                  Code: 'AMT_METHOD_FAILED',
+                  Code: 'AMT_PT_UNSUPPORTED',
                   Step: 'ADD_PROXY_CONFIGS',
                   AmtReturnValue: 2066,
-                  Reason: 'AMT answered the request with a non-zero return value'
+                  Reason: 'Operation or value is not supported by this AMT firmware'
                 })
                 expect(progressSpy).toHaveBeenCalledWith(
                   clientId,
@@ -381,10 +381,10 @@ describe('Proxy Configuration State Machine', () => {
                 expect(devices[clientId].status.Components?.CIRAProxy).toEqual({
                   Result: 'Failure',
                   Details: 'Failed to add proxy1',
-                  Code: 'AMT_METHOD_FAILED',
+                  Code: 'AMT_PT_INTERNAL_ERROR',
                   Step: 'ADD_PROXY_CONFIGS',
                   AmtReturnValue: 1,
-                  Reason: 'AMT answered the request with a non-zero return value'
+                  Reason: 'AMT reported an internal error'
                 })
                 resolve()
               }

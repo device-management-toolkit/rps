@@ -104,6 +104,68 @@ describe('resolveFailure', () => {
     })
   })
 
+  describe('return value tables', () => {
+    it('lets a decoded return value win over the step code and keeps the error text as detail', () => {
+      const failure = resolveFailure('ADD_PROXY_CONFIGS', 'CIRAProxy', {
+        code: 'RPS_UNEXPECTED_ERROR',
+        error: new Error('ReturnValue 2066'),
+        returnValue: 2066,
+        table: 'PT_STATUS'
+      })
+      expect(failure).toEqual({
+        Code: 'AMT_PT_UNSUPPORTED',
+        Component: 'CIRAProxy',
+        Step: 'ADD_PROXY_CONFIGS',
+        Reason: 'Operation or value is not supported by this AMT firmware',
+        AmtReturnValue: 2066,
+        Detail: 'ReturnValue 2066'
+      })
+    })
+
+    it('decodes Setup / AdminSetup values with the host-based setup table, not PT_STATUS', () => {
+      const failure = resolveFailure('CHECK_ADMIN_SETUP', 'Activation', {
+        code: 'RPS_ACTIVATION_FAILED',
+        returnValue: 3,
+        table: 'HOST_BASED_SETUP'
+      })
+      expect(failure.Code).toBe('IPS_RV_INVALID_PARAMETER')
+      expect(failure.AmtReturnValue).toBe(3)
+    })
+
+    it('decodes AddNextCertInChain values with its own table', () => {
+      const failure = resolveFailure('CHECK_CERT_CHAIN_RESPONSE', 'Activation', {
+        code: 'RPS_CERT_INVALID',
+        returnValue: 4,
+        table: 'ADD_NEXT_CERT_IN_CHAIN'
+      })
+      expect(failure.Code).toBe('IPS_RV_CERT_CHAIN_CERT_VERIFY_FAILED')
+      expect(failure.Reason).toBe('AMT could not verify the certificate')
+    })
+
+    it('decodes CIM and WiFi port values with their tables', () => {
+      expect(resolveFailure('S', 'CIRAConnection', { returnValue: 1, table: 'CIM' }).Code).toBe('CIM_RV_NOT_SUPPORTED')
+      expect(resolveFailure('S', 'WirelessNetwork', { returnValue: 1, table: 'WIFI_PORT_CONFIGURATION' }).Code).toBe(
+        'AMT_WIFI_NOT_SUPPORTED'
+      )
+    })
+
+    it('keeps the step code and the raw number for a value the table does not list', () => {
+      const failure = resolveFailure('CHECK_ADMIN_SETUP', 'Activation', {
+        code: 'RPS_ACTIVATION_FAILED',
+        returnValue: 2054,
+        table: 'HOST_BASED_SETUP'
+      })
+      expect(failure.Code).toBe('RPS_ACTIVATION_FAILED')
+      expect(failure.AmtReturnValue).toBe(2054)
+      const noStepCode = resolveFailure('ADD_WIFI_SETTINGS', 'WirelessNetwork', {
+        returnValue: 2066,
+        table: 'WIFI_PORT_CONFIGURATION'
+      })
+      expect(noStepCode.Code).toBe('AMT_METHOD_FAILED')
+      expect(noStepCode.AmtReturnValue).toBe(2066)
+    })
+  })
+
   it('does not read a stale successful HTTP response as an HTTP failure', () => {
     const failure = resolveFailure('ADD_NEXT_CERT_IN_CHAIN', 'Activation', {
       error: { statusCode: 200, statusMessage: 'OK' }

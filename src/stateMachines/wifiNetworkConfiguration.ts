@@ -411,6 +411,7 @@ export class WiFiConfiguration {
             'WirelessNetwork',
             {
               returnValue: () => returnValue,
+              table: 'WIFI_PORT_CONFIGURATION',
               message: `Failed to add wireless profile ${context.wifiProfileName}`
             },
             { context, event }

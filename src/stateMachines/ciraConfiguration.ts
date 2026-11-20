@@ -876,7 +876,8 @@ export class CIRAConfiguration {
                 failAt('USER_INITIATED_CONNECTION_SERVICE', 'CIRAConnection', {
                   message: 'Failed to set user initiated connection service',
                   assignTo: 'statusMessage',
-                  returnValue: ({ event }) => returnValueOf(event.output, 'RequestStateChange')
+                  returnValue: ({ event }) => returnValueOf(event.output, 'RequestStateChange'),
+                  table: 'CIM'
                 })
               ),
               target: 'FAILURE'

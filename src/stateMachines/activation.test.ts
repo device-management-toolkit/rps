@@ -2622,7 +2622,7 @@ describe('Activation State Machine', () => {
       } as any)
       expect(next.value).toBe('DEACTIVATION')
       expect(next.context.failure).toMatchObject({
-        Code: 'RPS_ACTIVATION_FAILED',
+        Code: 'IPS_RV_INVALID_STATE',
         Component: 'Activation',
         Step: step,
         AmtReturnValue: 2
