@@ -81,6 +81,51 @@ describe('CIRA Configuration State Machine', () => {
   let machineConfig: MachineImplementationsSimplified<CIRAConfigContext, CIRAConfigEvent>
   let machineContext
   let ciraConfig: CIRAConfig
+  it('blocks CIRA credential submission after cancellation during a Vault read', async () => {
+    const handler = new HttpHandler()
+    const controller = new AbortController()
+    handler.provisioning = { signal: controller.signal, pendingWrites: new Set() }
+    let finishRead!: (value: any) => void
+    const write = vi.fn(async () => true)
+    ciraStateMachineImpl.configurator.secretsManager = {
+      getSecretAtPath: vi.fn(
+        async () =>
+          await new Promise((resolve) => {
+            finishRead = resolve
+          })
+      ),
+      writeSecretWithObject: write
+    } as any
+    const saving = ciraStateMachineImpl.saveMPSPasswordToSecretProvider({
+      input: { ...machineContext, httpHandler: handler }
+    })
+    const rejected = expect(saving).rejects.toThrow('Provisioning session ended')
+    controller.abort()
+    finishRead({ TLS_ISSUED_CERTIFICATE: 'existing' })
+    await rejected
+    expect(write).not.toHaveBeenCalled()
+  })
+
+  it('keeps submitted CIRA credential writes in the session drain after cancellation', async () => {
+    const handler = new HttpHandler()
+    const controller = new AbortController()
+    handler.provisioning = { signal: controller.signal, pendingWrites: new Set() }
+    let finishWrite!: (value: any) => void
+    const pending = new Promise((resolve) => {
+      finishWrite = resolve
+    })
+    devices[clientId].tls = { issuedCertPEM: 'issued' } as any
+    ciraStateMachineImpl.configurator.secretsManager = { writeSecretWithObject: vi.fn(() => pending) } as any
+    const saving = ciraStateMachineImpl.saveMPSPasswordToSecretProvider({
+      input: { ...machineContext, httpHandler: handler }
+    })
+    controller.abort()
+    expect(handler.provisioning.pendingWrites.has(pending)).toBe(true)
+    finishWrite(true)
+    await saving
+    expect(handler.provisioning.pendingWrites.size).toBe(0)
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     ciraStateMachineImpl = new CIRAConfiguration()

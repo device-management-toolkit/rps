@@ -8,6 +8,7 @@ import Logger from './Logger.js'
 import { config } from './test/helper/Config.js'
 import { Validator } from './Validator.js'
 import { Configurator } from './Configurator.js'
+import { DbCreatorFactory } from './factories/DbCreatorFactory.js'
 import { DataProcessor } from './DataProcessor.js'
 import { Environment } from './utils/Environment.js'
 import { VersionChecker } from './VersionChecker.js'
@@ -20,6 +21,7 @@ import { ClientMethods, type ClientMsg } from './models/RCS.Config.js'
 import { Maintenance, type MaintenanceEvent } from './stateMachines/maintenance/maintenance.js'
 import { ChangePasswordEventType, type ChangePasswordEvent } from './stateMachines/maintenance/changePassword.js'
 // import { type IPConfiguration } from './stateMachines/syncIP.js'
+import ClientResponseMsg from './utils/ClientResponseMsg.js'
 import { RPSError } from './utils/RPSError.js'
 // import { type HostnameConfiguration } from './stateMachines/syncHostName.js'
 import { parseChunkedMessage } from './utils/parseChunkedMessage.js'
@@ -199,6 +201,7 @@ describe('Activate a device', () => {
     activation = new Activation()
   })
   it('should start activation service', async () => {
+    vi.spyOn(DbCreatorFactory.prototype, 'getDb').mockResolvedValue({} as any)
     const validatorSpy = vi.spyOn(dataProcessor.validator, 'validateActivationMsg').mockImplementation(async () => {})
     const setConnectionParamsSpy = vi.spyOn(dataProcessor, 'setConnectionParams').mockReturnValue()
     const activationStartSpy = vi.spyOn(activation.service, 'start').mockReturnValue(null)
@@ -485,4 +488,162 @@ it('process data to handle Response', async () => {
   // processData should trigger the validator.parseClientMsg path.
   // Exact call count depends on cross-test spy stacking; under Jest this was 3.
   expect(clientMethodshandleResponse).toHaveBeenCalled()
+})
+
+describe('Serialized activation lifecycle', () => {
+  const clientId = 'serialized-client'
+  let held: boolean
+  let release: ReturnType<typeof vi.fn>
+  let onLost: () => void
+  let complete: () => void
+  let actor: any
+  let processor: DataProcessor
+  const msg = { payload: { uuid: 'serialized-device' }, tenantId: '' } as ClientMsg
+  beforeEach(() => {
+    held = false
+    release = vi.fn(() => {
+      held = false
+    })
+    devices[clientId] = { tls: {}, reject: vi.fn(), ClientSocket: { close: vi.fn() } } as any
+    actor = {
+      service: {
+        start: vi.fn(),
+        send: vi.fn(),
+        stop: vi.fn(),
+        subscribe: vi.fn((observer) => {
+          complete = observer.complete
+        })
+      }
+    }
+    processor = new DataProcessor(new Logger('test'), {
+      validateActivationMsg: vi.fn(),
+      parseClientMsg: vi.fn()
+    } as any)
+    vi.spyOn(processor, 'setConnectionParams').mockImplementation(() => {})
+    vi.spyOn(DbCreatorFactory.prototype, 'getDb').mockResolvedValue({
+      acquireProvisioningLock: vi.fn(async (_uuid, lost) => {
+        if (held) return null
+        held = true
+        onLost = lost
+        return release
+      })
+    } as any)
+  })
+  afterEach(() => {
+    devices[clientId]?.stopProvisioning?.()
+    delete devices[clientId]
+    vi.restoreAllMocks()
+  })
+  it('reserves the connection before asynchronous validation can overlap', async () => {
+    let validated: () => void
+    vi.mocked(processor.validator.validateActivationMsg).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          validated = resolve
+        })
+    )
+    const first = processor.activateDevice(msg, clientId, actor)
+    await expect(processor.activateDevice(msg, clientId, actor)).rejects.toThrow('already running')
+    expect(processor.validator.validateActivationMsg).toHaveBeenCalledOnce()
+    validated!()
+    await first
+    expect(actor.service.start).toHaveBeenCalledOnce()
+  })
+  it('holds the lock through activation and releases after completion', async () => {
+    await processor.activateDevice(msg, clientId, actor)
+    expect(actor.service.send).toHaveBeenCalledOnce()
+    expect(release).not.toHaveBeenCalled()
+    await expect(processor.activateDevice(msg, clientId, actor)).rejects.toThrow('already running')
+    complete()
+    expect(actor.service.stop).toHaveBeenCalledOnce()
+    expect(release).toHaveBeenCalledOnce()
+  })
+  it('does not start a competing request while another session holds the lock', async () => {
+    held = true
+    await expect(processor.activateDevice(msg, clientId, actor)).rejects.toThrow('Another activation')
+    expect(actor.service.start).not.toHaveBeenCalled()
+    expect(actor.service.send).not.toHaveBeenCalled()
+  })
+  it('stops the activation and rejects pending exchanges when its lock is lost', async () => {
+    await processor.activateDevice(msg, clientId, actor)
+    onLost()
+    expect(actor.service.stop).toHaveBeenCalledOnce()
+    expect(devices[clientId].provisioningStopped).toBe(true)
+    expect(devices[clientId].reject).toHaveBeenCalled()
+    expect(devices[clientId].ClientSocket.close).toHaveBeenCalledWith(1011, 'Provisioning lock lost')
+    expect(release).toHaveBeenCalledOnce()
+  })
+  it('drains already-submitted writes before releasing its lock', async () => {
+    await processor.activateDevice(msg, clientId, actor)
+    const handler = actor.service.send.mock.calls[0][0].httpHandler as HttpHandler
+    let settle: () => void
+    const writing = handler.trackProvisioningWrite(
+      () =>
+        new Promise<void>((resolve) => {
+          settle = resolve
+        })
+    )
+    const stop = devices[clientId].stopProvisioning!
+    stop()
+    expect(release).not.toHaveBeenCalled()
+    await expect(processor.activateDevice(msg, clientId, actor)).rejects.toThrow('already running')
+    await expect(handler.trackProvisioningWrite(async () => {})).rejects.toThrow('session ended')
+    settle!()
+    await writing
+    await vi.waitFor(() => expect(release).toHaveBeenCalledOnce())
+  })
+
+  it('clears all stale tunnel state when the activation stops', async () => {
+    await processor.activateDevice(msg, clientId, actor)
+    const close = vi.fn()
+    Object.assign(devices[clientId], {
+      tlsTunnelManager: { close },
+      tlsTunnelSessionId: 'old',
+      tlsResponseBuffer: Buffer.from('old')
+    })
+    complete()
+    expect(close).toHaveBeenCalledOnce()
+    expect(devices[clientId].tlsTunnelManager).toBeUndefined()
+    expect(devices[clientId].tlsTunnelSessionId).toBeUndefined()
+    expect(devices[clientId].tlsResponseBuffer).toBeUndefined()
+    expect(devices[clientId].tlsTunnelNeedsReset).toBe(true)
+  })
+
+  it('returns an RPC error frame when lock acquisition fails', async () => {
+    vi.spyOn(processor.validator, 'parseClientMsg').mockReturnValue({ ...msg, method: ClientMethods.ACTIVATION } as any)
+    vi.spyOn(DbCreatorFactory.prototype, 'getDb').mockResolvedValue({
+      acquireProvisioningLock: vi.fn().mockRejectedValue(new Error('database unavailable'))
+    } as any)
+    vi.spyOn(ClientResponseMsg, 'get').mockImplementation(
+      (_id, _data, method, status, message) => ({ method, status, message }) as any
+    )
+    const response = await processor.processData('{}', clientId)
+    expect(response).toMatchObject({
+      method: 'error',
+      status: 'failed',
+      message: 'Failed to acquire provisioning session; retry activation'
+    })
+    expect(release).not.toHaveBeenCalled()
+  })
+
+  it('releases an acquired lock if the client disconnects while acquisition is pending', async () => {
+    let resume: (release: () => void) => void
+    vi.spyOn(DbCreatorFactory.prototype, 'getDb').mockResolvedValue({
+      acquireProvisioningLock: () =>
+        new Promise((resolve) => {
+          resume = resolve
+        })
+    } as any)
+    const pending = processor.activateDevice(msg, clientId, actor)
+    await vi.waitFor(() => expect(devices[clientId].stopProvisioning).toBeDefined())
+    await vi.waitFor(() => expect(resume).toBeDefined())
+    devices[clientId].stopProvisioning!()
+    // A replacement must not revive the cancelled request's acquisition continuation.
+    devices[clientId].provisioningStopped = false
+    devices[clientId].stopProvisioning = vi.fn()
+    resume!(release)
+    await expect(pending).rejects.toThrow('connection ended')
+    expect(release).toHaveBeenCalledOnce()
+    expect(actor.service.start).not.toHaveBeenCalled()
+  })
 })

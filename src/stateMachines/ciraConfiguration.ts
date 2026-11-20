@@ -81,8 +81,9 @@ export class CIRAConfiguration {
       }
     }
 
-    const data = await this.configurator.secretsManager.writeSecretWithObject(`devices/${clientObj.uuid}`, secretData)
-    return data
+    return await input.httpHandler.trackProvisioningWrite(() =>
+      this.configurator.secretsManager.writeSecretWithObject(`devices/${clientObj.uuid}`, secretData)
+    )
   }
 
   getMPSPassword = async ({ input }: { input: CIRAConfigContext }): Promise<any> => {

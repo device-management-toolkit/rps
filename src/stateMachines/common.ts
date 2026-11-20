@@ -68,6 +68,8 @@ export class HttpResponseError extends Error {
 const invokeWsmanCallInternal = async <T>(context: any): Promise<T> => {
   const { clientId, xmlMessage, httpHandler } = context
   const clientObj = devices[clientId]
+  context.httpHandler.assertProvisioningActive?.()
+  if (clientObj == null || clientObj.provisioningStopped) throw new Error('Provisioning session ended')
   if (xmlMessage == null) {
     throw new Error('xmlMessage is null - cannot send WSMAN request')
   }
@@ -172,11 +174,13 @@ const invokeWsmanCallViaTLSTunnel = async <T>(context: any, message: string): Pr
 
     try {
       await clientObj.tlsTunnelManager.connect()
+      httpHandler.assertProvisioningActive?.()
       clientObj.tlsTunnelManager.onData((data: Buffer) => {
         processTLSTunnelResponse(clientId, data, httpHandler)
       })
       invokeWsmanLogger.info(`TLS tunnel established`)
     } catch (err) {
+      httpHandler.assertProvisioningActive?.()
       invokeWsmanLogger.error(`TLS tunnel connect failed: ${(err as Error).message}`)
       clientObj.tlsTunnelManager = undefined
       clientObj.tlsTunnelSessionId = undefined
@@ -186,6 +190,7 @@ const invokeWsmanCallViaTLSTunnel = async <T>(context: any, message: string): Pr
     }
   }
 
+  httpHandler.assertProvisioningActive?.()
   clientObj.tlsResponseBuffer = undefined
   clientObj.pendingPromise = new Promise<T>((resolve, reject) => {
     clientObj.resolve = resolve
@@ -320,6 +325,10 @@ const invokeWsmanCall = async <T>(context: any, maxRetries = 0, timeoutMs?: numb
   const retryDelayMs = Environment.Config.delay_tls_timer * 1000
 
   while (retriesUsed < maxAttempts) {
+    context.httpHandler.assertProvisioningActive?.()
+    if (clientObj?.provisioningStopped) {
+      throw new Error('Provisioning session ended')
+    }
     try {
       const result = await Promise.race([
         invokeWsmanCallInternal<T>(context),
