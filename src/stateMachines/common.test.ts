@@ -44,6 +44,7 @@ describe('Common', () => {
     httpHandler: new HttpHandler()
   }
   beforeEach(() => {
+    context.httpHandler.provisioning = undefined
     originalWsmanMaxAttempts = Environment.Config.wsman_max_attempts
     // Keep this suite deterministic: explicit retries are covered by maxRetries arguments.
     Environment.Config.wsman_max_attempts = 1
@@ -113,8 +114,11 @@ describe('Common', () => {
     await expect(wsmanPromise).resolves.toEqual(expected)
   })
   it.each(['stopped', 'replaced'])('does not retry WSMAN after its provisioning session is %s', async (mode) => {
+    const controller = new AbortController()
+    context.httpHandler.provisioning = { signal: controller.signal, pendingWrites: new Set() }
     devices[clientId].stopProvisioning = vi.fn()
     sendSpy.mockImplementation(() => {
+      controller.abort()
       if (mode === 'stopped') devices[clientId].provisioningStopped = true
       else devices[clientId].stopProvisioning = vi.fn()
       devices[clientId].reject(new UNEXPECTED_PARSE_ERROR())
