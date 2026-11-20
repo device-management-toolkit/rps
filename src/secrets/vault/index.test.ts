@@ -554,3 +554,12 @@ it('should get health of vault', async () => {
     prefixUrl: `${Environment.Config.vault_address}/v1/`
   })
 })
+
+it('uses Vault CAS to preserve concurrent TLS ownership journal updates', async () => {
+  const post = vi
+    .spyOn(secretManagerService.gotClient, 'post')
+    .mockImplementation(() => ({ json: vi.fn(async () => ({ data: { version: 4 } })) }) as any)
+  const data = { certificates: [] }
+  await secretManagerService.writeSecretWithObjectIfVersion('tls-provisioning/device', data, 3)
+  expect(post).toHaveBeenCalledWith('tls-provisioning/device', { json: { data, options: { cas: 3 } } })
+})

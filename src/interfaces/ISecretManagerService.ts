@@ -13,6 +13,11 @@ export interface DeviceCredentials {
   version?: string
 }
 
+export interface TLSProvisioningJournal {
+  certificates: string[]
+  version?: string
+}
+
 export interface WifiCredentials {
   PSK_PASSPHRASE: string
   version?: string
@@ -50,12 +55,22 @@ export interface ISecretManagerService {
   // null only when the secret is absent (404); transport/server errors throw.
   getSecretAtPath: (
     path: string
-  ) => Promise<DeviceCredentials | WifiCredentials | TLSCredentials | CertCredentials | CiraConfigSecrets | null>
+  ) => Promise<
+    | DeviceCredentials
+    | WifiCredentials
+    | TLSCredentials
+    | CertCredentials
+    | CiraConfigSecrets
+    | TLSProvisioningJournal
+    | null
+  >
   writeSecretWithObject: (
     path: string,
     data: DeviceCredentials | WifiCredentials | TLSCredentials | CertCredentials | CiraConfigSecrets,
     metadata?: SecretMetadata
   ) => Promise<any>
+  // Optional atomic conditional writes used for provisioning ownership.
+  writeSecretWithObjectIfVersion?: (path: string, data: TLSProvisioningJournal, cas: number) => Promise<any>
   // never throws
   writeSecretMetadata?: (path: string, metadata: SecretMetadata) => Promise<void>
   deleteSecretAtPath: (path: string) => Promise<boolean>

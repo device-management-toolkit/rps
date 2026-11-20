@@ -195,6 +195,7 @@ export interface ClientObject {
   readyState?: number
   stopProvisioning?: () => void
   provisioningStopped?: boolean
+  cleanupAllowed?: boolean
   activationStatus?: boolean
   // Provisioning-status persistence to MPS (issue #2665).
   activatedAt?: Date // write-once: when RPS itself activated the device this session

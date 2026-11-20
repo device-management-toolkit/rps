@@ -553,6 +553,7 @@ describe('Serialized activation lifecycle', () => {
     await processor.activateDevice(msg, clientId, actor)
     expect(actor.service.send).toHaveBeenCalledOnce()
     expect(release).not.toHaveBeenCalled()
+    expect(devices[clientId].cleanupAllowed).toBe(true)
     await expect(processor.activateDevice(msg, clientId, actor)).rejects.toThrow('already running')
     complete()
     expect(actor.service.stop).toHaveBeenCalledOnce()

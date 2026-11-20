@@ -113,6 +113,8 @@ describe('TLS State Machine', () => {
           return await Promise.resolve({})
         }),
         pullPublicPrivateKeyPair: fromPromise(async ({ input }) => await Promise.resolve(testKeyPairPullResponse)),
+        prepareCertificate: fromPromise(async () => 'certificate'),
+        recordCertificate: fromPromise(async () => {}),
         addCertificate: fromPromise(async ({ input }) => await Promise.resolve({})),
         enumerateTLSCredentialContext: fromPromise(
           async ({ input }) =>
@@ -169,6 +171,8 @@ describe('TLS State Machine', () => {
         'GENERATE_KEY_PAIR',
         'ENUMERATE_PUBLIC_PRIVATE_KEY_PAIR',
         'PULL_PUBLIC_PRIVATE_KEY_PAIR',
+        'PREPARE_CERTIFICATE',
+        'RECORD_CERTIFICATE',
         'ADD_CERTIFICATE',
         'ENUMERATE_TLS_CREDENTIAL_CONTEXT',
         'PULL_TLS_CREDENTIAL_CONTEXT',
@@ -237,6 +241,8 @@ describe('TLS State Machine', () => {
         'GENERATE_KEY_PAIR',
         'ENUMERATE_PUBLIC_PRIVATE_KEY_PAIR',
         'PULL_PUBLIC_PRIVATE_KEY_PAIR',
+        'PREPARE_CERTIFICATE',
+        'RECORD_CERTIFICATE',
         'ADD_CERTIFICATE',
         'ENUMERATE_TLS_CREDENTIAL_CONTEXT',
         'PULL_TLS_CREDENTIAL_CONTEXT',
@@ -349,6 +355,7 @@ describe('TLS State Machine', () => {
     }
     context.keyPairHandle = TEST_KEY_PAIR_HANDLE
     context.message = testKeyPairPullResponse
+    context.certificateBlob = 'dGVzdA=='
     await tls.addCertificate({ input: { context, event } })
     expect(invokeWsmanCallSpy).toHaveBeenCalled()
   })
@@ -369,7 +376,7 @@ describe('TLS State Machine', () => {
       const signSpy = vi.spyOn(tls.certManager, 'amtCertSignWithCAKey')
       const createCertificateSpy = vi.spyOn(tls.certManager, 'createCertificate')
 
-      await tls.addCertificate({ input: { context, event } })
+      await tls.prepareCertificate({ input: { context, event } })
 
       // The digest and size must reach both the leaf and the root RPS mints. The options are the last argument.
       const optionsOf = (spy: { mock: { calls: any[][] } }): unknown => spy.mock.calls[0].at(-1)
@@ -590,6 +597,8 @@ describe('TLS State Machine', () => {
         'GENERATE_KEY_PAIR',
         'ENUMERATE_PUBLIC_PRIVATE_KEY_PAIR',
         'PULL_PUBLIC_PRIVATE_KEY_PAIR',
+        'PREPARE_CERTIFICATE',
+        'RECORD_CERTIFICATE',
         'ADD_CERTIFICATE',
         'ENUMERATE_TLS_CREDENTIAL_CONTEXT',
         'PULL_TLS_CREDENTIAL_CONTEXT',

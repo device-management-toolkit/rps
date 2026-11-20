@@ -1,3 +1,5 @@
+import { X509Certificate } from 'node:crypto'
+
 /*********************************************************************
  * Copyright (c) Intel Corporation 2024
  * SPDX-License-Identifier: Apache-2.0
@@ -37,4 +39,11 @@ export function ensurePemCertificate(input: string): string {
   const clean = input.replace(/\s+/g, '')
   const lines = clean.match(/.{1,64}/g) ?? []
   return `${PEM_BEGIN}\n${lines.join('\n')}\n${PEM_END}`
+}
+
+/** Accept the wrapped PEM, single-line PEM and base64 DER encodings used by RPS and AMT. */
+export function parseX509Certificate(certData: string): X509Certificate {
+  const pemMatch = certData.match(/-----BEGIN CERTIFICATE-----([^-]+)-----END CERTIFICATE-----/)
+  const base64 = pemMatch != null ? pemMatch[1].replace(/\s+/g, '') : certData
+  return new X509Certificate(Buffer.from(base64, 'base64'))
 }

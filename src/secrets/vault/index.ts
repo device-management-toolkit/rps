@@ -9,6 +9,7 @@ import {
   type ISecretManagerService,
   type SecretMetadata,
   type TLSCredentials,
+  type TLSProvisioningJournal,
   type WifiCredentials,
   isUsableHostname
 } from '../../interfaces/ISecretManagerService.js'
@@ -86,7 +87,7 @@ export class VaultService implements ISecretManagerService {
 
   async getSecretAtPath(
     path: string
-  ): Promise<DeviceCredentials | TLSCredentials | WifiCredentials | CiraConfigSecrets | null> {
+  ): Promise<DeviceCredentials | TLSCredentials | WifiCredentials | CiraConfigSecrets | TLSProvisioningJournal | null> {
     try {
       this.logger.verbose(`getting secrets from ${path}`)
       const rspJson: any = await this.gotClient.get(path).json()
@@ -107,11 +108,16 @@ export class VaultService implements ISecretManagerService {
     }
   }
 
-  async writeSecretWithObject(path: string, data: any, metadata?: SecretMetadata): Promise<any> {
+  async writeSecretWithObjectIfVersion(path: string, data: TLSProvisioningJournal, cas: number): Promise<any> {
+    return await this.writeSecretWithObject(path, data, undefined, cas)
+  }
+
+  async writeSecretWithObject(path: string, data: any, metadata?: SecretMetadata, cas?: number): Promise<any> {
     let result: any
     try {
       const json = {
-        data
+        data,
+        ...(cas != null ? { options: { cas } } : {})
       }
       this.logger.verbose('writing data to vault:')
       const rspJson: any = await this.gotClient.post(path, { json }).json()

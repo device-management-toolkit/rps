@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
+import { type ISecretManagerService } from '../interfaces/ISecretManagerService.js'
+import { recordCertificate } from './tlsProvisioningJournal.js'
 import { type AMT } from '@device-management-toolkit/wsman-messages'
 import { assign, sendTo, fromPromise, setup } from 'xstate'
 import { CertManager } from '../certManager.js'
@@ -34,6 +36,8 @@ export interface TLSContext extends CommonContext {
   amt: AMT.Messages
   keyPairHandle?: string
   authProtocol?: number
+  secretsManager?: ISecretManagerService
+  certificateBlob?: string
   certHandle?: string
 }
 
@@ -62,7 +66,7 @@ export class TLS {
     return await invokeWsmanCall(input, 2)
   }
 
-  addCertificate = async ({ input }: { input: { context: TLSContext; event: TLSEvent } }): Promise<any> => {
+  prepareCertificate = async ({ input }: { input: { context: TLSContext; event: TLSEvent } }): Promise<any> => {
     const clientObj = devices[input.context.clientId]
     let cert: string
     if (
@@ -143,10 +147,32 @@ export class TLS {
       clientObj.tls.issuedCertPEM = certResult.pem
     } else {
       cert = input.event.output.response.certificate
+      clientObj.tls.issuedCertPEM = ensurePemCertificate(cert)
     }
 
-    input.context.xmlMessage = input.context.amt.PublicKeyManagementService.AddCertificate({ CertificateBlob: cert })
+    return cert
+  }
 
+  recordCertificate = async ({ input }: { input: TLSContext }): Promise<void> => {
+    if (input.secretsManager == null || input.certificateBlob == null) {
+      throw new globalThis.Error('Missing TLS provisioning ownership storage')
+    }
+    if (devices[input.clientId].cleanupAllowed === false || !input.secretsManager.writeSecretWithObjectIfVersion) {
+      this.logger.info('Conditional ownership storage unavailable; untracked TLS objects will be preserved')
+      return
+    }
+    await recordCertificate(
+      input.secretsManager,
+      devices[input.clientId].uuid!,
+      input.certificateBlob,
+      input.httpHandler
+    )
+  }
+
+  addCertificate = async ({ input }: { input: { context: TLSContext; event: TLSEvent } }): Promise<any> => {
+    input.context.xmlMessage = input.context.amt.PublicKeyManagementService.AddCertificate({
+      CertificateBlob: input.context.certificateBlob!
+    })
     return await invokeWsmanCall(input.context, 2)
   }
 
@@ -311,6 +337,8 @@ export class TLS {
       generateKeyPair: fromPromise(this.generateKeyPair),
       enumeratePublicPrivateKeyPair: fromPromise(this.enumeratePublicPrivateKeyPair),
       pullPublicPrivateKeyPair: fromPromise(this.pullPublicPrivateKeyPair),
+      prepareCertificate: fromPromise(this.prepareCertificate),
+      recordCertificate: fromPromise(this.recordCertificate),
       addCertificate: fromPromise(this.addCertificate),
       enumerateTLSCredentialContext: fromPromise(this.enumerateTLSCredentialContext),
       pullTLSCredentialContext: fromPromise(this.pullTLSCredentialContext),
@@ -369,6 +397,7 @@ export class TLS {
       statusMessage: input.statusMessage,
       retryCount: input.retryCount,
       amt: input.amt,
+      secretsManager: input.secretsManager,
       tlsSettingData: input.tlsSettingData
     }),
     output: ({ context }) => ({ status: context.status, errorMessage: context.errorMessage }),
@@ -448,7 +477,7 @@ export class TLS {
             guard: 'useTLSEnterpriseAssistantCert',
             target: 'ENTERPRISE_ASSISTANT_RESPONSE'
           },
-          'ADD_CERTIFICATE'
+          'PREPARE_CERTIFICATE'
         ]
       },
       ENTERPRISE_ASSISTANT_REQUEST: {
@@ -517,7 +546,7 @@ export class TLS {
             actions: [
               assign({ message: ({ event }) => event.output })
             ],
-            target: 'ADD_CERTIFICATE'
+            target: 'PREPARE_CERTIFICATE'
           },
           onError: {
             actions: assign({
@@ -617,6 +646,31 @@ export class TLS {
           },
           'CREATE_TLS_CREDENTIAL_CONTEXT'
         ]
+      },
+      PREPARE_CERTIFICATE: {
+        invoke: {
+          src: 'prepareCertificate',
+          input: ({ context, event }) => ({ context, event }),
+          onDone: {
+            actions: assign({ certificateBlob: ({ event }) => event.output }),
+            target: 'RECORD_CERTIFICATE'
+          },
+          onError: {
+            actions: assign({ errorMessage: 'Failed to prepare TLS certificate' }),
+            target: 'FAILED'
+          }
+        }
+      },
+      RECORD_CERTIFICATE: {
+        invoke: {
+          src: 'recordCertificate',
+          input: ({ context }) => context,
+          onDone: 'ADD_CERTIFICATE',
+          onError: {
+            actions: assign({ errorMessage: 'Failed to record TLS provisioning ownership' }),
+            target: 'FAILED'
+          }
+        }
       },
       ADD_CERTIFICATE: {
         invoke: {

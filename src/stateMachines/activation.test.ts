@@ -315,6 +315,7 @@ describe('Activation State Machine', () => {
         setMEBxPassword: fromPromise(async ({ input }) => await Promise.resolve({ clientId })),
         initializeTLSTunnel: fromPromise(async () => await Promise.resolve(true)),
         fetchMPSRootKey: fromPromise(async () => await Promise.resolve(true)),
+        tlsCleanup: fromPromise(async () => ({ errorMessage: '' })),
         saveTlsTunnelCerts: fromPromise(async () => await Promise.resolve(true)),
         signalPortSwitch: fromPromise(async () => await Promise.resolve(true)),
         initializeTlsTunnelConnection: fromPromise(async () => await Promise.resolve(true)),
@@ -1127,6 +1128,7 @@ describe('Activation State Machine', () => {
           'NETWORK_CONFIGURATION',
           'FEATURES_CONFIGURATION',
           'SYNC_ACTIVATION_TIME',
+          'RECONCILE_TLS_OBJECTS',
           'PROVISIONED'
         ]
         const ccmActivationService = createActor(mockActivationMachine, { input: context })
@@ -1188,6 +1190,7 @@ describe('Activation State Machine', () => {
           'NETWORK_CONFIGURATION',
           'FEATURES_CONFIGURATION',
           'SYNC_ACTIVATION_TIME',
+          'RECONCILE_TLS_OBJECTS',
           'PROVISIONED'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
@@ -1248,6 +1251,7 @@ describe('Activation State Machine', () => {
           'FEATURES_CONFIGURATION',
           'CIRA',
           'SYNC_ACTIVATION_TIME',
+          'RECONCILE_TLS_OBJECTS',
           'PROVISIONED'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
@@ -1452,6 +1456,7 @@ describe('Activation State Machine', () => {
           'FEATURES_CONFIGURATION',
           'CIRA',
           'SYNC_ACTIVATION_TIME',
+          'RECONCILE_TLS_OBJECTS',
           'PROVISIONED'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
@@ -1820,6 +1825,7 @@ describe('Activation State Machine', () => {
           'FEATURES_CONFIGURATION',
           'CIRA',
           'SYNC_ACTIVATION_TIME',
+          'RECONCILE_TLS_OBJECTS',
           'PROVISIONED'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
@@ -1981,6 +1987,7 @@ describe('Activation State Machine', () => {
           'FEATURES_CONFIGURATION',
           'CIRA',
           'SYNC_ACTIVATION_TIME',
+          'RECONCILE_TLS_OBJECTS',
           'PROVISIONED'
         ]
 
@@ -2292,6 +2299,7 @@ describe('Activation State Machine', () => {
           'FEATURES_CONFIGURATION',
           'CIRA',
           'SYNC_ACTIVATION_TIME',
+          'RECONCILE_TLS_OBJECTS',
           'PROVISIONED'
         ]
 
@@ -2359,6 +2367,7 @@ describe('Activation State Machine', () => {
           'FEATURES_CONFIGURATION',
           'CIRA',
           'SYNC_ACTIVATION_TIME',
+          'RECONCILE_TLS_OBJECTS',
           'PROVISIONED'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
@@ -2631,6 +2640,7 @@ describe('Activation State Machine', () => {
           'TLS',
           'SAVE_POST_PROVISIONING_CERTS',
           'SYNC_ACTIVATION_TIME',
+          'RECONCILE_TLS_OBJECTS',
           'PROVISIONED'
         ]
         const ccmActivationService = createActor(mockActivationMachine, { input: context })
@@ -2687,6 +2697,7 @@ describe('Activation State Machine', () => {
           'NETWORK_CONFIGURATION',
           'FEATURES_CONFIGURATION',
           'SYNC_ACTIVATION_TIME',
+          'RECONCILE_TLS_OBJECTS',
           'PROVISIONED'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
@@ -2995,7 +3006,7 @@ describe('Activation State Machine', () => {
       const onDone = states.SYNC_ACTIVATION_TIME.invoke.onDone
 
       expect(onDone[0].guard({ event: { output: { status: 'success' } } })).toBe(true)
-      expect(onDone[0].target).toBe('PROVISIONED')
+      expect(onDone[0].target).toBe('RECONCILE_TLS_OBJECTS')
       expect(onDone[1].target).toBe('FAILED')
     })
 
@@ -3051,6 +3062,7 @@ describe('Activation State Machine', () => {
           'NETWORK_CONFIGURATION',
           'FEATURES_CONFIGURATION',
           'SYNC_ACTIVATION_TIME',
+          'RECONCILE_TLS_OBJECTS',
           'PROVISIONED'
         ]
         const service = createActor(mockActivationMachine, { input: context })
@@ -3289,10 +3301,46 @@ describe('Activation State Machine', () => {
     })
   })
 
+  it('reports cleanup failure without deactivating the usable identity', async () => {
+    const { createMachine, waitFor } = await import('xstate')
+    const machine = activation.machine.provide({
+      actors: {
+        tlsCleanup: fromPromise(async () => ({ errorMessage: 'Association enumeration failed' }))
+      }
+    })
+    const segment = createMachine(
+      {
+        ...machine.config,
+        initial: 'RECONCILE_TLS_OBJECTS',
+        context: {
+          ...context,
+          tlsCCMComplete: true,
+          tlsACMComplete: false,
+          profile: { ...context.profile, activation: ClientAction.ADMINCTLMODE }
+        },
+        states: { ...machine.config.states, DEACTIVATION: { type: 'final' } }
+      },
+      machine.implementations
+    )
+    const actor = createActor(segment)
+    actor.start()
+    const result = await waitFor(actor, (snapshot) => snapshot.status === 'done')
+    expect(result.value).toBe('FINAL')
+    expect(result.context.errorMessage).toBe('Association enumeration failed')
+    actor.stop()
+  })
+
   describe('TLS Tunnel Activation', () => {
     describe('saveTlsTunnelCerts', () => {
       beforeEach(async () => {
         await activation.configurator.ready
+      })
+
+      it('rejects a failed Vault write instead of authorizing cleanup', async () => {
+        devices[clientId].tls = { issuedCertPEM: 'issuedCert' } as any
+        vi.spyOn(activation.configurator.secretsManager, 'getSecretAtPath').mockResolvedValue(null)
+        vi.spyOn(activation.configurator.secretsManager, 'writeSecretWithObject').mockResolvedValue(null)
+        await expect(activation.saveTlsTunnelCerts({ input: context } as any)).rejects.toThrow('persist')
       })
 
       it('should save leaf cert to vault for ACM', async () => {

@@ -149,6 +149,8 @@ export class DataProcessor {
         throw new RPSError('Provisioning connection ended during validation')
       }
       const db = await new DbCreatorFactory().getDb()
+      // Other providers can provision, but cannot authorize recovery deletion.
+      device.cleanupAllowed = db.acquireProvisioningLock != null
       const lock = await db.acquireProvisioningLock?.(clientMsg.payload.uuid, lockLost)
       if (lock === null) throw new RPSError('Another activation is running for this device UUID')
       release = lock

@@ -3,7 +3,17 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { type CIM, type AMT, type IPS } from '@device-management-toolkit/wsman-messages'
+import { createPublicKey } from 'node:crypto'
+import { Base, WSManMessageCreator } from '@device-management-toolkit/wsman-messages/WSMan.js'
+import {
+  type ISecretManagerService,
+  type TLSProvisioningJournal,
+  type TLSCredentials,
+  type DeviceCredentials
+} from '../interfaces/ISecretManagerService.js'
+import { certificateIdentity, readJournal, writeJournal } from './tlsProvisioningJournal.js'
+import { parseX509Certificate as x509 } from '../utils/certHelpers.js'
+import { CIM, AMT, type IPS } from '@device-management-toolkit/wsman-messages'
 import { assign, fromPromise, sendTo, setup } from 'xstate'
 import { CertManager } from '../certManager.js'
 import { Configurator } from '../Configurator.js'
@@ -19,6 +29,18 @@ import { type AMTConfiguration } from '../models/index.js'
 import { Error } from './error.js'
 import { type CommonContext, invokeWsmanCall } from './common.js'
 import { Environment } from '../utils/Environment.js'
+
+// Shared deletion operations for ordinary unconfiguration and targeted recovery.
+// Each caller selects its own objects and invokes this from an explicit state.
+async function deleteSecurityObject(
+  input: CommonContext & { amt: AMT.Messages },
+  resource: 'PublicKeyCertificate' | 'PublicPrivateKeyPair',
+  instanceId: string,
+  retries = 0
+): Promise<any> {
+  input.xmlMessage = input.amt[resource].Delete({ name: 'InstanceID', value: instanceId })
+  return await invokeWsmanCall(input, retries)
+}
 
 export interface UnconfigContext extends CommonContext {
   profile: AMTConfiguration | null
@@ -302,8 +324,7 @@ export class Unconfiguration {
     if (input.amt != null) {
       const selector = { name: 'InstanceID', value: input.publicKeyCertificates[0].InstanceID }
       input.publicKeyCertificates = input.publicKeyCertificates.slice(1)
-      input.xmlMessage = input.amt.PublicKeyCertificate.Delete(selector)
-      return await invokeWsmanCall(input)
+      return await deleteSecurityObject(input, 'PublicKeyCertificate', selector.value)
     } else {
       this.logger.error('Null object in deletePublicKeyCertificate()')
     }
@@ -441,8 +462,7 @@ export class Unconfiguration {
     if (input.amt != null) {
       const selector = { name: 'InstanceID', value: input.privateCerts[0].InstanceID }
       input.privateCerts = input.privateCerts.slice(1)
-      input.xmlMessage = input.amt.PublicPrivateKeyPair.Delete(selector)
-      return await invokeWsmanCall(input)
+      return await deleteSecurityObject(input, 'PublicPrivateKeyPair', selector.value)
     } else {
       this.logger.error('Null object in deletePublicPrivateKeyPair()')
     }
@@ -1250,4 +1270,376 @@ export class Unconfiguration {
     this.dbFactory = new DbCreatorFactory()
     this.logger = new Logger('Unconfiguration_State_Machine')
   }
+}
+
+// Recovery only removes confirmed abandoned provisioning objects. Its machine
+// is separate from broad unconfiguration so it never disables active features.
+interface CleanupContext extends CommonContext {
+  amt: AMT.Messages
+  secretsManager: ISecretManagerService
+  journal: TLSProvisioningJournal
+  resources: Base[]
+  resourceIndex: number
+  enumerationContext?: string
+  inventory: Record<string, any[]>
+  candidate?: { certificate?: any; key?: any; pem: string }
+  lastDeleted?: string
+  trustedChain?: string[]
+  persistedCertificate?: string
+  errorMessage: string
+}
+
+const array = (value: any): any[] => (value == null ? [] : Array.isArray(value) ? value : [value])
+const keyIdentity = (der: string): string => {
+  for (const type of ['spki', 'pkcs1'] as const) {
+    try {
+      return createPublicKey({ key: Buffer.from(der, 'base64'), type, format: 'der' })
+        .export({ type: 'spki', format: 'der' })
+        .toString('base64')
+    } catch {
+      /* Try the other AMT public-key encoding. */
+    }
+  }
+  throw new globalThis.Error('Invalid AMT public key')
+}
+const explicitlyTrue = (value: any): boolean => value === true || value === 'true' || value === 1 || value === '1'
+const explicitlyFalse = (value: any): boolean => value === false || value === 'false' || value === 0 || value === '0'
+
+// Include selectors in both ends of every association. Unrecognised reference
+// shapes abort selection rather than being mistaken for an unused identity.
+function references(entries: any[]): Set<string> {
+  const result = new Set<string>()
+  const visit = (value: any): void => {
+    if (value == null || typeof value !== 'object') return
+    if ('Selector' in value) {
+      for (const selector of array(value.Selector)) {
+        if (typeof selector === 'string' && selector !== '') result.add(selector)
+        else if (typeof selector?._ === 'string' && selector._ !== '') result.add(selector._)
+        else throw new globalThis.Error('Unrecognised credential association selector')
+      }
+    }
+    for (const child of Object.values(value)) {
+      if (Array.isArray(child)) child.forEach(visit)
+      else visit(child)
+    }
+  }
+  for (const entry of entries) {
+    if (
+      array(entry.ElementInContext?.ReferenceParameters?.SelectorSet?.Selector).length === 0 ||
+      array(entry.ElementProvidingContext?.ReferenceParameters?.SelectorSet?.Selector).length === 0
+    ) {
+      throw new globalThis.Error('Incomplete credential association')
+    }
+    visit(entry)
+  }
+  return result
+}
+
+// Memoize decoding only for one fresh inventory check, never across deletions.
+function memoize<T>(decode: (value: string) => T): (value: string) => T {
+  const cache = new Map<string, T>()
+  return (value) => {
+    if (!cache.has(value)) cache.set(value, decode(value))
+    return cache.get(value)!
+  }
+}
+function cleanupIdentities() {
+  const parse = memoize(x509)
+  return {
+    parse,
+    fingerprint: (pem: string) => parse(pem).fingerprint256,
+    publicKey: memoize((pem: string) =>
+      parse(pem).publicKey.export({ type: 'spki', format: 'der' }).toString('base64')
+    ),
+    key: memoize(keyIdentity)
+  }
+}
+
+const cleanupInput = ({ context }: { context: CleanupContext }): CleanupContext => context
+const cleanupInvoke = (src: 'load' | 'enumerate' | 'pull' | 'deleteObject' | 'retire') => ({
+  src,
+  input: cleanupInput,
+  onError: 'FAILED' as const
+})
+
+export class TLSCleanup {
+  // Remote access mutual authentication also consumes leaf certificates. The
+  // dependency's generic Base provides Enumerate/Pull for this association.
+  remoteCredentials = (): Base => {
+    const resource = new Base(new WSManMessageCreator('http://intel.com/wbem/wscim/1/amt-schema/1/'))
+    resource.className = 'AMT_RemoteAccessCredentialContext' as AMT.Classes
+    return resource
+  }
+
+  load = async ({ input }: { input: CleanupContext }): Promise<any> => {
+    const uuid = devices[input.clientId].uuid
+    if (!uuid) throw new globalThis.Error('Missing device UUID for TLS cleanup')
+    if (devices[input.clientId].cleanupAllowed === false || !input.secretsManager.writeSecretWithObjectIfVersion)
+      return { journal: { certificates: [] } }
+    const journal = await readJournal(input.secretsManager, uuid)
+    // No durable ownership evidence: leave all device objects alone.
+    if (journal.certificates.length === 0) return { journal }
+    const credentials = (await input.secretsManager.getSecretAtPath(`devices/${uuid}`)) as DeviceCredentials | null
+    if (!credentials?.TLS_ISSUED_CERTIFICATE) throw new globalThis.Error('No persisted TLS identity for cleanup')
+    const device = devices[input.clientId]
+    const profile = device.ClientData?.payload?.profile
+    const tlsSecrets = profile?.profileName
+      ? ((await input.secretsManager.getSecretAtPath(`TLS/${profile.profileName}`)) as TLSCredentials | null)
+      : null
+    const root =
+      tlsSecrets?.ROOT_CERTIFICATE?.pem ?? tlsSecrets?.ROOT_CERTIFICATE?.certbin ?? device.tls?.mpsRootCertPEM
+    const trustedChain = root ? root.match(/-----BEGIN CERTIFICATE-----[^-]+-----END CERTIFICATE-----/g) ?? [root] : []
+    return { journal, trustedChain, persistedCertificate: credentials.TLS_ISSUED_CERTIFICATE }
+  }
+
+  enumerate = async ({ input }: { input: CleanupContext }): Promise<any> => {
+    input.xmlMessage = input.resources[input.resourceIndex].Enumerate()
+    return await invokeWsmanCall(input, 2)
+  }
+
+  pull = async ({ input }: { input: CleanupContext }): Promise<any> => {
+    input.xmlMessage = input.resources[input.resourceIndex].Pull(input.enumerationContext!)
+    return await invokeWsmanCall(input, 2)
+  }
+
+  private verifyReplacement(input: CleanupContext, ids: ReturnType<typeof cleanupIdentities>): string | undefined {
+    const certificates = input.inventory.AMT_PublicKeyCertificate ?? []
+    const keys = input.inventory.AMT_PublicPrivateKeyPair ?? []
+    const contexts = input.inventory.AMT_TLSCredentialContext ?? []
+    if (!(input.inventory.AMT_TLSSettingData ?? []).some((setting) => explicitlyTrue(setting.Enabled))) {
+      throw new globalThis.Error('Replacement TLS identity is not enabled')
+    }
+    const tlsReferences = references(contexts)
+    if (input.lastDeleted && [...certificates, ...keys].some((item) => item.InstanceID === input.lastDeleted)) {
+      throw new globalThis.Error('AMT did not remove the selected TLS object')
+    }
+    const activeFingerprint = ids.fingerprint(input.persistedCertificate!)
+    const active = certificates.find((cert) => ids.fingerprint(cert.X509Certificate) === activeFingerprint)
+    if (
+      !active ||
+      !tlsReferences.has(active.InstanceID) ||
+      !keys.some((key) => ids.key(key.DERKey) === ids.publicKey(active.X509Certificate))
+    ) {
+      throw new globalThis.Error('Persisted TLS identity is not associated with an AMT key and TLS context')
+    }
+    const leaf = ids.parse(active.X509Certificate)
+    const configured = (input.trustedChain ?? []).map(ids.parse)
+    const roots = [
+      ...certificates
+        .filter((cert) => explicitlyTrue(cert.TrustedRootCertficate))
+        .map((cert) => ids.parse(cert.X509Certificate)),
+      ...configured.filter((cert) => cert.checkIssued(cert) && cert.verify(cert.publicKey))
+    ]
+    // Microsoft CA need not install its root on AMT. Without a configured trust
+    // anchor, preserve pending objects rather than fail otherwise valid activation.
+    if (!roots.length) return undefined
+    const issuers = [...configured, ...certificates.map((cert) => ids.parse(cert.X509Certificate))]
+    const valid = (cert: ReturnType<typeof x509>): boolean =>
+      Date.now() >= Date.parse(cert.validFrom) && Date.now() < Date.parse(cert.validTo)
+    const verifyChain = (cert: ReturnType<typeof x509>, visited = new Set<string>()): boolean => {
+      if (!valid(cert) || visited.has(cert.fingerprint256)) return false
+      if (roots.some((root) => root.ca && valid(root) && root.fingerprint256 === cert.fingerprint256)) return true
+      const next = new Set(visited).add(cert.fingerprint256)
+      return [...issuers, ...roots].some(
+        (issuer) => issuer.ca && cert.checkIssued(issuer) && cert.verify(issuer.publicKey) && verifyChain(issuer, next)
+      )
+    }
+    if (!verifyChain(leaf)) throw new globalThis.Error('Replacement TLS identity cannot be verified')
+    return activeFingerprint
+  }
+
+  private selectAbandoned(
+    input: CleanupContext,
+    ids: ReturnType<typeof cleanupIdentities>,
+    activeFingerprint: string
+  ): CleanupContext['candidate'] {
+    const certificates = input.inventory.AMT_PublicKeyCertificate ?? []
+    const keys = input.inventory.AMT_PublicPrivateKeyPair ?? []
+    const allReferences = references(
+      Object.entries(input.inventory)
+        .filter(([name]) => name.endsWith('CredentialContext'))
+        .flatMap(([, entries]) => entries)
+    )
+    for (const pem of input.journal.certificates) {
+      if (ids.fingerprint(pem) === activeFingerprint) continue
+      const certificate = certificates.find((cert) => ids.fingerprint(cert.X509Certificate) === ids.fingerprint(pem))
+      if (
+        certificate &&
+        (!explicitlyFalse(certificate.TrustedRootCertficate) ||
+          !explicitlyFalse(certificate.ReadOnlyCertificate) ||
+          allReferences.has(certificate.InstanceID))
+      )
+        continue
+      const matchingKeys = keys.filter((key) => ids.key(key.DERKey) === ids.publicKey(pem))
+      const key = matchingKeys.length === 1 ? matchingKeys[0] : undefined
+      // A shared key stays even when its abandoned leaf can be removed.
+      const keyUsed =
+        key &&
+        (allReferences.has(key.InstanceID) ||
+          certificates.some(
+            (cert) => cert !== certificate && ids.publicKey(cert.X509Certificate) === ids.publicKey(pem)
+          ))
+      return { certificate, key: keyUsed ? undefined : key, pem }
+    }
+    return undefined
+  }
+
+  select = async ({ input }: { input: CleanupContext }): Promise<CleanupContext['candidate']> => {
+    const ids = cleanupIdentities()
+    const active = this.verifyReplacement(input, ids)
+    return active == null ? undefined : this.selectAbandoned(input, ids, active)
+  }
+
+  deleteObject = async ({ input }: { input: CleanupContext }): Promise<any> => {
+    const { certificate, key } = input.candidate!
+    // Remove the leaf first; the next selection uses fresh inventory for its key.
+    return await deleteSecurityObject(
+      input,
+      certificate ? 'PublicKeyCertificate' : 'PublicPrivateKeyPair',
+      (certificate ?? key).InstanceID,
+      2
+    )
+  }
+
+  retire = async ({ input }: { input: CleanupContext }): Promise<void> => {
+    const uuid = devices[input.clientId].uuid
+    if (!uuid) throw new globalThis.Error('Missing device UUID for TLS cleanup')
+    const journal = await readJournal(input.secretsManager, uuid)
+    // Also retire the completed active leaf so future rotations cannot target it.
+    const fingerprint = certificateIdentity(input.candidate?.pem ?? input.persistedCertificate!)
+    const certificates = journal.certificates.filter((cert) => certificateIdentity(cert) !== fingerprint)
+    if (certificates.length !== journal.certificates.length) {
+      await writeJournal(input.secretsManager, uuid, journal, certificates, input.httpHandler)
+    }
+  }
+
+  machine = setup({
+    types: {} as {
+      context: CleanupContext
+      input: Pick<CleanupContext, 'clientId' | 'amt' | 'httpHandler' | 'secretsManager'>
+    },
+    actors: {
+      load: fromPromise(this.load),
+      enumerate: fromPromise(this.enumerate),
+      pull: fromPromise(this.pull),
+      select: fromPromise(this.select),
+      deleteObject: fromPromise(this.deleteObject),
+      retire: fromPromise(this.retire)
+    }
+  }).createMachine({
+    id: 'tls-cleanup',
+    context: ({ input }) => ({ ...input, journal: { certificates: [] }, resources: [
+        input.amt.PublicKeyCertificate,
+        input.amt.PublicPrivateKeyPair,
+        input.amt.TLSCredentialContext,
+        input.amt.TLSSettingData,
+        input.amt.IEEE8021xCredentialContext,
+        new CIM.Messages().CredentialContext,
+        this.remoteCredentials()
+      ], resourceIndex: 0, inventory: {}, message: null, xmlMessage: '', errorMessage: '' }),
+    initial: 'LOAD',
+    output: ({ context }) => ({ errorMessage: context.errorMessage }),
+    states: {
+      LOAD: {
+        invoke: {
+          ...cleanupInvoke('load'),
+          onDone: [
+            {
+              guard: ({ event }) => event.output.journal.certificates.length > 0,
+              actions: assign(({ event }) => event.output),
+              target: 'RESET_INVENTORY'
+            },
+            'SUCCESS'
+          ]
+        }
+      },
+      RESET_INVENTORY: { entry: assign({ inventory: {}, resourceIndex: 0 }), always: 'ENUMERATE' },
+      ENUMERATE: {
+        invoke: {
+          ...cleanupInvoke('enumerate'),
+          onDone: {
+            actions: assign({
+              enumerationContext: ({ event }) => event.output?.Envelope?.Body?.EnumerateResponse?.EnumerationContext
+            }),
+            target: 'PULL'
+          }
+        }
+      },
+      PULL: {
+        invoke: {
+          ...cleanupInvoke('pull'),
+          onDone: { actions: assign({ message: ({ event }) => event.output }), target: 'READ_PAGE' }
+        }
+      },
+      READ_PAGE: {
+        entry: assign(({ context }) => {
+          const page = context.message?.Envelope?.Body?.PullResponse
+          if (page == null || (page.EndOfSequence == null && !page.EnumerationContext) || page.Items == null)
+            return { errorMessage: 'Incomplete TLS cleanup inventory' }
+          const inventory = { ...context.inventory }
+          if (page.Items !== '') {
+            for (const [name, entries] of Object.entries(page.Items))
+              inventory[name] = [...(inventory[name] ?? []), ...array(entries)]
+          }
+          return { inventory, enumerationContext: page.EndOfSequence == null ? page.EnumerationContext : undefined }
+        }),
+        always: [
+          { guard: ({ context }) => !!context.errorMessage, target: 'FAILED' },
+          { guard: ({ context }) => !!context.enumerationContext, target: 'PULL' },
+          {
+            guard: ({ context }) => context.resourceIndex < context.resources.length - 1,
+            actions: assign({ resourceIndex: ({ context }) => context.resourceIndex + 1 }),
+            target: 'ENUMERATE'
+          },
+          'SELECT'
+        ]
+      },
+      SELECT: {
+        invoke: {
+          src: 'select',
+          input: cleanupInput,
+          onDone: { actions: assign({ candidate: ({ event }) => event.output }), target: 'CHECK_CANDIDATE' },
+          onError: 'FAILED'
+        }
+      },
+      CHECK_CANDIDATE: {
+        always: [
+          {
+            guard: ({ context }) => !!(context.candidate?.certificate ?? context.candidate?.key),
+            target: 'DELETE_OBJECT'
+          },
+          'RETIRE'
+        ]
+      },
+      DELETE_OBJECT: {
+        invoke: {
+          ...cleanupInvoke('deleteObject'),
+          onDone: {
+            actions: assign({
+              lastDeleted: ({ context }) => (context.candidate!.certificate ?? context.candidate!.key).InstanceID
+            }),
+            target: 'RESET_INVENTORY'
+          }
+        }
+      },
+      RETIRE: {
+        invoke: {
+          ...cleanupInvoke('retire'),
+          onDone: [
+            { guard: ({ context }) => !!context.candidate, target: 'LOAD' },
+            'SUCCESS'
+          ]
+        }
+      },
+      SUCCESS: { type: 'final' },
+      FAILED: {
+        entry: assign({
+          errorMessage: ({ context, event }) =>
+            context.errorMessage ||
+            `TLS cleanup failed: ${'error' in event && event.error instanceof globalThis.Error ? event.error.message : 'Unknown error'}; retry recovery`
+        }),
+        type: 'final'
+      }
+    }
+  })
 }
