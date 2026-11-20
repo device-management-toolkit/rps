@@ -38,13 +38,13 @@ import {
   applicableComponents
 } from './common.js'
 import ClientResponseMsg from '../utils/ClientResponseMsg.js'
-import { Unconfiguration } from './unconfiguration.js'
+import { Unconfiguration, TLSCleanup } from './unconfiguration.js'
 import { type DeviceCredentials } from '../interfaces/ISecretManagerService.js'
 import { type ClientObject } from '../models/RCS.Config.js'
 import { NetworkConfiguration } from './networkConfiguration.js'
 import { error } from 'console'
 import { AmtChainVerificationError, TLSTunnelManager } from '../TLSTunnelManager.js'
-import { ensurePemCertificate } from '../utils/certHelpers.js'
+import { ensurePemCertificate, parseX509Certificate } from '../utils/certHelpers.js'
 import {
   getAMTCertificatePolicy,
   type ProvisioningSignatureParameters,
@@ -872,15 +872,7 @@ export class Activation {
       | undefined
   ): string | undefined => selector?._
 
-  private parseX509Certificate = (certData: string): crypto.X509Certificate => {
-    // Strip PEM header/footer (handles both proper multi-line PEM and single-line PEM)
-    const pemMatch = certData.match(/-----BEGIN CERTIFICATE-----([^-]+)-----END CERTIFICATE-----/)
-    if (pemMatch != null) {
-      return new crypto.X509Certificate(Buffer.from(pemMatch[1].replace(/\s+/g, ''), 'base64'))
-    }
-    // Assume raw base64 DER
-    return new crypto.X509Certificate(Buffer.from(certData, 'base64'))
-  }
+  private parseX509Certificate = (certData: string): crypto.X509Certificate => parseX509Certificate(certData)
 
   private normalizeFingerprint = (fingerprint: string): string => fingerprint.replace(/:/g, '').toLowerCase()
 
@@ -1231,11 +1223,12 @@ export class Activation {
       TLS_ISSUED_CERTIFICATE: clientObj.tls.issuedCertPEM
     }
 
-    await input.httpHandler.trackProvisioningWrite(() =>
+    const saved = await input.httpHandler.trackProvisioningWrite(() =>
       this.configurator.secretsManager.writeSecretWithObject(`devices/${clientObj.uuid}`, data, {
         hostname: clientObj.hostname
       })
     )
+    if (saved == null) throw new globalThis.Error('Failed to persist issued TLS certificate')
     this.logger.info(`Stored TLS leaf cert in vault for device ${clientObj.uuid}`)
     return true
   }
@@ -1395,6 +1388,7 @@ export class Activation {
       checkAmtTlsState: fromPromise(this.checkAmtTlsState.bind(this)),
       validateDeviceTlsCert: fromPromise(this.validateDeviceTlsCert.bind(this)),
       fetchMPSRootKey: fromPromise(this.fetchMPSRootKey.bind(this)),
+      tlsCleanup: new TLSCleanup().machine,
       saveTlsTunnelCerts: fromPromise(this.saveTlsTunnelCerts.bind(this)),
       signalPortSwitch: fromPromise(this.signalPortSwitch.bind(this)),
       initializeTlsTunnelConnection: fromPromise(this.initializeTlsTunnelConnection.bind(this)),
@@ -2550,6 +2544,7 @@ export class Activation {
             statusMessage: '',
             retryCount: 0,
             amt: context.amt,
+            secretsManager: this.configurator.secretsManager,
             tlsSettingData: []
           }),
           onDone: [
@@ -2594,7 +2589,7 @@ export class Activation {
           onDone: 'SIGNAL_PORT_SWITCH',
           onError: {
             actions: assign({ errorMessage: 'Failed to save TLS certificates to vault' }),
-            target: 'FAILED'
+            target: 'FINAL'
           }
         }
       },
@@ -2808,9 +2803,15 @@ export class Activation {
             statusMessage: '',
             retryCount: 0,
             amt: context.amt,
+            secretsManager: this.configurator.secretsManager,
             tlsSettingData: []
           }),
           onDone: [
+            {
+              guard: ({ event }) => (event.output as any)?.status === 'error',
+              actions: assign({ errorMessage: ({ event }) => (event.output as any).errorMessage }),
+              target: 'FINAL'
+            },
             {
               // Save issued DMT cert to vault when TLS provisioning generated one.
               guard: 'hasIssuedTlsCert',
@@ -2838,18 +2839,10 @@ export class Activation {
             },
             { target: 'SYNC_ACTIVATION_TIME' }
           ],
-          onError: [
-            {
-              // Non-fatal: cert was added to AMT, vault save failed — still switch to TLS for ACM
-              guard: 'hasToUpgrade',
-              target: 'SIGNAL_PORT_SWITCH'
-            },
-            {
-              guard: 'hasCIRAProfile',
-              target: 'CIRA'
-            },
-            { target: 'SYNC_ACTIVATION_TIME' }
-          ]
+          onError: {
+            actions: assign({ errorMessage: 'Failed to save TLS certificates to vault' }),
+            target: 'FINAL'
+          }
         }
       },
       DEACTIVATION: {
@@ -2884,7 +2877,7 @@ export class Activation {
           onDone: [
             {
               guard: ({ event }) => (event.output as any)?.status === 'success',
-              target: 'PROVISIONED'
+              target: 'RECONCILE_TLS_OBJECTS'
             },
             {
               actions: assign({
@@ -2901,6 +2894,30 @@ export class Activation {
         },
         on: {
           ONFAILED: 'FAILED'
+        }
+      },
+      RECONCILE_TLS_OBJECTS: {
+        invoke: {
+          src: 'tlsCleanup',
+          input: ({ context }) => ({
+            tlsExpected: !this.shouldUseNonTlsActivatedPath(context.clientId),
+            clientId: context.clientId,
+            amt: context.amt,
+            httpHandler: context.httpHandler,
+            secretsManager: this.configurator.secretsManager
+          }),
+          onDone: [
+            {
+              guard: ({ event }) => !!(event.output as any)?.errorMessage,
+              actions: assign({ errorMessage: ({ event }) => (event.output as any).errorMessage }),
+              target: 'FINAL'
+            },
+            { target: 'PROVISIONED' }
+          ],
+          onError: {
+            actions: assign({ errorMessage: 'TLS object reconciliation failed' }),
+            target: 'FINAL'
+          }
         }
       },
       PROVISIONED: {
