@@ -9,13 +9,8 @@ import { type DigestChallenge } from '@device-management-toolkit/wsman-messages/
 import Logger from './Logger.js'
 import { type connectionParams } from './models/RCS.Config.js'
 
-export interface ProvisioningSession {
-  signal: AbortSignal
-  pendingWrites: Set<Promise<unknown>>
-}
-
 export class HttpHandler {
-  provisioning?: ProvisioningSession
+  provisioning?: { signal: AbortSignal; pendingWrites: Set<Promise<unknown>> }
 
   assertProvisioningActive(): void {
     if (this.provisioning?.signal.aborted) throw new Error('Provisioning session ended')

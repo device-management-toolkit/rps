@@ -114,16 +114,11 @@ export class DataProcessor {
     const controller = new AbortController()
     const handler = new HttpHandler()
     handler.provisioning = { signal: controller.signal, pendingWrites: new Set() }
-    const releaseWhenDrained = (): void => {
-      const finish = (): void => {
-        const unlock = release
-        release = undefined
-        unlock?.()
-        if (device.stopProvisioning === stop) device.stopProvisioning = undefined
-      }
-      const pending = [...handler.provisioning!.pendingWrites]
-      if (pending.length) void Promise.allSettled(pending).then(finish)
-      else finish()
+    const releaseSession = (): void => {
+      const unlock = release
+      release = undefined
+      unlock?.()
+      if (device.stopProvisioning === stop) device.stopProvisioning = undefined
     }
     const stop = (): void => {
       if (!controller.signal.aborted) {
@@ -137,7 +132,9 @@ export class DataProcessor {
         device.tlsResponseBuffer = undefined
         device.tlsTunnelNeedsReset = true
       }
-      releaseWhenDrained()
+      const pending = [...handler.provisioning!.pendingWrites]
+      if (pending.length) void Promise.allSettled(pending).then(releaseSession)
+      else releaseSession()
     }
     const lockLost = (): void => {
       stop()
@@ -152,11 +149,9 @@ export class DataProcessor {
         throw new RPSError('Provisioning connection ended during validation')
       }
       const db = await new DbCreatorFactory().getDb()
-      if (db.acquireProvisioningLock) {
-        const lock = await db.acquireProvisioningLock(clientMsg.payload.uuid, lockLost)
-        if (!lock) throw new RPSError('Another activation is running for this device UUID')
-        release = lock
-      }
+      const lock = await db.acquireProvisioningLock?.(clientMsg.payload.uuid, lockLost)
+      if (lock === null) throw new RPSError('Another activation is running for this device UUID')
+      release = lock
       if (controller.signal.aborted) throw new RPSError('Provisioning connection ended while acquiring its lock')
       activation.service.subscribe({ complete: stop, error: stop })
       this.setConnectionParams(clientId)
