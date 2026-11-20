@@ -22,6 +22,13 @@ import { HttpResponseError, coalesceMessage, isDigestRealmValid } from './common
 
 const invokeWsmanCallSpy = vi.hoisted(() => vi.fn<any>())
 const invokeEnterpriseAssistantCallSpy = vi.hoisted(() => vi.fn<any>())
+// These tests supply their child actors; real service initialization can
+// outlive the test environment and leave database imports running at teardown.
+vi.mock('../Configurator.js', () => ({
+  Configurator: function () {
+    return { ready: Promise.resolve() }
+  }
+}))
 vi.mock('./common.js', async () => {
   const actual = await vi.importActual<typeof import('./common.js')>('./common.js')
   const { HttpResponseError, coalesceMessage, isDigestRealmValid } = actual
