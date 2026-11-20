@@ -8,6 +8,9 @@ import { HttpHandler } from '../HttpHandler.js'
 import { devices } from '../devices.js'
 import { type HttpZResponseModel } from 'http-z'
 import Logger from '../Logger.js'
+import { type ProvisioningFailure } from '../models/RCS.Config.js'
+import { type ErrorCode } from '../utils/errorCatalog.js'
+import { resolveFailure } from '../utils/resolveFailure.js'
 
 const errorLogger = new Logger('ErrorHandler')
 
@@ -21,6 +24,22 @@ interface ErrorEvent {
   type: 'PARSE'
   clientId: string
 }
+
+/**
+ * Event sent to the parent machine when the HTTP-level error cannot be recovered. `output` is the
+ * legacy text parents already assign to errorMessage; `failure` is the structured description
+ * (code, step, reason, HTTP status) built from the response. The error machine does not know which
+ * component or step invoked it, so Step is its own state and Component defaults to 'Activation';
+ * parents prefer the failure they recorded on the way in (see failureAfterErrorMachine).
+ */
+export interface ErrorFailedEvent {
+  type: 'ONFAILED'
+  output: string
+  failure: ProvisioningFailure
+}
+
+const buildFailure = (step: string, code: ErrorCode, message: HttpZResponseModel | null): ProvisioningFailure =>
+  resolveFailure(step, 'Activation', { code, error: message ?? undefined })
 
 export class Error {
   logger: Logger
@@ -72,18 +91,27 @@ export class Error {
       isUnauthorized: ({ context }) => context.message?.statusCode === 401
     },
     actions: {
-      respondUnauthorized: sendParent(() => ({
-        type: 'ONFAILED',
-        output: 'Unable to authenticate with AMT'
-      })),
-      respondBadRequest: sendParent(({ context }) => ({
-        type: 'ONFAILED',
-        output: context.message?.statusMessage
-      })),
-      respondUnknown: sendParent(() => ({
-        type: 'ONFAILED',
-        output: 'Unknown error has occured'
-      })),
+      respondUnauthorized: sendParent(
+        ({ context }): ErrorFailedEvent => ({
+          type: 'ONFAILED',
+          output: 'Unable to authenticate with AMT',
+          failure: buildFailure('UNAUTHORIZED', 'WSMAN_AUTH_FAILED', context.message)
+        })
+      ),
+      respondBadRequest: sendParent(
+        ({ context }): ErrorFailedEvent => ({
+          type: 'ONFAILED',
+          output: context.message?.statusMessage as string,
+          failure: buildFailure('BADREQUEST', 'WSMAN_BAD_REQUEST', context.message)
+        })
+      ),
+      respondUnknown: sendParent(
+        ({ context }): ErrorFailedEvent => ({
+          type: 'ONFAILED',
+          output: 'Unknown error has occured',
+          failure: buildFailure('UNKNOWN', 'WSMAN_REQUEST_FAILED', context.message)
+        })
+      ),
       addAuthorizationHeader: this.addAuthorizationHeader,
       resetAuthCount: this.resetAuthCount
     }
