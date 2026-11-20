@@ -3324,7 +3324,7 @@ describe('Activation State Machine', () => {
       false,
       false,
       1,
-      true
+      false
     ]
   ])('passes TLS intent to recovery (enforced=%s, tunnel=%s, mode=%s)', async (enforced, tunnel, mode, expected) => {
     const { createMachine, waitFor } = await import('xstate')
@@ -3345,6 +3345,34 @@ describe('Activation State Machine', () => {
     actor.start()
     await waitFor(actor, (snapshot) => snapshot.status === 'done')
     expect(cleanup.mock.calls[0][0].input.tlsExpected).toBe(expected)
+  })
+
+  it('completes non-TLS activation with a TLS-enabled profile without reading the retained journal', async () => {
+    const { createMachine, waitFor } = await import('xstate')
+    devices[clientId].tlsEnforced = false
+    devices[clientId].tlsTunnelActivation = false
+    devices[clientId].ClientData.payload.ver = '18.0.0'
+    const read = vi.spyOn(activation.configurator.secretsManager, 'getSecretAtPath')
+    const write = vi.fn()
+    activation.configurator.secretsManager.writeSecretWithObjectIfVersion = write
+    const machine = activation.machine.provide({
+      actors: { timeSync: fromPromise(async () => ({ status: 'success' })) }
+    })
+    const segment = createMachine(
+      {
+        ...machine.config,
+        initial: 'SYNC_ACTIVATION_TIME',
+        context: { ...context, profile: { ...context.profile, tlsMode: 1 } },
+        states: { ...machine.config.states, PROVISIONED: { type: 'final' } }
+      },
+      machine.implementations
+    )
+    const actor = createActor(segment)
+    actor.start()
+    const result = await waitFor(actor, (snapshot) => snapshot.status === 'done')
+    expect(result.value).toBe('PROVISIONED')
+    expect(read).not.toHaveBeenCalled()
+    expect(write).not.toHaveBeenCalled()
   })
 
   it('reports cleanup failure without deactivating the usable identity', async () => {

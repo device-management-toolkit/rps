@@ -1649,12 +1649,14 @@ describe('Interrupted TLS provisioning reconciliation', () => {
     expect(stored[`tls-provisioning/${uuid}`].certificates).toEqual([abandoned])
   })
 
-  it('preserves the journal after deactivation followed by intentional non-TLS activation', async () => {
+  it.each([false, true])('preserves the journal after deactivation (TLS expected: %s)', async (tlsExpected) => {
     await recordCertificate(secrets, uuid, abandoned)
     delete stored[`devices/${uuid}`]
-    const actor = createActor(new TLSCleanup().machine, { input: { ...input(), tlsExpected: false } })
+    const actor = createActor(new TLSCleanup().machine, { input: { ...input(), tlsExpected } })
     actor.start()
-    expect(await toPromise(actor)).toEqual({ errorMessage: '' })
+    const result = await toPromise(actor)
+    if (tlsExpected) expect(result.errorMessage).toContain('No persisted TLS identity for cleanup')
+    else expect(result).toEqual({ errorMessage: '' })
     expect(operations).toEqual([])
     expect(stored[`tls-provisioning/${uuid}`].certificates).toEqual([abandoned])
   })
