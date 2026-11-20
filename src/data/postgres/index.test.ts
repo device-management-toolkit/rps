@@ -46,6 +46,24 @@ describe('Provisioning advisory locks', () => {
     expect(held.size).toBe(0)
   })
 
+  it.each(['connect', 'query'])('does not notify an owner on connection failure during %s', async (stage) => {
+    const session = new EventEmitter() as any
+    const lost = vi.fn()
+    session.connect = vi.fn(async () => {})
+    session.query = vi.fn(async () => ({ rows: [{ acquired: true }] }))
+    session[stage].mockImplementationOnce(async () => {
+      session.emit('error', new Error('connection lost'))
+      session.emit('end')
+      return { rows: [{ acquired: true }] }
+    })
+    session.end = vi.fn(async () => {})
+    const db = Object.assign(Object.create(Db.prototype), { provisioningClient: () => session }) as Db
+    await expect(db.acquireProvisioningLock('device', lost)).rejects.toThrow('ended during acquisition')
+    expect(lost).not.toHaveBeenCalled()
+    expect(session.end).toHaveBeenCalledOnce()
+    if (stage === 'connect') expect(session.query).not.toHaveBeenCalled()
+  })
+
   it('destroys its session when acquisition fails', async () => {
     const session = new EventEmitter() as any
     session.query = vi.fn().mockRejectedValue(new Error('database unavailable'))

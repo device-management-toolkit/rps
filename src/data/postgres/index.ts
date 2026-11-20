@@ -102,6 +102,7 @@ export default class Db implements IDB {
       .readBigInt64BE()
       .toString()
     let released = false
+    let acquired = false
     const release = (): void => {
       if (released) return
       released = true
@@ -109,18 +110,21 @@ export default class Db implements IDB {
     }
     const lost = (): void => {
       if (released) return
-      onLost()
+      if (acquired) onLost()
       release()
     }
     client.on('error', lost)
     client.on('end', lost)
     try {
       await client.connect()
+      if (released) throw new Error('Provisioning lock session ended during acquisition')
       const result = await client.query('SELECT pg_try_advisory_lock($1::bigint) AS acquired', [key])
-      if (!result.rows[0]?.acquired || released) {
+      if (released) throw new Error('Provisioning lock session ended during acquisition')
+      if (!result.rows[0]?.acquired) {
         release()
         return null
       }
+      acquired = true
       return release
     } catch (error) {
       release()
