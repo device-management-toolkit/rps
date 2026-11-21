@@ -5,6 +5,7 @@
   "vault_token": "myroot",
   "websocketport": 8080,
   "db_provider": "postgres",
+  "mode": "mps",
   "secrets_provider": "vault",
   "gcpsm_project": "",
   "gcpsm_location": "",

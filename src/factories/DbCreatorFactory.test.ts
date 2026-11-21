@@ -26,4 +26,16 @@ describe('DB Creator Factory', () => {
     expect(db1).toEqual(db2)
     expect(db1).not.toEqual(db3)
   })
+
+  it('selects the console provider when db_provider is console', async () => {
+    DbCreatorFactory.reset()
+    Environment.Config = { ...config, db_provider: 'console', mps_server: 'http://console:8181' }
+
+    const db = await new DbCreatorFactory().getDb()
+
+    expect(db.constructor.name).toEqual('ConsoleDb')
+
+    DbCreatorFactory.reset()
+    Environment.Config = config
+  })
 })
