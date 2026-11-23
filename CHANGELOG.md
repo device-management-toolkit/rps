@@ -1,3 +1,10 @@
+## [2.48.2](https://github.com/device-management-toolkit/rps/compare/v2.48.1...v2.48.2) (2026-11-23)
+
+
+### Performance Improvements
+
+* **activation:** reuse verified TLS identity and provisioning inventory ([#3008](https://github.com/device-management-toolkit/rps/issues/3008)) ([85d857a](https://github.com/device-management-toolkit/rps/commit/85d857a20366f833d20f0d1e0004ca1cea40c06b))
+
 ## [2.48.1](https://github.com/device-management-toolkit/rps/compare/v2.48.0...v2.48.1) (2026-11-23)
 
 
