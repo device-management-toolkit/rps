@@ -20,6 +20,15 @@ import { AMT, CIM } from '@device-management-toolkit/wsman-messages'
 import { vi } from 'vitest'
 import { HttpResponseError, coalesceMessage, isDigestRealmValid } from './common.js'
 
+// These tests exercise network configuration, not database/secrets startup.
+// Keep the parent and child machines from starting asynchronous initialization
+// that can outlive the test environment.
+vi.mock('../Configurator.js', () => ({
+  Configurator: function () {
+    return { ready: Promise.resolve() }
+  }
+}))
+
 const invokeWsmanCallSpy = vi.hoisted(() => vi.fn<any>())
 const invokeEnterpriseAssistantCallSpy = vi.hoisted(() => vi.fn<any>())
 vi.mock('./common.js', async () => {
