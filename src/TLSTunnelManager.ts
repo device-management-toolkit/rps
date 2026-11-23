@@ -26,6 +26,7 @@ import {
 const logger = new Logger('TLSTunnelManager')
 
 let sessionCounter = 0
+const tlsInputDrainTimeoutMs = 1000
 
 /**
  * The device's certificate chain was refused. `message` is the full reason for the logs and `summary` is a short
@@ -99,9 +100,15 @@ export class TLSTunnelManager {
   private duplexStream: Duplex
   private connected = false
   private handshakeStarted = false
+  // Set once a handshake record (0x16) from the peer has been seen on this session. Before
+  // that, this reader treats application-data records as stale; after it, TLS 1.3
+  // may deliver the remaining server handshake as encrypted 0x17 records.
+  private serverHandshakeSeen = false
+  private preHandshakeBuffer: Buffer = Buffer.alloc(0)
   private pendingData: Buffer[] = []
   private sessionId: string
   private intentionalClose = false
+  private inputEnded = false
   private writeBuffer: Buffer[] = []
   private flushPending = false
   private peerChainDer: Buffer[] = []
@@ -184,6 +191,10 @@ export class TLSTunnelManager {
 
   private flushWriteBuffer(): void {
     this.flushPending = false
+    if (this.intentionalClose || this.inputEnded) {
+      this.writeBuffer = []
+      return
+    }
     if (this.writeBuffer.length === 0) {
       return
     }
@@ -194,6 +205,7 @@ export class TLSTunnelManager {
 
     const base64Data = combined.toString('base64')
     const msg = ClientResponseMsg.get(this.clientId, base64Data, 'tls_data', 'ok')
+    msg.tlsSessionId = this.sessionId
     try {
       this.clientSocket.send(JSON.stringify(msg), (err?: Error) => {
         if (err) {
@@ -206,20 +218,50 @@ export class TLSTunnelManager {
   }
 
   injectData(data: Buffer): void {
-    // Parse TLS record type
-    let contentType = -1
-    if (data.length >= 5) {
-      contentType = data[0]
-    }
-
-    // Discard stale Application Data (0x17) received before handshake completes
-    if (!this.connected && contentType === 0x17) {
+    if (!this.connected && !this.serverHandshakeSeen) {
+      // RPC chunks are not record boundaries. Buffer complete records so a stale
+      // application's header and payload are discarded together, even across chunks.
+      this.preHandshakeBuffer = Buffer.concat([this.preHandshakeBuffer, data])
+      // Before ServerHello, each buffered record must start with a TLS content type
+      // and legacy version prefix. Let OpenSSL reject malformed input immediately.
+      const validHeader = (): boolean =>
+        this.preHandshakeBuffer.length === 0 ||
+        (this.preHandshakeBuffer[0] >= 0x14 &&
+          this.preHandshakeBuffer[0] <= 0x17 &&
+          (this.preHandshakeBuffer.length < 2 || this.preHandshakeBuffer[1] === 0x03))
+      while (this.preHandshakeBuffer.length > 0) {
+        if (!validHeader()) {
+          this.forwardTlsData(this.preHandshakeBuffer)
+          this.preHandshakeBuffer = Buffer.alloc(0)
+          return
+        }
+        if (this.preHandshakeBuffer.length < 5) return
+        const recordLength = 5 + this.preHandshakeBuffer.readUInt16BE(3)
+        if (this.preHandshakeBuffer.length < recordLength) return
+        const contentType = this.preHandshakeBuffer[0]
+        const record = this.preHandshakeBuffer.subarray(0, recordLength)
+        this.preHandshakeBuffer = this.preHandshakeBuffer.subarray(recordLength)
+        if (contentType === 0x17) continue
+        if (contentType === 0x16) {
+          this.serverHandshakeSeen = true
+          this.forwardTlsData(Buffer.concat([record, this.preHandshakeBuffer]))
+          this.preHandshakeBuffer = Buffer.alloc(0)
+          return
+        }
+        // Preserve alerts and other records for the TLS library to validate.
+        this.forwardTlsData(record)
+      }
       return
     }
+    // After ServerHello, forward chunks immediately, including encrypted TLS 1.3
+    // handshake records and chunks beginning in the middle of a record.
+    this.forwardTlsData(data)
+  }
 
+  private forwardTlsData(data: Buffer): void {
     // Capture server certificates from TLS Handshake Certificate message (type 0x0b)
     // before OpenSSL processes them, so we can diagnose verification failures
-    if (!this.connected && contentType === 0x16 && data.length > 5) {
+    if (!this.connected && data.length > 5 && data[0] === 0x16) {
       this.extractHandshakeCerts(data)
     }
 
@@ -690,6 +732,31 @@ export class TLSTunnelManager {
 
   onData(callback: (data: Buffer) => void): void {
     this.tlsSocket?.on('data', callback)
+  }
+
+  /** Finish decrypted input before deciding whether the pending HTTP response completed. */
+  endInput(onEnd: () => void): void {
+    if (this.inputEnded) return
+    this.inputEnded = true
+    const socket = this.tlsSocket
+    if (socket == null || socket.destroyed) {
+      onEnd()
+      return
+    }
+    let ended = false
+    const finish = (): void => {
+      if (ended) return
+      ended = true
+      clearTimeout(timer)
+      socket.removeListener('end', finish)
+      socket.removeListener('close', finish)
+      onEnd()
+    }
+    socket.once('end', finish)
+    socket.once('close', finish)
+    const timer = setTimeout(finish, tlsInputDrainTimeoutMs)
+    timer.unref()
+    this.duplexStream.push(null)
   }
 
   close(): void {
