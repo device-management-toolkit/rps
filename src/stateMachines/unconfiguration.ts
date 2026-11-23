@@ -947,6 +947,8 @@ export class Unconfiguration {
         }
       },
       ENUMERATE_TLS_SETTING_DATA: {
+        // Preserve the active tunnel identity without reading settings that this branch discards.
+        always: { guard: 'isTLSEnforced', target: 'GET_ENVIRONMENT_DETECTION_SETTINGS' },
         invoke: {
           src: 'enumerateTLSSettingData',
           input: ({ context }) => context,
@@ -975,8 +977,6 @@ export class Unconfiguration {
       },
       PULL_TLS_SETTING_DATA_RESPONSE: {
         always: [
-          // Skip TLS disable and cert cleanup for TLS-enforced devices — certs are in use by the active TLS tunnel
-          { guard: 'isTLSEnforced', target: 'GET_ENVIRONMENT_DETECTION_SETTINGS' },
           { guard: 'tlsSettingDataEnabled', target: 'DISABLE_TLS_SETTING_DATA' },
           { guard: 'is8021xProfileDisabled', target: 'ENUMERATE_PUBLIC_PRIVATE_KEY_PAIR' },
           { target: 'ENUMERATE_PUBLIC_KEY_CERTIFICATE' }

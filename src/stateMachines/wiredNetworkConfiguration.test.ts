@@ -23,6 +23,12 @@ import { HttpResponseError, coalesceMessage, isDigestRealmValid } from './common
 const invokeWsmanCallSpy = vi.hoisted(() => vi.fn<any>())
 const invokeEnterpriseAssistantCallSpy = vi.hoisted(() => vi.fn())
 
+vi.mock('../Configurator.js', () => ({
+  Configurator: function () {
+    return { ready: Promise.resolve() }
+  }
+}))
+
 vi.mock('./common.js', async () => {
   const actual = await vi.importActual<typeof import('./common.js')>('./common.js')
   const { HttpResponseError, coalesceMessage, isDigestRealmValid } = actual
