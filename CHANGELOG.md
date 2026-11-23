@@ -1,3 +1,10 @@
+## [2.48.1](https://github.com/device-management-toolkit/rps/compare/v2.48.0...v2.48.1) (2026-11-23)
+
+
+### Performance Improvements
+
+* **activation:** handle streamed TLS records and session closure ([#3039](https://github.com/device-management-toolkit/rps/issues/3039)) ([640aad5](https://github.com/device-management-toolkit/rps/commit/640aad55256a8025cb8ebae2036cd52348fec376))
+
 # [2.48.0](https://github.com/device-management-toolkit/rps/compare/v2.47.0...v2.48.0) (2026-11-16)
 
 
