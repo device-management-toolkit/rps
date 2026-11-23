@@ -3649,6 +3649,7 @@ describe('TLS reconfiguration reuse optimizations', () => {
     } as any
     input = {
       clientId: syntheticId,
+      httpHandler: new HttpHandler(),
       isActivated: true,
       profile: { activation: ClientAction.ADMINCTLMODE, tlsMode: 1 },
       amt: new AMT.Messages()
