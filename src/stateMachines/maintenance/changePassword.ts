@@ -9,7 +9,10 @@ import {
   isDigestRealmValid,
   coalesceMessage,
   HttpResponseError,
-  invokeWsmanCall
+  invokeWsmanCall,
+  failAt,
+  failureAfterErrorMachine,
+  messageAfterErrorMachine
 } from '../common.js'
 import { AMT, type Common } from '@device-management-toolkit/wsman-messages'
 import { PasswordHelper } from '../../utils/PasswordHelper.js'
@@ -87,7 +90,9 @@ export class ChangePassword {
     const output = wsmanRsp.Envelope.Body.SetAdminAclEntryEx_OUTPUT
     if (output?.ReturnValue !== PTStatus.SUCCESS.value) {
       const msg = `ReturnValue ${getPTStatusName(output?.ReturnValue)}`
-      throw new Error(msg)
+      const err: Error & { returnValue?: number } = new Error(msg)
+      err.returnValue = output?.ReturnValue
+      throw err
     }
     return password
   }
@@ -185,11 +190,18 @@ export class ChangePassword {
             target: 'SET_ADMIN_ACL_ENTRY'
           },
           onError: {
-            actions: assign({
-              message: ({ event }) => event.error,
-              errorMessage: ({ event }) => coalesceMessage('at GET_GENERAL_SETTINGS', event.error),
-              targetAfterError: () => 'GET_GENERAL_SETTINGS'
-            }),
+            actions: [
+              assign({
+                message: ({ event }) => event.error,
+                targetAfterError: () => 'GET_GENERAL_SETTINGS'
+              }),
+              assign(
+                failAt('GET_GENERAL_SETTINGS', 'Maintenance', {
+                  message: ({ event }) => coalesceMessage('at GET_GENERAL_SETTINGS', event.error),
+                  error: ({ event }) => event.error
+                })
+              )
+            ],
             target: 'ERROR'
           }
         }
@@ -208,9 +220,13 @@ export class ChangePassword {
             target: 'SAVE_TO_SECRET_PROVIDER'
           },
           onError: {
-            actions: assign({
-              errorMessage: ({ event }) => coalesceMessage('at SET_ADMIN_ACL_ENTRY', event.error)
-            }),
+            actions: assign(
+              failAt('SET_ADMIN_ACL_ENTRY', 'Maintenance', {
+                message: ({ event }) => coalesceMessage('at SET_ADMIN_ACL_ENTRY', event.error),
+                error: ({ event }) => event.error,
+                returnValue: ({ event }) => (event.error as any)?.returnValue
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -228,9 +244,13 @@ export class ChangePassword {
             target: 'REFRESH_MPS'
           },
           onError: {
-            actions: assign({
-              errorMessage: ({ event }) => coalesceMessage('at SAVE_TO_SECRET_PROVIDER', event.error)
-            }),
+            actions: assign(
+              failAt('SAVE_TO_SECRET_PROVIDER', 'Maintenance', {
+                code: 'RPS_SECRETS_WRITE_FAILED',
+                message: ({ event }) => coalesceMessage('at SAVE_TO_SECRET_PROVIDER', event.error),
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -248,9 +268,13 @@ export class ChangePassword {
             target: 'SUCCESS'
           },
           onError: {
-            actions: assign({
-              errorMessage: ({ event }) => coalesceMessage('at REFRESH_MPS', event.error)
-            }),
+            actions: assign(
+              failAt('REFRESH_MPS', 'Maintenance', {
+                code: 'RPS_MPS_SAVE_DEVICE_FAILED',
+                message: ({ event }) => coalesceMessage('at REFRESH_MPS', event.error),
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -268,12 +292,15 @@ export class ChangePassword {
             actions: assign({ message: ({ event }) => event.error }),
             target: 'FAILED'
           },
-          onDone: 'NEXT_STATE'
+          // The error machine recovered (e.g. digest retry): the recorded failure no longer applies.
+          onDone: { actions: assign({ failure: undefined }), target: 'NEXT_STATE' }
         },
         on: {
           ONFAILED: {
             actions: assign({
-              errorMessage: ({ context, event }) => coalesceMessage(context.errorMessage, event.output)
+              errorMessage: (args) =>
+                coalesceMessage(args.context.errorMessage, messageAfterErrorMachine('Maintenance', args)),
+              failure: (args) => failureAfterErrorMachine('Maintenance', args)
             }),
             target: 'FAILED'
           }
@@ -286,7 +313,9 @@ export class ChangePassword {
             target: 'GET_GENERAL_SETTINGS'
           },
           {
-            actions: assign({ errorMessage: ({ context }) => 'No valid next state' }),
+            actions: assign(
+              failAt('NEXT_STATE', 'Maintenance', { code: 'RPS_NO_VALID_NEXT_STATE', message: 'No valid next state' })
+            ),
             target: 'FAILED'
           }
         ]
@@ -304,7 +333,7 @@ export class ChangePassword {
       if (context.statusMessage === 'SUCCESS') {
         return doneSuccess(context.taskName)
       } else {
-        return doneFail(context.taskName, context.errorMessage)
+        return doneFail(context.taskName, context.errorMessage, context.failure)
       }
     }
   })

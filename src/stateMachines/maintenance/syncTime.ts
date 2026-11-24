@@ -5,7 +5,13 @@
 
 import { AMT } from '@device-management-toolkit/wsman-messages'
 import { assign, fromPromise, sendTo, setup } from 'xstate'
-import { coalesceMessage, type CommonMaintenanceContext } from '../common.js'
+import {
+  coalesceMessage,
+  type CommonMaintenanceContext,
+  failAt,
+  failureAfterErrorMachine,
+  messageAfterErrorMachine
+} from '../common.js'
 import Logger from '../../Logger.js'
 import { doneFail, doneSuccess } from './doneResponse.js'
 import { getPTStatusName, PTStatus } from '../../utils/PTStatus.js'
@@ -69,7 +75,9 @@ export class SyncTime {
     const output = rsp.Envelope.Body.EnableLocalTimeSync_OUTPUT
     if (output?.ReturnValue !== PTStatus.SUCCESS.value) {
       const msg = `ReturnValue ${getPTStatusName(output?.ReturnValue)}`
-      throw new Error(msg)
+      const err: Error & { returnValue?: number } = new Error(msg)
+      err.returnValue = output?.ReturnValue
+      throw err
     }
   }
 
@@ -79,7 +87,9 @@ export class SyncTime {
     const output = rsp.Envelope.Body.GetLowAccuracyTimeSynch_OUTPUT
     if (output?.ReturnValue !== PTStatus.SUCCESS.value) {
       const msg = `ReturnValue ${getPTStatusName(output?.ReturnValue)}`
-      throw new Error(msg)
+      const err: Error & { returnValue?: number } = new Error(msg)
+      err.returnValue = output?.ReturnValue
+      throw err
     }
     const data: LowAccuracyData = {
       Ta0: output.Ta0,
@@ -99,7 +109,9 @@ export class SyncTime {
     const output = wsmanRsp.Envelope.Body.SetHighAccuracyTimeSynch_OUTPUT
     if (output?.ReturnValue !== PTStatus.SUCCESS.value) {
       const msg = `ReturnValue ${getPTStatusName(output?.ReturnValue)}`
-      throw new Error(msg)
+      const err: Error & { returnValue?: number } = new Error(msg)
+      err.returnValue = output?.ReturnValue
+      throw err
     }
   }
 
@@ -164,11 +176,19 @@ export class SyncTime {
             target: 'SUCCESS'
           },
           onError: {
-            actions: assign({
-              message: ({ event }) => event.error,
-              errorMessage: ({ event }) => coalesceMessage('at ENABLE_LOCAL_TIME_SYNC', event.error),
-              targetAfterError: () => 'ENABLE_LOCAL_TIME_SYNC'
-            }),
+            actions: [
+              assign({
+                message: ({ event }) => event.error,
+                targetAfterError: () => 'ENABLE_LOCAL_TIME_SYNC'
+              }),
+              assign(
+                failAt('ENABLE_LOCAL_TIME_SYNC', 'Maintenance', {
+                  message: ({ event }) => coalesceMessage('at ENABLE_LOCAL_TIME_SYNC', event.error),
+                  error: ({ event }) => event.error,
+                  returnValue: ({ event }) => (event.error as any)?.returnValue
+                })
+              )
+            ],
             target: 'ERROR'
           }
         }
@@ -189,11 +209,19 @@ export class SyncTime {
             target: 'SET_HIGH_ACCURACY_TIME_SYNCH'
           },
           onError: {
-            actions: assign({
-              message: ({ event }) => event.error,
-              errorMessage: ({ event }) => coalesceMessage('at GET_LOW_ACCURACY_TIME_SYNCH', event.error),
-              targetAfterError: () => 'GET_LOW_ACCURACY_TIME_SYNCH'
-            }),
+            actions: [
+              assign({
+                message: ({ event }) => event.error,
+                targetAfterError: () => 'GET_LOW_ACCURACY_TIME_SYNCH'
+              }),
+              assign(
+                failAt('GET_LOW_ACCURACY_TIME_SYNCH', 'Maintenance', {
+                  message: ({ event }) => coalesceMessage('at GET_LOW_ACCURACY_TIME_SYNCH', event.error),
+                  error: ({ event }) => event.error,
+                  returnValue: ({ event }) => (event.error as any)?.returnValue
+                })
+              )
+            ],
             target: 'ERROR'
           }
         }
@@ -211,9 +239,13 @@ export class SyncTime {
             target: 'SUCCESS'
           },
           onError: {
-            actions: assign({
-              errorMessage: ({ event }) => coalesceMessage('at SET_HIGH_ACCURACY_TIME_SYNCH', event.error)
-            }),
+            actions: assign(
+              failAt('SET_HIGH_ACCURACY_TIME_SYNCH', 'Maintenance', {
+                message: ({ event }) => coalesceMessage('at SET_HIGH_ACCURACY_TIME_SYNCH', event.error),
+                error: ({ event }) => event.error,
+                returnValue: ({ event }) => (event.error as any)?.returnValue
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -231,11 +263,16 @@ export class SyncTime {
             actions: assign({ message: ({ event }) => event.error }),
             target: 'FAILED'
           },
-          onDone: 'NEXT_STATE'
+          // The error machine recovered (e.g. digest retry): the recorded failure no longer applies.
+          onDone: { actions: assign({ failure: undefined }), target: 'NEXT_STATE' }
         },
         on: {
           ONFAILED: {
-            actions: assign({ errorMessage: ({ context, event }) => coalesceMessage(context.message, event.output) }),
+            actions: assign({
+              errorMessage: (args) =>
+                coalesceMessage(args.context.message, messageAfterErrorMachine('Maintenance', args)),
+              failure: (args) => failureAfterErrorMachine('Maintenance', args)
+            }),
             target: 'FAILED'
           }
         }
@@ -265,7 +302,7 @@ export class SyncTime {
       if (context.statusMessage === 'SUCCESS') {
         return doneSuccess(context.taskName)
       } else {
-        return doneFail(context.taskName, context.errorMessage)
+        return doneFail(context.taskName, context.errorMessage, context.failure)
       }
     }
   })

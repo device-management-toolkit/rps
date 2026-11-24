@@ -5,7 +5,14 @@
 
 import { AMT, type Common } from '@device-management-toolkit/wsman-messages'
 import { assign, fromPromise, sendTo, setup } from 'xstate'
-import { coalesceMessage, type CommonMaintenanceContext, HttpResponseError } from '../common.js'
+import {
+  coalesceMessage,
+  type CommonMaintenanceContext,
+  failAt,
+  HttpResponseError,
+  failureAfterErrorMachine,
+  messageAfterErrorMachine
+} from '../common.js'
 import Logger from '../../Logger.js'
 import { doneFail, doneSuccess } from './doneResponse.js'
 import got from 'got'
@@ -152,11 +159,18 @@ export class SyncHostName {
             target: 'PUT_GENERAL_SETTINGS'
           },
           onError: {
-            actions: assign({
-              message: ({ event }) => event.error,
-              errorMessage: ({ event }) => coalesceMessage('at GET_GENERAL_SETTINGS', event.error),
-              targetAfterError: () => 'GET_GENERAL_SETTINGS'
-            }),
+            actions: [
+              assign({
+                message: ({ event }) => event.error,
+                targetAfterError: () => 'GET_GENERAL_SETTINGS'
+              }),
+              assign(
+                failAt('GET_GENERAL_SETTINGS', 'Maintenance', {
+                  message: ({ event }) => coalesceMessage('at GET_GENERAL_SETTINGS', event.error),
+                  error: ({ event }) => event.error
+                })
+              )
+            ],
             target: 'ERROR'
           }
         }
@@ -175,9 +189,12 @@ export class SyncHostName {
             target: 'SAVE_SECRET_METADATA'
           },
           onError: {
-            actions: assign({
-              errorMessage: ({ event }) => coalesceMessage('at PUT_GENERAL_SETTINGS', event.error)
-            }),
+            actions: assign(
+              failAt('PUT_GENERAL_SETTINGS', 'Maintenance', {
+                message: ({ event }) => coalesceMessage('at PUT_GENERAL_SETTINGS', event.error),
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -210,9 +227,13 @@ export class SyncHostName {
             target: 'SUCCESS'
           },
           onError: {
-            actions: assign({
-              errorMessage: ({ event }) => coalesceMessage('at SAVE_TO_MPS', event.error)
-            }),
+            actions: assign(
+              failAt('SAVE_TO_MPS', 'Maintenance', {
+                code: 'RPS_MPS_SAVE_DEVICE_FAILED',
+                message: ({ event }) => coalesceMessage('at SAVE_TO_MPS', event.error),
+                error: ({ event }) => event.error
+              })
+            ),
             target: 'FAILED'
           }
         }
@@ -230,11 +251,15 @@ export class SyncHostName {
             actions: assign({ message: ({ event }) => event.error }),
             target: 'FAILED'
           },
-          onDone: 'NEXT_STATE'
+          // The error machine recovered (e.g. digest retry): the recorded failure no longer applies.
+          onDone: { actions: assign({ failure: undefined }), target: 'NEXT_STATE' }
         },
         on: {
           ONFAILED: {
-            actions: assign({ errorMessage: ({ event }) => event.output }),
+            actions: assign({
+              errorMessage: (args) => messageAfterErrorMachine('Maintenance', args),
+              failure: (args) => failureAfterErrorMachine('Maintenance', args)
+            }),
             target: 'FAILED'
           }
         }
@@ -260,7 +285,7 @@ export class SyncHostName {
       if (context.statusMessage === 'SUCCESS') {
         return doneSuccess(context.taskName)
       } else {
-        return doneFail(context.taskName, context.errorMessage)
+        return doneFail(context.taskName, context.errorMessage, context.failure)
       }
     }
   })

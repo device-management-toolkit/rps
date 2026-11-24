@@ -28,7 +28,16 @@ vi.mock('../common.js', async () => {
   return {
     invokeWsmanCall: invokeWsmanCallSpy,
     HttpResponseError,
-    coalesceMessage
+    coalesceMessage,
+    failAt: actual.failAt,
+    returnValueOf: actual.returnValueOf,
+    buildFailure: actual.buildFailure,
+
+    stepFailure: actual.stepFailure,
+
+    failureAfterErrorMachine: actual.failureAfterErrorMachine,
+
+    messageAfterErrorMachine: actual.messageAfterErrorMachine
   }
 })
 
