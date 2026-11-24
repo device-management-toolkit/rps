@@ -241,14 +241,14 @@ describe('CIRA Configuration State Machine', () => {
               // Non-zero ReturnValue is carried, not dropped.
               expect(state.context.statusMessage).toEqual('Failed to set user initiated connection service')
               expect(state.context.failure).toEqual({
-                Code: 'AMT_METHOD_FAILED',
+                Code: 'CIM_RV_NOT_SUPPORTED',
                 Component: 'CIRAConnection',
                 Step: 'USER_INITIATED_CONNECTION_SERVICE',
-                Reason: 'AMT answered the request with a non-zero return value',
+                Reason: 'Operation is not supported by this device',
                 AmtReturnValue: 1
               })
               expect(devices[clientId].status.Components?.CIRAConnection).toMatchObject({
-                Code: 'AMT_METHOD_FAILED',
+                Code: 'CIM_RV_NOT_SUPPORTED',
                 Step: 'USER_INITIATED_CONNECTION_SERVICE',
                 AmtReturnValue: 1
               })

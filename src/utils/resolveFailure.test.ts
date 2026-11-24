@@ -15,7 +15,7 @@ describe('resolveFailure', () => {
         Code: 'AMT_METHOD_FAILED',
         Component: 'WirelessNetwork',
         Step: 'ADD_WIFI_SETTINGS',
-        Reason: 'AMT answered the request with a non-zero return value',
+        Reason: 'AMT returned ReturnValue 2066',
         AmtReturnValue: 2066
       })
     })
@@ -101,6 +101,100 @@ describe('resolveFailure', () => {
       expect(failure.Code).toBe('RPS_UNEXPECTED_ERROR')
       expect(failure.Detail).toBeUndefined()
       expect(failure.HttpStatus).toBeUndefined()
+    })
+  })
+
+  describe('return value tables', () => {
+    it('lets a decoded return value win over the step code and keeps the error text as detail', () => {
+      const failure = resolveFailure('ADD_PROXY_CONFIGS', 'CIRAProxy', {
+        code: 'RPS_UNEXPECTED_ERROR',
+        error: new Error('ReturnValue 2066'),
+        returnValue: 2066,
+        table: 'PT_STATUS'
+      })
+      expect(failure).toEqual({
+        Code: 'AMT_PT_UNSUPPORTED',
+        Component: 'CIRAProxy',
+        Step: 'ADD_PROXY_CONFIGS',
+        Reason: 'Operation or value is not supported by this AMT firmware',
+        AmtReturnValue: 2066,
+        Detail: 'ReturnValue 2066'
+      })
+    })
+
+    it('decodes Setup / AdminSetup values with the host-based setup table, not PT_STATUS', () => {
+      const failure = resolveFailure('CHECK_ADMIN_SETUP', 'Activation', {
+        code: 'RPS_ACTIVATION_FAILED',
+        returnValue: 3,
+        table: 'HOST_BASED_SETUP'
+      })
+      expect(failure.Code).toBe('IPS_RV_INVALID_PARAMETER')
+      expect(failure.AmtReturnValue).toBe(3)
+    })
+
+    it('decodes AddNextCertInChain values with its own table', () => {
+      const failure = resolveFailure('CHECK_CERT_CHAIN_RESPONSE', 'Activation', {
+        code: 'RPS_CERT_INVALID',
+        returnValue: 4,
+        table: 'ADD_NEXT_CERT_IN_CHAIN'
+      })
+      expect(failure.Code).toBe('IPS_RV_CERT_CHAIN_CERT_VERIFY_FAILED')
+      expect(failure.Reason).toBe('AMT could not verify the certificate')
+    })
+
+    it('does not report CIM "job started" as the reason for a failure', () => {
+      const failure = resolveFailure('USER_INITIATED_CONNECTION_SERVICE', 'CIRAConnection', {
+        returnValue: 4096,
+        table: 'CIM'
+      })
+      expect(failure).toEqual({
+        Code: 'AMT_METHOD_FAILED',
+        Component: 'CIRAConnection',
+        Step: 'USER_INITIATED_CONNECTION_SERVICE',
+        Reason: 'AMT returned ReturnValue 4096',
+        AmtReturnValue: 4096
+      })
+    })
+
+    it('decodes CIM and WiFi port values with their tables', () => {
+      expect(resolveFailure('S', 'CIRAConnection', { returnValue: 1, table: 'CIM' }).Code).toBe('CIM_RV_NOT_SUPPORTED')
+      expect(resolveFailure('S', 'WirelessNetwork', { returnValue: 1, table: 'WIFI_PORT_CONFIGURATION' }).Code).toBe(
+        'AMT_WIFI_NOT_SUPPORTED'
+      )
+    })
+
+    it('keeps the step code and the raw number for a value the table does not list', () => {
+      const failure = resolveFailure('CHECK_ADMIN_SETUP', 'Activation', {
+        code: 'RPS_ACTIVATION_FAILED',
+        returnValue: 2054,
+        table: 'HOST_BASED_SETUP'
+      })
+      expect(failure.Code).toBe('RPS_ACTIVATION_FAILED')
+      expect(failure.AmtReturnValue).toBe(2054)
+      const noStepCode = resolveFailure('ADD_WIFI_SETTINGS', 'WirelessNetwork', {
+        returnValue: 2066,
+        table: 'WIFI_PORT_CONFIGURATION'
+      })
+      expect(noStepCode.Code).toBe('AMT_METHOD_FAILED')
+      expect(noStepCode.Reason).toBe('AMT returned ReturnValue 2066')
+      expect(noStepCode.AmtReturnValue).toBe(2066)
+    })
+
+    it('does not repeat the return value in Detail when the error was built from it', () => {
+      const error: Error & { returnValue?: number } = new Error('ReturnValue PT_STATUS_INTERNAL_ERROR')
+      error.returnValue = 1
+      const failure = resolveFailure('SET_HIGH_ACCURACY_TIME_SYNCH', 'Maintenance', {
+        error,
+        returnValue: 1,
+        table: 'PT_STATUS'
+      })
+      expect(failure).toEqual({
+        Code: 'AMT_PT_INTERNAL_ERROR',
+        Component: 'Maintenance',
+        Step: 'SET_HIGH_ACCURACY_TIME_SYNCH',
+        Reason: 'AMT reported an internal error',
+        AmtReturnValue: 1
+      })
     })
   })
 

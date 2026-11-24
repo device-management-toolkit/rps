@@ -170,12 +170,11 @@ describe('ChangePassword State Machine', () => {
     expect(state.output.status).toBe(StatusFailed)
     expect(state.context.errorMessage).toBe('at SET_ADMIN_ACL_ENTRY ReturnValue PT_STATUS_INVALID_PASSWORD')
     expect(state.context.failure).toEqual({
-      Code: 'AMT_METHOD_FAILED',
+      Code: 'AMT_PT_INVALID_PASSWORD',
       Component: 'Maintenance',
       Step: 'SET_ADMIN_ACL_ENTRY',
-      Reason: 'AMT answered the request with a non-zero return value',
-      AmtReturnValue: 2054,
-      Detail: 'ReturnValue PT_STATUS_INVALID_PASSWORD'
+      Reason: 'The password specified in the user ACL is invalid',
+      AmtReturnValue: 2054
     })
     expect(state.output.failure).toEqual(state.context.failure)
   })

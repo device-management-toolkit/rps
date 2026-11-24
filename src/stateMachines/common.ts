@@ -29,7 +29,7 @@ import {
   type ProvisioningFailure
 } from '../models/RCS.Config.js'
 import { resolveFailure } from '../utils/resolveFailure.js'
-import { describeCode, type ErrorCode, isDeviceOriginCode } from '../utils/errorCatalog.js'
+import { describeCode, type ErrorCode, isDeviceOriginCode, type ReturnValueTable } from '../utils/errorCatalog.js'
 import { MqttProvider } from '../utils/MqttProvider.js'
 import pkg, { type HttpZResponseModel } from 'http-z'
 import { parseChunkedMessage } from '../utils/parseChunkedMessage.js'
@@ -878,6 +878,8 @@ export interface FailAtOptions {
   error?: (args: ActionArgs) => unknown
   /** Resolver for the method ReturnValue, usually `({ event }) => returnValueOf(event.output, 'AddWiFiSettings')`. */
   returnValue?: (args: ActionArgs) => number | undefined
+  /** wsman-messages table that documents the method; without it the ReturnValue is carried undecoded. */
+  table?: ReturnValueTable
   /** Which legacy context field receives the text; defaults to errorMessage. */
   assignTo?: 'errorMessage' | 'statusMessage'
 }
@@ -912,7 +914,8 @@ export function buildFailure(
   const failure = resolveFailure(step, component, {
     code: options.code,
     error,
-    returnValue
+    returnValue,
+    table: options.table
   })
   // Name the WSMAN call when it is what failed: either it was answered with a non-zero
   // ReturnValue, or it is the call that just threw. A step that fails for another reason is not

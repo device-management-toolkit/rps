@@ -157,6 +157,7 @@ export class ProxyConfiguration {
             'CIRAProxy',
             {
               returnValue: () => returnValue,
+              table: 'PT_STATUS',
               message: `Failed to add proxy configuration ${context.proxyConfigName}`
             },
             { context, event }
