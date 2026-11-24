@@ -331,9 +331,10 @@ export class Unconfiguration {
   deletePublicKeyCertificate = async ({ input }): Promise<any> => {
     if (input.amt != null) {
       const selector = { name: 'InstanceID', value: input.publicKeyCertificates[0].InstanceID }
-      input.publicKeyCertificates = input.publicKeyCertificates.slice(1)
       input.xmlMessage = input.amt.PublicKeyCertificate.Delete(selector)
-      return await invokeWsmanCall(input)
+      const response = await invokeWsmanCall(input)
+      input.publicKeyCertificates = input.publicKeyCertificates.slice(1)
+      return response
     } else {
       this.logger.error('Null object in deletePublicKeyCertificate()')
     }
@@ -502,9 +503,10 @@ export class Unconfiguration {
   deletePublicPrivateKeyPair = async ({ input }): Promise<any> => {
     if (input.amt != null) {
       const selector = { name: 'InstanceID', value: input.privateCerts[0].InstanceID }
-      input.privateCerts = input.privateCerts.slice(1)
       input.xmlMessage = input.amt.PublicPrivateKeyPair.Delete(selector)
-      return await invokeWsmanCall(input)
+      const response = await invokeWsmanCall(input)
+      input.privateCerts = input.privateCerts.slice(1)
+      return response
     } else {
       this.logger.error('Null object in deletePublicPrivateKeyPair()')
     }
@@ -593,6 +595,8 @@ export class Unconfiguration {
       // Skip TLS disable operations for TLS-enforced devices - Put on AMT_TLSSettingData doesn't work through TLS tunnel
       isTLSEnforced: ({ context }) => devices[context.clientId]?.tlsEnforced === true,
       hasCompetingRequest: ({ context }) => hasCompetingRequest(context.clientId),
+      canRetryCleanupChallenge: ({ context, event }) =>
+        event.error?.statusCode === 401 && (context.retryCount ?? 0) < 2,
       shouldRetry: ({ context, event }) => context.retryCount < 3 && event.output instanceof UNEXPECTED_PARSE_ERROR
     },
     actions: {
@@ -612,15 +616,17 @@ export class Unconfiguration {
       },
       'Update Cleanup Status': ({ context }) => {
         this.logger.warn(`Abandoned TLS object cleanup incomplete: ${context.statusMessage}`)
-        devices[context.clientId].status.Status = context.statusMessage
       },
       'Reset Unauth Count': ({ context }) => {
         devices[context.clientId].unauthCount = 0
       },
       'Read WiFi Endpoint Settings Pull Response': this.readWiFiEndpointSettingsPullResponse,
       'Read HTTP Proxy Access Point Pull Response': this.readHTTPProxyAccessPointPullResponse,
+      'Refresh Cleanup Authorization': ({ context, event }) => {
+        this.error.addAuthorizationHeader({ context: { clientId: context.clientId, message: event.error } })
+      },
       'Reset Retry Count': assign({ retryCount: () => 0 }),
-      'Increment Retry Count': assign({ retryCount: ({ context }) => context.retryCount + 1 }),
+      'Increment Retry Count': assign({ retryCount: ({ context }) => (context.retryCount ?? 0) + 1 }),
       'Read Ethernet Port Settings': this.readEthernetPortSettings,
       // TLS-enforced devices keep their TLS setup; only certificates RPS left behind are selected.
       'Select Abandoned TLS Objects': assign(({ context, event }) => {
@@ -660,7 +666,7 @@ export class Unconfiguration {
             target: 'ENUMERATE_ETHERNET_PORT_SETTINGS'
           },
           REMOVE_ABANDONED_TLS: {
-            actions: 'Reset Unauth Count',
+            actions: ['Reset Unauth Count', 'Reset Retry Count'],
             target: 'REMOVE_ABANDONED_TLS_OBJECTS'
           }
         }
@@ -1327,13 +1333,24 @@ export class Unconfiguration {
           src: 'readTlsInventory',
           input: ({ context }) => context,
           id: 'read-tls-inventory',
-          onDone: { actions: 'Select Abandoned TLS Objects', target: 'NEXT_ABANDONED_TLS_OBJECT' },
-          onError: {
-            actions: assign({
-              statusMessage: () => 'Failed to read TLS inventory; abandoned objects were kept'
-            }),
-            target: 'CLEANUP_FAILURE'
-          }
+          onDone: {
+            actions: ['Select Abandoned TLS Objects', 'Reset Retry Count'],
+            target: 'NEXT_ABANDONED_TLS_OBJECT'
+          },
+          onError: [
+            {
+              guard: 'canRetryCleanupChallenge',
+              actions: ['Refresh Cleanup Authorization', 'Increment Retry Count'],
+              target: 'READ_TLS_INVENTORY',
+              reenter: true
+            },
+            {
+              actions: assign({
+                statusMessage: () => 'Failed to read TLS inventory; abandoned objects were kept'
+              }),
+              target: 'CLEANUP_FAILURE'
+            }
+          ]
         }
       },
       NEXT_ABANDONED_TLS_OBJECT: {
@@ -1349,13 +1366,20 @@ export class Unconfiguration {
           src: 'deletePublicPrivateKeyPair',
           input: ({ context }) => context,
           id: 'delete-abandoned-tls-key',
-          onDone: 'NEXT_ABANDONED_TLS_OBJECT',
-          onError: {
-            actions: assign({
-              statusMessage: () => 'Failed to delete abandoned TLS key pair'
-            }),
-            target: 'CLEANUP_FAILURE'
-          }
+          onDone: { actions: 'Reset Retry Count', target: 'NEXT_ABANDONED_TLS_OBJECT' },
+          onError: [
+            {
+              guard: 'canRetryCleanupChallenge',
+              actions: ['Refresh Cleanup Authorization', 'Increment Retry Count'],
+              target: 'NEXT_ABANDONED_TLS_OBJECT'
+            },
+            {
+              actions: assign({
+                statusMessage: () => 'Failed to delete abandoned TLS key pair'
+              }),
+              target: 'CLEANUP_FAILURE'
+            }
+          ]
         }
       },
       DELETE_ABANDONED_TLS_CERTIFICATE: {
@@ -1363,13 +1387,20 @@ export class Unconfiguration {
           src: 'deletePublicKeyCertificate',
           input: ({ context }) => context,
           id: 'delete-abandoned-tls-certificate',
-          onDone: 'NEXT_ABANDONED_TLS_OBJECT',
-          onError: {
-            actions: assign({
-              statusMessage: () => 'Failed to delete abandoned TLS certificate'
-            }),
-            target: 'CLEANUP_FAILURE'
-          }
+          onDone: { actions: 'Reset Retry Count', target: 'NEXT_ABANDONED_TLS_OBJECT' },
+          onError: [
+            {
+              guard: 'canRetryCleanupChallenge',
+              actions: ['Refresh Cleanup Authorization', 'Increment Retry Count'],
+              target: 'NEXT_ABANDONED_TLS_OBJECT'
+            },
+            {
+              actions: assign({
+                statusMessage: () => 'Failed to delete abandoned TLS certificate'
+              }),
+              target: 'CLEANUP_FAILURE'
+            }
+          ]
         }
       },
       // Unlike FAILURE, this leaves the TLS and CIRA status that activation has already set untouched.

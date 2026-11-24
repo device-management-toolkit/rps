@@ -204,6 +204,27 @@ describe('findAbandonedTlsObjects', () => {
     ).toEqual([orphan.key])
   })
 
+  it('keeps a key referenced by the providing endpoint of another association', () => {
+    const otherContexts = [
+      {
+        ElementInContext: { Selector: { _: 'other certificate' } },
+        ElementProvidingContext: { Selector: { _: orphan.key.InstanceID } }
+      }
+    ]
+    expect(findAbandonedTlsObjects({ ...base, otherContexts })).toEqual({ certificates: [orphanEntry], keys: [] })
+  })
+
+  it.each([
+    null,
+    { MissingReference: 'unknown' },
+    { MissingReference: null },
+    { ElementInContext: {} },
+    { ElementInContext: { Selector: { _: '' } } },
+    { ElementInContext: { Selector: { _: 'Cert 1' } }, ElementProvidingContext: {} }
+  ])('keeps everything when an association cannot be resolved: %j', (association) => {
+    expect(findAbandonedTlsObjects({ ...base, otherContexts: [association] })).toEqual(nothing)
+  })
+
   it('selects nothing when inventory cannot be parsed', () => {
     const broken = certEntry(3, 'not a certificate')
     expect(

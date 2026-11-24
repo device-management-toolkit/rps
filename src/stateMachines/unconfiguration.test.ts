@@ -1358,7 +1358,7 @@ describe('Abandoned TLS object cleanup on TLS-enforced devices', () => {
   })
 
   it('does not delete an object that any association still uses', async () => {
-    const used = { ...full, otherContexts: [{ Selector: { _: 'Cert 1' } }] }
+    const used = { ...full, otherContexts: [{ ElementInContext: { Selector: { _: 'Cert 1' } } }] }
     expect((await run(used)).deleted).toEqual([])
   })
 
@@ -1394,6 +1394,100 @@ describe('Abandoned TLS object cleanup on TLS-enforced devices', () => {
     actor.stop()
     expect(snapshot.value).toBe('SUCCESS')
     expect(enumerateEthernet).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    'read',
+    'key',
+    'certificate'
+  ])('retries a digest challenge during %s without losing a queued object', async (step) => {
+    devices[clientId] = { tlsEnforced: true, uuid: 'uuid-1', status: { Status: 'ACM' }, connectionParams: {} } as any
+    const challenge = {
+      statusCode: 401,
+      headers: [{ name: 'Www-Authenticate', value: 'Digest realm="AMT", nonce="new-nonce", qop="auth"' }]
+    }
+    let challenged = false
+    const deleted: string[] = []
+    const read = vi.fn(async () => {
+      if (step === 'read' && !challenged) {
+        challenged = true
+        throw challenge
+      }
+      return full
+    })
+    invokeWsmanCallSpy.mockImplementation(async (input: any) => {
+      const kind = input.xmlMessage.includes('AMT_PublicPrivateKeyPair') ? 'key' : 'certificate'
+      const list = kind === 'key' ? input.privateCerts : input.publicKeyCertificates
+      if (step === kind && !challenged) {
+        challenged = true
+        throw challenge
+      }
+      deleted.push(list[0].InstanceID)
+      return {}
+    })
+    try {
+      const machine = unconfiguration.machine.provide({ actors: { readTlsInventory: fromPromise(read) } })
+      const snapshot = await runMachineSegment(
+        machine,
+        'REMOVE_ABANDONED_TLS_OBJECTS',
+        {
+          clientId,
+          retryCount: 0,
+          privateCerts: [],
+          publicKeyCertificates: [],
+          amt: new AMT.Messages()
+        },
+        []
+      )
+      expect(snapshot.value).toBe('SUCCESS')
+      expect(deleted).toEqual(['Key 1', 'Cert 1'])
+      expect(devices[clientId].connectionParams.digestChallenge.nonce).toBe('new-nonce')
+      expect(devices[clientId].status.Status).toBe('ACM')
+      expect(challenged).toBe(true)
+    } finally {
+      invokeWsmanCallSpy.mockReset().mockResolvedValue({})
+    }
+  })
+
+  it.each([
+    'read',
+    'key',
+    'certificate'
+  ])('stops after three rejected authentication attempts during %s', async (step) => {
+    devices[clientId] = { tlsEnforced: true, uuid: 'uuid-1', status: { Status: 'ACM' }, connectionParams: {} } as any
+    const challenge = { statusCode: 401, headers: [] }
+    const read = vi.fn(async () => {
+      if (step === 'read') throw challenge
+      return full
+    })
+    const attempts = vi.fn(async (input: any) => {
+      const kind = input.xmlMessage.includes('AMT_PublicPrivateKeyPair') ? 'key' : 'certificate'
+      if (step === kind) throw challenge
+      return {}
+    })
+    invokeWsmanCallSpy.mockImplementation(attempts)
+    try {
+      const machine = unconfiguration.machine.provide({ actors: { readTlsInventory: fromPromise(read) } })
+      const snapshot = await runMachineSegment(
+        machine,
+        'REMOVE_ABANDONED_TLS_OBJECTS',
+        {
+          clientId,
+          retryCount: 0,
+          privateCerts: [],
+          publicKeyCertificates: [],
+          amt: new AMT.Messages()
+        },
+        []
+      )
+      expect(snapshot.value).toBe('CLEANUP_FAILURE')
+      expect(step === 'read' ? read.mock.calls.length : attempts.mock.calls.length).toBe(step === 'certificate' ? 4 : 3)
+      if (step === 'key') expect(snapshot.context.privateCerts).toEqual([orphan.key])
+      if (step === 'certificate') expect(snapshot.context.publicKeyCertificates).toEqual([orphan.entry])
+      expect(devices[clientId].status.Status).toBe('ACM')
+    } finally {
+      invokeWsmanCallSpy.mockReset().mockResolvedValue({})
+    }
   })
 
   it('compares device UUIDs case-insensitively', async () => {
@@ -1432,14 +1526,20 @@ describe('Abandoned TLS object cleanup on TLS-enforced devices', () => {
       'Failed to delete abandoned TLS certificate',
       ['Key 1']
     ]
-  ])('reports a %s failure, stops, and leaves the TLS and CIRA status alone', async (failing, message, deleted) => {
-    expect(await run(full, failing)).toEqual({
-      deleted,
-      value: 'CLEANUP_FAILURE',
-      status: message,
-      kept: ['connected', 'configured']
-    })
-  })
+  ])(
+    'logs a %s failure, stops, and leaves activation, TLS and CIRA status alone',
+    async (failing, message, deleted) => {
+      const warning = vi.spyOn(unconfiguration.logger, 'warn')
+      expect(await run(full, failing)).toEqual({
+        deleted,
+        value: 'CLEANUP_FAILURE',
+        status: undefined,
+        kept: ['connected', 'configured']
+      })
+      expect(warning).toHaveBeenCalledWith(`Abandoned TLS object cleanup incomplete: ${message}`)
+      warning.mockRestore()
+    }
+  )
 })
 
 describe('readTlsInventory', () => {

@@ -39,6 +39,50 @@ const keyId = (der: string): string => {
   throw new Error('Unrecognised AMT public key')
 }
 
+// An unreadable association is unknown usage, never proof that an object is unused.
+const referenceIds = (contexts: any): Set<string> => {
+  const ids = new Set<string>()
+  const endpoint = (value: any): void => {
+    const selectors: any[] = []
+    const visit = (item: any): void => {
+      if (item == null || typeof item !== 'object') return
+      for (const [name, child] of Object.entries(item)) {
+        if (name === 'Selector') selectors.push(...(Array.isArray(child) ? child : [child]))
+        else visit(child)
+      }
+    }
+    visit(value)
+    const instanceIds = selectors.filter((selector) => selector?.$?.Name == null || selector.$.Name === 'InstanceID')
+    if (!instanceIds.length || instanceIds.some((selector) => typeof selector?._ !== 'string' || !selector._)) {
+      throw new Error('Unreadable credential reference')
+    }
+    instanceIds.forEach((selector) => ids.add(selector._))
+  }
+  const visit = (value: any): void => {
+    if (value == null || value === '') return
+    if (Array.isArray(value)) {
+      return value.forEach((association) => {
+        if (association == null || association === '') throw new Error('Unreadable credential association')
+        visit(association)
+      })
+    }
+    if (typeof value !== 'object' || !Object.keys(value).length) throw new Error('Unreadable credential association')
+    if ('ElementInContext' in value) {
+      endpoint(value.ElementInContext)
+      if ('ElementProvidingContext' in value) endpoint(value.ElementProvidingContext)
+    } else {
+      for (const [name, associations] of Object.entries(value)) {
+        if (!name.endsWith('CredentialContext') || associations == null) {
+          throw new Error('Unreadable credential association')
+        }
+        visit(associations)
+      }
+    }
+  }
+  visit(contexts)
+  return ids
+}
+
 /**
  * Selects TLS certificates (and their key pairs) left on AMT by an interrupted provisioning attempt.
  *
@@ -55,17 +99,16 @@ export function findAbandonedTlsObjects(inventory: TlsInventory): { certificates
   try {
     // Ownership is proven by a signature from the key RPS holds, not by an issuer name or a cached CA.
     const signer = createPublicKey(forge.pki.publicKeyToPem(forge.pki.setRsaPublicKey(signingKey.n, signingKey.e)))
-    const tlsReferences = JSON.stringify(tlsContexts ?? null)
-    const references = JSON.stringify([tlsContexts ?? null, otherContexts ?? null])
-    const isReferenced = (object: any): boolean => references.includes(JSON.stringify(object.InstanceID))
+    const tlsReferences = referenceIds(tlsContexts)
+    const references = new Set([...tlsReferences, ...referenceIds(otherContexts)])
+    const isReferenced = (object: any): boolean => references.has(object.InstanceID)
     const parsed = certificates.map((entry) => ({ entry, x509: parse(entry.X509Certificate) }))
 
     // The identity RPS saved must be installed, in use by TLS, and backed by a key; otherwise stop.
     const saved = parse(persistedLeafPem)
     // AMT may hold several copies of the saved certificate; the one TLS references is the identity in use.
     const active = parsed.find(
-      ({ entry, x509 }) =>
-        x509.fingerprint256 === saved.fingerprint256 && tlsReferences.includes(JSON.stringify(entry.InstanceID))
+      ({ entry, x509 }) => x509.fingerprint256 === saved.fingerprint256 && tlsReferences.has(entry.InstanceID)
     )
     if (!active || !keys.some((key) => keyId(key.DERKey) === publicKeyOf(active.x509))) {
       return none
