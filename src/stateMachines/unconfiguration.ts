@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { type CIM, type AMT, type IPS } from '@device-management-toolkit/wsman-messages'
+import { CIM, IPS, type AMT } from '@device-management-toolkit/wsman-messages'
+import { Base, WSManMessageCreator } from '@device-management-toolkit/wsman-messages/WSMan.js'
 import { assign, fromPromise, sendTo, setup } from 'xstate'
 import { CertManager } from '../certManager.js'
 import { Configurator } from '../Configurator.js'
@@ -19,6 +20,35 @@ import { type AMTConfiguration } from '../models/index.js'
 import { Error } from './error.js'
 import { type CommonContext, invokeWsmanCall } from './common.js'
 import { Environment } from '../utils/Environment.js'
+import { type DeviceCredentials } from '../interfaces/ISecretManagerService.js'
+import { findAbandonedTlsObjects } from '../utils/findAbandonedTlsObjects.js'
+
+// Cleanup assumes one activation per device at a time. This only sees requests handled by this process
+// (UUIDs compare case-insensitively); a request on another RPS instance is not visible and is unsupported.
+const hasCompetingRequest = (clientId: string): boolean => {
+  const uuid = devices[clientId]?.uuid?.toLowerCase()
+  return Object.entries(devices).some(
+    ([id, other]) => id !== clientId && uuid != null && other.uuid?.toLowerCase() === uuid
+  )
+}
+
+const toArray = (value: any): any[] => (value == null ? [] : Array.isArray(value) ? value : [value])
+
+// Reads every page of one class. A missing page throws, so selection never sees a partial inventory.
+async function readAll(input: any, resource: Base): Promise<any[]> {
+  input.xmlMessage = resource.Enumerate()
+  let context = (await invokeWsmanCall<any>(input, 2)).Envelope?.Body?.EnumerateResponse?.EnumerationContext
+  const items: any[] = []
+  while (true) {
+    if (!context) throw new globalThis.Error('Incomplete WS-Man enumeration')
+    input.xmlMessage = resource.Pull(context)
+    const page = (await invokeWsmanCall<any>(input, 2)).Envelope?.Body?.PullResponse
+    if (page?.Items == null) throw new globalThis.Error('Incomplete WS-Man pull response')
+    if (page.Items !== '') Object.values(page.Items).forEach((entries) => items.push(...toArray(entries)))
+    if (page.EndOfSequence != null) return items
+    context = page.EnumerationContext
+  }
+}
 
 export interface UnconfigContext extends CommonContext {
   profile: AMTConfiguration | null
@@ -38,7 +68,7 @@ export interface UnconfigContext extends CommonContext {
   cim?: CIM.Messages
 }
 export interface UnconfigEvent {
-  type: 'REMOVECONFIG' | 'ONFAILURE'
+  type: 'REMOVECONFIG' | 'REMOVE_ABANDONED_TLS' | 'ONFAILURE'
   clientId: string
   output?: any
   error?: any
@@ -437,6 +467,38 @@ export class Unconfiguration {
     }
   }
 
+  // Everything needed to tell abandoned objects from used ones. TLS contexts are kept apart from the other
+  // associations because only a TLS context shows that the saved identity is actually in use.
+  readTlsInventory = async ({ input }): Promise<any> => {
+    const remoteAccess = new Base(new WSManMessageCreator('http://intel.com/wbem/wscim/1/amt-schema/1/'))
+    remoteAccess.className = 'AMT_RemoteAccessCredentialContext' as AMT.Classes
+    const otherContexts: any[] = []
+    for (const association of [
+      input.amt.IEEE8021xCredentialContext,
+      new IPS.Messages().IEEE8021xCredentialContext,
+      new CIM.Messages().CredentialContext,
+      remoteAccess
+    ]) {
+      otherContexts.push(...(await readAll(input, association)))
+    }
+    // secretsManager is assigned asynchronously; waiting also surfaces an initialization failure as a read error.
+    await this.configurator.ready
+    const saved = (await this.configurator.secretsManager.getSecretAtPath(
+      `devices/${devices[input.clientId].uuid}`
+    )) as DeviceCredentials | null
+    // The key RPS signs TLS leaves with, read from the same Vault secret fetchMPSRootKey uses so that
+    // cleanup does not depend on which provisioning route ran or on in-memory state.
+    const mpsCerts = (await this.configurator.secretsManager.getSecretAtPath('MPSCerts')) as any
+    return {
+      tlsContexts: await readAll(input, input.amt.TLSCredentialContext),
+      otherContexts,
+      certificates: await readAll(input, input.amt.PublicKeyCertificate),
+      keys: await readAll(input, input.amt.PublicPrivateKeyPair),
+      persistedLeafPem: saved?.TLS_ISSUED_CERTIFICATE,
+      signingKey: mpsCerts?.root_key ? this.nodeForge.privateKeyFromPem(mpsCerts.root_key) : undefined
+    }
+  }
+
   deletePublicPrivateKeyPair = async ({ input }): Promise<any> => {
     if (input.amt != null) {
       const selector = { name: 'InstanceID', value: input.privateCerts[0].InstanceID }
@@ -478,6 +540,7 @@ export class Unconfiguration {
       disableRemoteTLSSettingData: fromPromise(this.disableRemoteTLSSettingData),
       disableLocalTLSSettingData: fromPromise(this.disableLocalTLSSettingData),
       commitSetupAndConfigurationService: fromPromise(this.commitSetupAndConfigurationService),
+      readTlsInventory: fromPromise(this.readTlsInventory),
       enumerateTLSCredentialContext: fromPromise(this.enumerateTLSCredentialContext),
       pullTLSCredentialContext: fromPromise(this.pullTLSCredentialContext),
       deleteTLSCredentialContext: fromPromise(this.deleteTLSCredentialContext),
@@ -529,6 +592,7 @@ export class Unconfiguration {
       isWiredSupportedOnDevice: ({ context }) => context.wiredSettings?.MACAddress != null,
       // Skip TLS disable operations for TLS-enforced devices - Put on AMT_TLSSettingData doesn't work through TLS tunnel
       isTLSEnforced: ({ context }) => devices[context.clientId]?.tlsEnforced === true,
+      hasCompetingRequest: ({ context }) => hasCompetingRequest(context.clientId),
       shouldRetry: ({ context, event }) => context.retryCount < 3 && event.output instanceof UNEXPECTED_PARSE_ERROR
     },
     actions: {
@@ -546,6 +610,10 @@ export class Unconfiguration {
         device.status.CIRAConnection = ''
         device.status.Status = context.statusMessage
       },
+      'Update Cleanup Status': ({ context }) => {
+        this.logger.warn(`Abandoned TLS object cleanup incomplete: ${context.statusMessage}`)
+        devices[context.clientId].status.Status = context.statusMessage
+      },
       'Reset Unauth Count': ({ context }) => {
         devices[context.clientId].unauthCount = 0
       },
@@ -553,7 +621,20 @@ export class Unconfiguration {
       'Read HTTP Proxy Access Point Pull Response': this.readHTTPProxyAccessPointPullResponse,
       'Reset Retry Count': assign({ retryCount: () => 0 }),
       'Increment Retry Count': assign({ retryCount: ({ context }) => context.retryCount + 1 }),
-      'Read Ethernet Port Settings': this.readEthernetPortSettings
+      'Read Ethernet Port Settings': this.readEthernetPortSettings,
+      // TLS-enforced devices keep their TLS setup; only certificates RPS left behind are selected.
+      'Select Abandoned TLS Objects': assign(({ context, event }) => {
+        const device = devices[context.clientId]
+        const inventory = (event as any).output
+        const { certificates, keys } = findAbandonedTlsObjects({
+          ...inventory,
+          signingKey: hasCompetingRequest(context.clientId) ? undefined : inventory.signingKey
+        })
+        this.logger.info(
+          `Abandoned TLS objects for ${device.uuid}: ${certificates.length} certificates, ${keys.length} keys`
+        )
+        return { publicKeyCertificates: certificates, privateCerts: keys }
+      })
     }
   }).createMachine({
     context: ({ input }) => ({
@@ -577,6 +658,10 @@ export class Unconfiguration {
           REMOVECONFIG: {
             actions: ['Reset Unauth Count', 'Reset Retry Count'],
             target: 'ENUMERATE_ETHERNET_PORT_SETTINGS'
+          },
+          REMOVE_ABANDONED_TLS: {
+            actions: 'Reset Unauth Count',
+            target: 'REMOVE_ABANDONED_TLS_OBJECTS'
           }
         }
       },
@@ -1230,6 +1315,67 @@ export class Unconfiguration {
             target: 'FAILURE'
           }
         }
+      },
+      // Cleanup-only entry (REMOVE_ABANDONED_TLS), run by activation once the replacement identity is saved.
+      // TLS-enforced devices only. Keys go before certificates: a certificate RPS signed stays
+      // identifiable if a retry follows an interruption, but a key alone cannot be traced to RPS.
+      REMOVE_ABANDONED_TLS_OBJECTS: {
+        always: [{ guard: 'isTLSEnforced', target: 'READ_TLS_INVENTORY' }, { target: 'SUCCESS' }]
+      },
+      READ_TLS_INVENTORY: {
+        invoke: {
+          src: 'readTlsInventory',
+          input: ({ context }) => context,
+          id: 'read-tls-inventory',
+          onDone: { actions: 'Select Abandoned TLS Objects', target: 'NEXT_ABANDONED_TLS_OBJECT' },
+          onError: {
+            actions: assign({
+              statusMessage: () => 'Failed to read TLS inventory; abandoned objects were kept'
+            }),
+            target: 'CLEANUP_FAILURE'
+          }
+        }
+      },
+      NEXT_ABANDONED_TLS_OBJECT: {
+        always: [
+          { guard: 'hasCompetingRequest', target: 'SUCCESS' },
+          { guard: 'hasPrivateCerts', target: 'DELETE_ABANDONED_TLS_KEY' },
+          { guard: 'hasPublicKeyCertificate', target: 'DELETE_ABANDONED_TLS_CERTIFICATE' },
+          { target: 'SUCCESS' }
+        ]
+      },
+      DELETE_ABANDONED_TLS_KEY: {
+        invoke: {
+          src: 'deletePublicPrivateKeyPair',
+          input: ({ context }) => context,
+          id: 'delete-abandoned-tls-key',
+          onDone: 'NEXT_ABANDONED_TLS_OBJECT',
+          onError: {
+            actions: assign({
+              statusMessage: () => 'Failed to delete abandoned TLS key pair'
+            }),
+            target: 'CLEANUP_FAILURE'
+          }
+        }
+      },
+      DELETE_ABANDONED_TLS_CERTIFICATE: {
+        invoke: {
+          src: 'deletePublicKeyCertificate',
+          input: ({ context }) => context,
+          id: 'delete-abandoned-tls-certificate',
+          onDone: 'NEXT_ABANDONED_TLS_OBJECT',
+          onError: {
+            actions: assign({
+              statusMessage: () => 'Failed to delete abandoned TLS certificate'
+            }),
+            target: 'CLEANUP_FAILURE'
+          }
+        }
+      },
+      // Unlike FAILURE, this leaves the TLS and CIRA status that activation has already set untouched.
+      CLEANUP_FAILURE: {
+        entry: ['Update Cleanup Status'],
+        type: 'final'
       },
       FAILURE: {
         entry: ['Update Status'],
