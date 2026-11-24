@@ -4,10 +4,11 @@
  **********************************************************************/
 
 import { vi } from 'vitest'
-import { type MachineImplementationsSimplified, createActor } from 'xstate'
+import { type MachineImplementationsSimplified, assign, createActor, sendTo, setup, waitFor } from 'xstate'
 import { Error, type ErrorContext } from './error.js'
 import { randomUUID } from 'node:crypto'
 import { devices } from '../devices.js'
+import { GATEWAY_TIMEOUT_ERROR } from '../utils/constants.js'
 
 let context: ErrorContext
 const clientId = randomUUID()
@@ -161,5 +162,73 @@ describe('Error State Machine', () => {
     expect(devices[clientId].connectionParams.digestChallenge).toBeNull()
     error.addAuthorizationHeader({ context })
     expect(devices[clientId].connectionParams.digestChallenge).not.toBeNull()
+  })
+
+  describe('ONFAILED structured failure', () => {
+    // Runs the real error machine under a minimal parent so the sendParent payload can be inspected.
+    const runUnderParent = async (message: any): Promise<any> => {
+      const parent = setup({
+        types: {} as { context: { received?: any }; events: { type: 'ONFAILED'; output: string; failure: any } },
+        actors: { error: error.machine }
+      }).createMachine({
+        context: {},
+        initial: 'running',
+        states: {
+          running: {
+            entry: sendTo('error-machine', { type: 'PARSE', clientId }),
+            invoke: { src: 'error', id: 'error-machine', input: { message, clientId } },
+            on: {
+              ONFAILED: { actions: assign({ received: ({ event }) => event }), target: 'done' }
+            }
+          },
+          done: { type: 'final' }
+        }
+      })
+      const actor = createActor(parent).start()
+      await waitFor(actor, (s) => s.matches('done'))
+      return actor.getSnapshot().context.received
+    }
+
+    it('carries WSMAN_AUTH_FAILED with the HTTP status when authentication is exhausted', async () => {
+      devices[clientId].unauthCount = 3
+      const event = await runUnderParent(unauthorizedResponse)
+      expect(event.output).toBe('Unable to authenticate with AMT')
+      expect(event.failure).toEqual({
+        Code: 'WSMAN_AUTH_FAILED',
+        Component: 'Activation',
+        Step: 'UNAUTHORIZED',
+        Reason: 'AMT rejected the digest credentials (HTTP 401)',
+        HttpStatus: 401
+      })
+    })
+
+    it('carries WSMAN_BAD_REQUEST for a 400 response', async () => {
+      const event = await runUnderParent({ statusCode: 400, statusMessage: 'Bad Request', headers: [], body: {} })
+      expect(event.output).toBe('Bad Request')
+      expect(event.failure).toEqual({
+        Code: 'WSMAN_BAD_REQUEST',
+        Component: 'Activation',
+        Step: 'BADREQUEST',
+        Reason: 'AMT rejected the WSMAN request as malformed (HTTP 400)',
+        HttpStatus: 400,
+        Detail: 'Bad Request'
+      })
+    })
+
+    it('carries WSMAN_REQUEST_FAILED for an unrecognized response', async () => {
+      const event = await runUnderParent(null)
+      expect(event.output).toBe('WSMAN request to AMT failed')
+      expect(event.failure).toMatchObject({
+        Code: 'WSMAN_REQUEST_FAILED',
+        Component: 'Activation',
+        Step: 'UNKNOWN'
+      })
+    })
+
+    it('uses the reason of the failure as the legacy text for a timeout', async () => {
+      const event = await runUnderParent(new GATEWAY_TIMEOUT_ERROR())
+      expect(event.output).toBe('Timed out waiting for a WSMAN response from AMT')
+      expect(event.failure).toMatchObject({ Code: 'WSMAN_TIMEOUT', Step: 'UNKNOWN' })
+    })
   })
 })

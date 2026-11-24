@@ -138,7 +138,7 @@ export type FailureComponent =
  * Additive wire shape: serialized alongside the legacy flat status strings.
  */
 export interface ProvisioningFailure {
-  /** Stable machine-readable code, e.g. AMT_METHOD_FAILED, WSMAN_TIMEOUT, RPS_DB_PROFILE_NOT_FOUND */
+  /** Stable machine-readable code, e.g. AMT_METHOD_FAILED, WSMAN_TIMEOUT, RPS_DB_PROFILE_READ_FAILED */
   Code: string
   Component: FailureComponent
   /** State machine step (state name) that failed, e.g. ADD_WIFI_SETTINGS */
