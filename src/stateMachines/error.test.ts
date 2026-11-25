@@ -164,6 +164,11 @@ describe('Error State Machine', () => {
     expect(devices[clientId].connectionParams.digestChallenge).not.toBeNull()
   })
 
+  it('does not throw in addAuthorizationHeader when the client already disconnected', () => {
+    delete devices[clientId]
+    expect(() => error.addAuthorizationHeader({ context })).not.toThrow()
+  })
+
   describe('ONFAILED structured failure', () => {
     // Runs the real error machine under a minimal parent so the sendParent payload can be inspected.
     const runUnderParent = async (message: any): Promise<any> => {

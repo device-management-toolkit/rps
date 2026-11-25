@@ -2510,6 +2510,30 @@ describe('Activation State Machine', () => {
       expect(sentPayload.ComponentsRollup).toBeUndefined()
       expect(sentPayload.ComponentsVersion).toBeUndefined()
     })
+    it('does not throw, logs a warning and sends nothing when the client disconnected before the final status', () => {
+      context.status = 'error'
+      delete devices[clientId]
+      const warnSpy = vi.spyOn(activation.logger, 'warn')
+      const persistSpy = vi.spyOn(activation, 'persistProvisioningStatusToMPS')
+      expect(() => activation.sendMessageToDevice({ context })).not.toThrow()
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(`Client ${clientId} disconnected`))
+      expect(responseMessageSpy).not.toHaveBeenCalled()
+      expect(sendSpy).not.toHaveBeenCalled()
+      expect(persistSpy).not.toHaveBeenCalled()
+    })
+
+    it('does not throw, logs a warning and sends nothing when the client disconnected before the final status', () => {
+      context.status = 'error'
+      delete devices[clientId]
+      const warnSpy = vi.spyOn(activation.logger, 'warn')
+      const persistSpy = vi.spyOn(activation, 'persistProvisioningStatusToMPS')
+      expect(() => activation.sendMessageToDevice({ context })).not.toThrow()
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(`Client ${clientId} disconnected`))
+      expect(responseMessageSpy).not.toHaveBeenCalled()
+      expect(sendSpy).not.toHaveBeenCalled()
+      expect(persistSpy).not.toHaveBeenCalled()
+    })
+
     it('should update Credentials', () => {
       activation.updateCredentials({ context })
       expect(devices[context.clientId].connectionParams.username).toBe(AMTUserName)

@@ -304,6 +304,24 @@ describe('Deactivation State Machine', () => {
     expect(sendSpy).toHaveBeenCalled()
   })
 
+  it('does not throw, logs a warning and sends nothing when the client disconnected before the final status', () => {
+    const warnSpy = vi.spyOn(deactivation.logger, 'warn')
+    delete devices[clientId]
+    expect(() => deactivation.sendMessageToDevice({ context: deactivationContext })).not.toThrow()
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(`Client ${clientId} disconnected`))
+    expect(responseMessageSpy).not.toHaveBeenCalled()
+    expect(sendSpy).not.toHaveBeenCalled()
+  })
+
+  it('does not throw, logs a warning and sends nothing when the client disconnected before the final status', () => {
+    const warnSpy = vi.spyOn(deactivation.logger, 'warn')
+    delete devices[clientId]
+    expect(() => deactivation.sendMessageToDevice({ context: deactivationContext })).not.toThrow()
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(`Client ${clientId} disconnected`))
+    expect(responseMessageSpy).not.toHaveBeenCalled()
+    expect(sendSpy).not.toHaveBeenCalled()
+  })
+
   it('should eventually reach "PROVISIONED"', () =>
     new Promise<void>((resolve, reject) => {
       const service = createActor(deactivation.machine, { input: deactivationContext })
