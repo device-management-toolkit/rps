@@ -3233,6 +3233,9 @@ export class Activation {
         }
       },
       NEXT_STATE: {
+        // Consume the retry target. It is set when a step enters ERROR and must not outlive this decision,
+        // or a later 401 from a step that sets no target would be routed to an earlier, already recovered one.
+        exit: assign({ targetAfterError: () => undefined }),
         always: [
           {
             // Retry recovered authentication challenges before TLS ACM failure handling.
