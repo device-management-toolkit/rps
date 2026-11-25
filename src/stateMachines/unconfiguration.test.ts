@@ -1265,6 +1265,45 @@ describe('TLS cleanup read optimization', () => {
   })
 })
 
+describe('Broad unconfiguration deletion failures', () => {
+  it.each([
+    [
+      'DELETE_PUBLIC_PRIVATE_KEY_PAIR',
+      'privateCerts',
+      'ENUMERATE_PUBLIC_KEY_CERTIFICATE'
+    ],
+    [
+      'DELETE_PUBLIC_KEY_CERTIFICATE',
+      'publicKeyCertificates',
+      'GET_ENVIRONMENT_DETECTION_SETTINGS'
+    ]
+  ])('advances past persistently rejected objects in %s', async (state, queue, terminal) => {
+    const entries = [{ InstanceID: 'first' }, { InstanceID: 'second' }]
+    const attempted: string[] = []
+    invokeWsmanCallSpy.mockImplementation(async (input: any) => {
+      attempted.push(input[queue][0].InstanceID)
+      throw { statusCode: 400 }
+    })
+    try {
+      const snapshot = await runMachineSegment(
+        new Unconfiguration().machine,
+        state,
+        {
+          clientId,
+          amt: new AMT.Messages(),
+          [queue]: entries
+        },
+        [terminal]
+      )
+      expect(snapshot.value).toBe(terminal)
+      expect(snapshot.context[queue]).toEqual([])
+      expect(attempted).toEqual(['first', 'second'])
+    } finally {
+      invokeWsmanCallSpy.mockReset().mockResolvedValue({})
+    }
+  })
+})
+
 describe('Abandoned TLS object cleanup on TLS-enforced devices', () => {
   const certManager = new CertManager(new Logger('test'), new NodeForge())
   const issuer = { CN: 'MPSRoot' }
@@ -1294,7 +1333,10 @@ describe('Abandoned TLS object cleanup on TLS-enforced devices', () => {
   const unconfiguration = new Unconfiguration()
   const active = leaf(0)
   const orphan = leaf(1)
-  const inUse = { ElementInContext: { Selector: { _: 'Cert 0' } } }
+  const inUse = {
+    ElementInContext: { Selector: { _: 'Cert 0' } },
+    ElementProvidingContext: { Selector: { _: 'test endpoint' } }
+  }
 
   const run = async (
     inventory: any,
@@ -1358,7 +1400,7 @@ describe('Abandoned TLS object cleanup on TLS-enforced devices', () => {
   })
 
   it('does not delete an object that any association still uses', async () => {
-    const used = { ...full, otherContexts: [{ ElementInContext: { Selector: { _: 'Cert 1' } } }] }
+    const used = { ...full, otherContexts: [{ ...inUse, ElementInContext: { Selector: { _: 'Cert 1' } } }] }
     expect((await run(used)).deleted).toEqual([])
   })
 

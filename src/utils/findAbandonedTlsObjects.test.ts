@@ -5,6 +5,8 @@
 
 import { generateKeyPairSync } from 'node:crypto'
 import forge from 'node-forge'
+import { AMT } from '@device-management-toolkit/wsman-messages'
+import { HttpHandler } from '../HttpHandler.js'
 import { describe, expect, it } from 'vitest'
 import { CertManager } from '../certManager.js'
 import Logger from '../Logger.js'
@@ -62,6 +64,7 @@ const certEntry = (handle: number, pem: string, flags: Record<string, boolean> =
 })
 const contextFor = (...handles: number[]): any => ({
   AMT_TLSCredentialContext: handles.map((handle) => ({
+    ElementProvidingContext: { Selector: { _: 'test protocol endpoint', $: { Name: 'InstanceID' } } },
     ElementInContext: {
       ReferenceParameters: {
         SelectorSet: { Selector: { _: `Intel(r) AMT Certificate: Handle: ${handle}`, $: { Name: 'InstanceID' } } }
@@ -204,6 +207,42 @@ describe('findAbandonedTlsObjects', () => {
     ).toEqual([orphan.key])
   })
 
+  it('accepts both endpoints returned by the TLS context builder', () => {
+    const xml = new AMT.Messages().TLSCredentialContext.Create(activeEntry.InstanceID)
+    const context = new HttpHandler().parseXML(xml).Envelope.Body.AMT_TLSCredentialContext
+    expect(findAbandonedTlsObjects({ ...base, tlsContexts: [context] })).toEqual({
+      certificates: [orphanEntry],
+      keys: [orphan.key]
+    })
+  })
+
+  it('accepts the collection name returned by AMT 21 in the captured recovery run', () => {
+    const xml = new AMT.Messages().TLSCredentialContext.Create(activeEntry.InstanceID)
+    const context = new HttpHandler().parseXML(xml).Envelope.Body.AMT_TLSCredentialContext
+    context.ElementProvidingContext.ReferenceParameters.SelectorSet.Selector._ =
+      'TLSProtocolEndpoint Instances Collection'
+    expect(findAbandonedTlsObjects({ ...base, tlsContexts: [context] })).toEqual({
+      certificates: [orphanEntry],
+      keys: [orphan.key]
+    })
+  })
+
+  it.each([
+    'wrong resource',
+    'wrong selector',
+    'wrong value',
+    'certificate endpoint'
+  ])('keeps everything for an invalid protocol reference: %s', (change) => {
+    const xml = new AMT.Messages().TLSCredentialContext.Create(activeEntry.InstanceID)
+    const context = new HttpHandler().parseXML(xml).Envelope.Body.AMT_TLSCredentialContext
+    const parameters = context.ElementProvidingContext.ReferenceParameters
+    if (change === 'wrong resource') parameters.ResourceURI = 'unknown'
+    if (change === 'wrong selector') parameters.SelectorSet.Selector.$.Name = 'Unknown'
+    if (change === 'wrong value') parameters.SelectorSet.Selector._ = ''
+    if (change === 'certificate endpoint') context.ElementInContext = context.ElementProvidingContext
+    expect(findAbandonedTlsObjects({ ...base, tlsContexts: [context] })).toEqual(nothing)
+  })
+
   it('keeps a key referenced by the providing endpoint of another association', () => {
     const otherContexts = [
       {
@@ -219,6 +258,7 @@ describe('findAbandonedTlsObjects', () => {
     { MissingReference: 'unknown' },
     { MissingReference: null },
     { ElementInContext: {} },
+    { ElementInContext: { Selector: { _: 'Cert 1' } } },
     { ElementInContext: { Selector: { _: '' } } },
     { ElementInContext: { Selector: { _: 'Cert 1' } }, ElementProvidingContext: {} }
   ])('keeps everything when an association cannot be resolved: %j', (association) => {

@@ -1222,6 +1222,7 @@ export class Unconfiguration {
             target: 'PULL_PUBLIC_PRIVATE_KEY_PAIR_RESPONSE'
           },
           onError: {
+            actions: assign({ privateCerts: ({ context }) => context.privateCerts.slice(1) }),
             target: 'PULL_PUBLIC_PRIVATE_KEY_PAIR_RESPONSE'
           }
         }
@@ -1278,6 +1279,7 @@ export class Unconfiguration {
             target: 'PULL_PUBLIC_KEY_CERTIFICATE_RESPONSE'
           }, // check if there is any more certificates
           onError: {
+            actions: assign({ publicKeyCertificates: ({ context }) => context.publicKeyCertificates.slice(1) }),
             target: 'PULL_PUBLIC_KEY_CERTIFICATE_RESPONSE'
           }
         }

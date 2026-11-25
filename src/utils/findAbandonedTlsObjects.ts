@@ -42,7 +42,7 @@ const keyId = (der: string): string => {
 // An unreadable association is unknown usage, never proof that an object is unused.
 const referenceIds = (contexts: any): Set<string> => {
   const ids = new Set<string>()
-  const endpoint = (value: any): void => {
+  const endpoint = (value: any, providing = false): void => {
     const selectors: any[] = []
     const visit = (item: any): void => {
       if (item == null || typeof item !== 'object') return
@@ -52,6 +52,16 @@ const referenceIds = (contexts: any): Set<string> => {
       }
     }
     visit(value)
+    // The TLS providing endpoint identifies a protocol collection, not a certificate or key.
+    if (
+      providing &&
+      value?.ReferenceParameters?.ResourceURI ===
+        'http://intel.com/wbem/wscim/1/amt-schema/1/AMT_TLSProtocolEndpointCollection' &&
+      selectors.length === 1 &&
+      selectors[0]?.$?.Name === 'ElementName' &&
+      /^TLSProtocolEndpoint ?Instances Collection$/.test(selectors[0]._)
+    )
+      return
     const instanceIds = selectors.filter((selector) => selector?.$?.Name == null || selector.$.Name === 'InstanceID')
     if (!instanceIds.length || instanceIds.some((selector) => typeof selector?._ !== 'string' || !selector._)) {
       throw new Error('Unreadable credential reference')
@@ -69,7 +79,7 @@ const referenceIds = (contexts: any): Set<string> => {
     if (typeof value !== 'object' || !Object.keys(value).length) throw new Error('Unreadable credential association')
     if ('ElementInContext' in value) {
       endpoint(value.ElementInContext)
-      if ('ElementProvidingContext' in value) endpoint(value.ElementProvidingContext)
+      endpoint(value.ElementProvidingContext, true)
     } else {
       for (const [name, associations] of Object.entries(value)) {
         if (!name.endsWith('CredentialContext') || associations == null) {
