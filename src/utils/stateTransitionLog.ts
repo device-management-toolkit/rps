@@ -11,15 +11,16 @@ const logger = new Logger('StateTrace')
  * Logs every state-machine transition under the given root actor at debug level.
  * Emits one line when an actor state or status changes.
  * Only snapshots exposing the machine matches() method are logged.
+ * The root actor is logged as `rootName` (it has no id, so xstate would call it x:<counter>).
  */
-export function traceStateTransitions(service: AnyActorRef, clientId: string): void {
+export function traceStateTransitions(service: AnyActorRef, clientId: string, rootName = 'activation'): void {
   if (typeof service?.system?.inspect !== 'function') return
   const last = new Map<string, string>()
   const subscription = service.system.inspect((event: InspectionEvent) => {
     if (event.type !== '@xstate.snapshot') return
     const snapshot = event.snapshot
     if (snapshot == null || !('matches' in snapshot) || typeof snapshot.matches !== 'function') return
-    const actor = (event.actorRef as AnyActorRef)?.id ?? 'unknown'
+    const actor = event.actorRef === service ? rootName : ((event.actorRef as AnyActorRef)?.id ?? 'unknown')
     const state = 'value' in snapshot ? snapshot.value : undefined
     const value = typeof state === 'string' ? state : JSON.stringify(state)
     const key = `${value}|${snapshot.status}`
@@ -30,8 +31,11 @@ export function traceStateTransitions(service: AnyActorRef, clientId: string): v
     )
   })
   if (typeof service.subscribe === 'function') {
+    // Release on the next tick: the terminal snapshot is inspected after completion is signalled.
     const stop = (): void => {
-      subscription.unsubscribe()
+      setTimeout(() => {
+        subscription.unsubscribe()
+      }, 0)
     }
     service.subscribe({ complete: stop, error: stop })
   }
