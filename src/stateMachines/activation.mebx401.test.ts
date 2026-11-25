@@ -63,6 +63,7 @@ describe.each(authenticationSteps)('$state authentication recovery', ({ state, a
     expect(invoke).toHaveBeenCalledTimes(2)
     expect(devices[clientId].connectionParams?.digestChallenge?.nonce).toBe('fresh-nonce')
     expect(devices[clientId].unauthCount).toBe(0)
+    expect(snapshot.context.targetAfterError).toBeUndefined()
   })
 
   it.each([
@@ -171,5 +172,42 @@ describe('SetMEBxPassword digest challenge in the TLS ACM phase', () => {
       ['GET_GENERAL_SETTINGS', 'DEACTIVATION']
     )
     expect(snapshot.value).toBe('DEACTIVATION')
+  })
+})
+
+describe('retry target after authentication recovery', () => {
+  it.each([
+    'ADMIN_SETUP',
+    'UPGRADE_TO_ADMIN_SETUP',
+    'CHANGE_AMT_PASSWORD',
+    'SET_MEBX_PASSWORD',
+    'GET_GENERAL_SETTINGS'
+  ])('is consumed when %s is retried', async (target) => {
+    const machine = new Activation().machine
+    const snapshot = await runMachineSegment(machine, 'NEXT_STATE', { ...tlsAcmContext, targetAfterError: target }, [
+      target,
+      'DEACTIVATION',
+      'FAILED'
+    ])
+    expect(snapshot.value).not.toBe('FAILED')
+    expect(snapshot.context.targetAfterError).toBeUndefined()
+  })
+
+  it('does not route a later error to a step that was already recovered', async () => {
+    const machine = new Activation().machine
+    const first = await runMachineSegment(
+      machine,
+      'NEXT_STATE',
+      { ...tlsAcmContext, tlsCCMComplete: false, targetAfterError: 'ADMIN_SETUP' },
+      ['ADMIN_SETUP', 'FAILED']
+    )
+    expect(first.value).toBe('ADMIN_SETUP')
+    const second = await runMachineSegment(
+      machine,
+      'NEXT_STATE',
+      { ...tlsAcmContext, tlsCCMComplete: false, targetAfterError: first.context.targetAfterError },
+      ['ADMIN_SETUP', 'FAILED']
+    )
+    expect(second.value).toBe('FAILED')
   })
 })
