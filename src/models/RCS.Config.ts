@@ -193,6 +193,8 @@ export interface ClientObject {
   payload?: any
   certObj?: ProvisioningCertObj | null
   readyState?: number
+  stopProvisioning?: () => void
+  provisioningStopped?: boolean
   activationStatus?: boolean
   // Provisioning-status persistence to MPS (issue #2665).
   activatedAt?: Date // write-once: when RPS itself activated the device this session

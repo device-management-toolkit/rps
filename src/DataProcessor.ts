@@ -22,6 +22,7 @@ import { ChangePasswordEventType } from './stateMachines/maintenance/changePassw
 import { SyncHostNameEventType } from './stateMachines/maintenance/syncHostName.js'
 import { SyncIPEventType } from './stateMachines/maintenance/syncIP.js'
 import { SyncDeviceInfoEventType } from './stateMachines/maintenance/syncDeviceInfo.js'
+import { DbCreatorFactory } from './factories/DbCreatorFactory.js'
 import { devices } from './devices.js'
 
 export class DataProcessor {
@@ -107,16 +108,68 @@ export class DataProcessor {
     this.logger.debug(
       `ProcessData: Parsed Message received from device ${clientMsg.payload.uuid}: ${JSON.stringify(clientMsg, null, '\t')}`
     )
-    await this.validator.validateActivationMsg(clientMsg, clientId) // Validate the activation message payload
-    this.setConnectionParams(clientId)
-    activation.service.start()
-    const event: ActivationEvent = {
-      type: devices[clientId].activationStatus ? 'ACTIVATED' : 'ACTIVATION',
-      clientId,
-      tenantId: clientMsg.tenantId,
-      friendlyName: clientMsg.payload.friendlyName
+    const device = devices[clientId]
+    if (device.stopProvisioning) throw new RPSError('An activation is already running on this connection')
+    let release: (() => void) | undefined
+    const controller = new AbortController()
+    const handler = new HttpHandler()
+    handler.provisioning = { signal: controller.signal, pendingWrites: new Set() }
+    const releaseSession = (): void => {
+      const unlock = release
+      release = undefined
+      unlock?.()
+      if (device.stopProvisioning === stop) device.stopProvisioning = undefined
     }
-    activation.service.send(event)
+    const stop = (): void => {
+      if (!controller.signal.aborted) {
+        controller.abort()
+        device.provisioningStopped = true
+        activation.service.stop()
+        device.reject?.(new Error('Provisioning session ended'))
+        device.tlsTunnelManager?.close()
+        device.tlsTunnelManager = undefined
+        device.tlsTunnelSessionId = undefined
+        device.tlsResponseBuffer = undefined
+        device.tlsTunnelNeedsReset = true
+      }
+      const pending = [...handler.provisioning!.pendingWrites]
+      if (pending.length) void Promise.allSettled(pending).then(releaseSession)
+      else releaseSession()
+    }
+    const lockLost = (): void => {
+      stop()
+      // Actor.stop() bypasses final-state responses; close RPC so it cannot wait forever.
+      device.ClientSocket?.close(1011, 'Provisioning lock lost')
+    }
+    device.stopProvisioning = stop
+    device.provisioningStopped = false
+    try {
+      await this.validator.validateActivationMsg(clientMsg, clientId)
+      if (devices[clientId] !== device || controller.signal.aborted) {
+        throw new RPSError('Provisioning connection ended during validation')
+      }
+      const db = await new DbCreatorFactory().getDb()
+      const lock = await db.acquireProvisioningLock?.(clientMsg.payload.uuid, lockLost)
+      if (lock === null) throw new RPSError('Another activation is running for this device UUID')
+      release = lock
+      if (controller.signal.aborted) throw new RPSError('Provisioning connection ended while acquiring its lock')
+      activation.service.subscribe({ complete: stop, error: stop })
+      this.setConnectionParams(clientId)
+      activation.service.start()
+      const event: ActivationEvent = {
+        type: device.activationStatus ? 'ACTIVATED' : 'ACTIVATION',
+        clientId,
+        tenantId: clientMsg.tenantId,
+        friendlyName: clientMsg.payload.friendlyName,
+        httpHandler: handler
+      }
+      activation.service.send(event)
+    } catch (error) {
+      stop()
+      if (error instanceof RPSError) throw error
+      this.logger.error(`Failed to start provisioning: ${String(error)}`)
+      throw new RPSError('Failed to acquire provisioning session; retry activation')
+    }
   }
 
   async deactivateDevice(
@@ -233,6 +286,7 @@ export class DataProcessor {
     uuid: string | null = null
   ): void {
     const clientObj = devices[clientId]
+    if (!clientObj.stopProvisioning) clientObj.provisioningStopped = false
     clientObj.connectionParams = {
       port: clientObj.tlsEnforced === true ? 16993 : 16992,
       guid: uuid ?? clientObj.ClientData.payload.uuid,
