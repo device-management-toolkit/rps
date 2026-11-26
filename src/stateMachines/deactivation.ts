@@ -56,6 +56,11 @@ export class Deactivation {
   sendMessageToDevice = ({ context }: { context: DeactivationContext }): void => {
     const { clientId, status } = context
     const clientObj = devices[clientId]
+    if (clientObj == null) {
+      // The client disconnected (WebSocketListener removed the device) while the machine was still running.
+      this.logger.warn(`Client ${clientId} disconnected before the final status could be sent (status: ${status})`)
+      return
+    }
     let method: 'failed' | 'success' | 'ok' | 'heartbeat' = 'success' // TODO: Get rid of redundant data (i.e. Method and Status)
     if (status === 'success') {
       clientObj.status.Status = context.statusMessage !== '' ? context.statusMessage : 'Deactivated'

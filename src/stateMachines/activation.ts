@@ -236,6 +236,11 @@ export class Activation {
   sendMessageToDevice({ context }): void {
     const { clientId, status } = context
     const clientObj = devices[clientId]
+    if (clientObj == null) {
+      // The client disconnected (WebSocketListener removed the device) while the machine was still running.
+      this.logger.warn(`Client ${clientId} disconnected before the final status could be sent (status: ${status})`)
+      return
+    }
     let method: 'failed' | 'success' | 'ok' | 'heartbeat' | null
     if (status === 'success') {
       method = 'success'

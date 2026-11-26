@@ -47,6 +47,10 @@ export class Error {
   addAuthorizationHeader = ({ context }: { context: ErrorContext }): void => {
     const { message, clientId } = context
     const clientObj = devices[clientId]
+    if (clientObj == null) {
+      // The client disconnected while the machine was still running; nothing to update.
+      return
+    }
     if (clientObj.unauthCount == null) {
       clientObj.unauthCount = 0
     }
@@ -86,7 +90,7 @@ export class Error {
       input: ErrorContext
     },
     guards: {
-      isMaxRetries: ({ context }) => devices[context.clientId].unauthCount < 3,
+      isMaxRetries: ({ context }) => (devices[context.clientId]?.unauthCount ?? 3) < 3,
       isBadRequest: ({ context }) => context.message?.statusCode === 400,
       isUnauthorized: ({ context }) => context.message?.statusCode === 401
     },
