@@ -1,3 +1,10 @@
+## [2.48.3](https://github.com/device-management-toolkit/rps/compare/v2.48.2...v2.48.3) (2026-11-26)
+
+
+### Bug Fixes
+
+* **activation:** recover digest challenges across provisioning steps ([#3040](https://github.com/device-management-toolkit/rps/issues/3040)) ([c2f5193](https://github.com/device-management-toolkit/rps/commit/c2f5193c05901de2ba41a73faeb01dbf012c0a2f))
+
 ## [2.48.2](https://github.com/device-management-toolkit/rps/compare/v2.48.1...v2.48.2) (2026-11-23)
 
 
