@@ -1128,6 +1128,7 @@ describe('Activation State Machine', () => {
           'NETWORK_CONFIGURATION',
           'FEATURES_CONFIGURATION',
           'SYNC_ACTIVATION_TIME',
+          'REMOVE_ABANDONED_TLS_OBJECTS',
           'PROVISIONED'
         ]
         const ccmActivationService = createActor(mockActivationMachine, { input: context })
@@ -1189,6 +1190,7 @@ describe('Activation State Machine', () => {
           'NETWORK_CONFIGURATION',
           'FEATURES_CONFIGURATION',
           'SYNC_ACTIVATION_TIME',
+          'REMOVE_ABANDONED_TLS_OBJECTS',
           'PROVISIONED'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
@@ -1249,6 +1251,7 @@ describe('Activation State Machine', () => {
           'FEATURES_CONFIGURATION',
           'CIRA',
           'SYNC_ACTIVATION_TIME',
+          'REMOVE_ABANDONED_TLS_OBJECTS',
           'PROVISIONED'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
@@ -1453,6 +1456,7 @@ describe('Activation State Machine', () => {
           'FEATURES_CONFIGURATION',
           'CIRA',
           'SYNC_ACTIVATION_TIME',
+          'REMOVE_ABANDONED_TLS_OBJECTS',
           'PROVISIONED'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
@@ -1821,6 +1825,7 @@ describe('Activation State Machine', () => {
           'FEATURES_CONFIGURATION',
           'CIRA',
           'SYNC_ACTIVATION_TIME',
+          'REMOVE_ABANDONED_TLS_OBJECTS',
           'PROVISIONED'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
@@ -1982,6 +1987,7 @@ describe('Activation State Machine', () => {
           'FEATURES_CONFIGURATION',
           'CIRA',
           'SYNC_ACTIVATION_TIME',
+          'REMOVE_ABANDONED_TLS_OBJECTS',
           'PROVISIONED'
         ]
 
@@ -2292,6 +2298,7 @@ describe('Activation State Machine', () => {
           'FEATURES_CONFIGURATION',
           'CIRA',
           'SYNC_ACTIVATION_TIME',
+          'REMOVE_ABANDONED_TLS_OBJECTS',
           'PROVISIONED'
         ]
 
@@ -2359,6 +2366,7 @@ describe('Activation State Machine', () => {
           'FEATURES_CONFIGURATION',
           'CIRA',
           'SYNC_ACTIVATION_TIME',
+          'REMOVE_ABANDONED_TLS_OBJECTS',
           'PROVISIONED'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
@@ -2631,6 +2639,7 @@ describe('Activation State Machine', () => {
           'TLS',
           'SAVE_POST_PROVISIONING_CERTS',
           'SYNC_ACTIVATION_TIME',
+          'REMOVE_ABANDONED_TLS_OBJECTS',
           'PROVISIONED'
         ]
         const ccmActivationService = createActor(mockActivationMachine, { input: context })
@@ -2687,6 +2696,7 @@ describe('Activation State Machine', () => {
           'NETWORK_CONFIGURATION',
           'FEATURES_CONFIGURATION',
           'SYNC_ACTIVATION_TIME',
+          'REMOVE_ABANDONED_TLS_OBJECTS',
           'PROVISIONED'
         ]
         const acmActivationService = createActor(mockActivationMachine, { input: context })
@@ -2995,7 +3005,9 @@ describe('Activation State Machine', () => {
       const onDone = states.SYNC_ACTIVATION_TIME.invoke.onDone
 
       expect(onDone[0].guard({ event: { output: { status: 'success' } } })).toBe(true)
-      expect(onDone[0].target).toBe('PROVISIONED')
+      // Success continues to the last cleanup step, which is the only way into PROVISIONED.
+      expect(onDone[0].target).toBe('REMOVE_ABANDONED_TLS_OBJECTS')
+      expect(states.REMOVE_ABANDONED_TLS_OBJECTS.invoke.onDone).toBe('PROVISIONED')
       expect(onDone[1].target).toBe('FAILED')
     })
 
@@ -3051,6 +3063,7 @@ describe('Activation State Machine', () => {
           'NETWORK_CONFIGURATION',
           'FEATURES_CONFIGURATION',
           'SYNC_ACTIVATION_TIME',
+          'REMOVE_ABANDONED_TLS_OBJECTS',
           'PROVISIONED'
         ]
         const service = createActor(mockActivationMachine, { input: context })
@@ -4039,5 +4052,53 @@ describe('TLS reuse state at the start of a provisioning attempt', () => {
     } finally {
       actor.stop()
     }
+  })
+})
+
+describe('Removing abandoned TLS objects as the last step of activation', () => {
+  const run = async (
+    options: { timeSync?: unknown; cleanup?: () => Promise<unknown> } = {}
+  ): Promise<{ order: string[]; value: any }> => {
+    const order: string[] = []
+    const machine = new Activation().machine.provide({
+      actors: {
+        saveTlsTunnelCerts: fromPromise(async () => {
+          order.push('save certificate')
+          return true
+        }),
+        timeSync: fromPromise(async () => options.timeSync ?? { status: 'success' }) as any,
+        unconfiguration: fromPromise(async () => {
+          order.push('cleanup')
+          return await (options.cleanup?.() ?? Promise.resolve({}))
+        }) as any
+      }
+    })
+    // The AMT 19+ post-provisioning route: TLS is provisioned after the broad Stage 6 pass has already run.
+    const snapshot = await runMachineSegment(
+      machine,
+      'SAVE_POST_PROVISIONING_CERTS',
+      { clientId: 'abandoned-tls-cleanup-test', errorMessage: '' },
+      ['PROVISIONED', 'FAILED']
+    )
+    return { order, value: snapshot.value }
+  }
+
+  it('cleans up after the replacement identity is saved on the post-provisioning route', async () => {
+    expect(await run()).toEqual({ order: ['save certificate', 'cleanup'], value: 'PROVISIONED' })
+  })
+
+  it.each([
+    ['throws', async () => await Promise.reject(new Error('cleanup crashed'))],
+    [
+      'reports a failure',
+      async () => await Promise.resolve({ errorMessage: 'Failed to delete abandoned TLS key pair' })
+    ]
+  ])('still provisions when the cleanup %s', async (_name, cleanup) => {
+    expect((await run({ cleanup })).value).toBe('PROVISIONED')
+  })
+
+  it('does not clean up when activation fails before it', async () => {
+    const result = await run({ timeSync: { status: 'error', errorMessage: 'no time' } })
+    expect(result).toEqual({ order: ['save certificate'], value: 'FAILED' })
   })
 })

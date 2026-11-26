@@ -3182,7 +3182,7 @@ export class Activation {
           onDone: [
             {
               guard: ({ event }) => (event.output as any)?.status === 'success',
-              target: 'PROVISIONED'
+              target: 'REMOVE_ABANDONED_TLS_OBJECTS'
             },
             {
               actions: assign({
@@ -3199,6 +3199,29 @@ export class Activation {
         },
         on: {
           ONFAILED: 'FAILED'
+        }
+      },
+      // Every route reaches PROVISIONED through here, after the replacement identity has been saved.
+      // Best effort: the cleanup records its own failures and never fails the activation.
+      REMOVE_ABANDONED_TLS_OBJECTS: {
+        entry: sendTo('abandoned-tls-cleanup', { type: 'REMOVE_ABANDONED_TLS' }),
+        invoke: {
+          src: 'unconfiguration',
+          id: 'abandoned-tls-cleanup',
+          input: ({ context }) => ({
+            clientId: context.clientId,
+            profile: context.profile,
+            httpHandler: context.httpHandler,
+            retryCount: 0,
+            privateCerts: [],
+            tlsSettingData: [],
+            publicKeyCertificates: [],
+            amt: context.amt,
+            ips: context.ips,
+            cim: context.cim
+          }),
+          onDone: 'PROVISIONED',
+          onError: 'PROVISIONED'
         }
       },
       PROVISIONED: {

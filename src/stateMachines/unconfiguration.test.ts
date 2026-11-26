@@ -3,8 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  **********************************************************************/
 
-import { vi } from 'vitest'
-import { randomUUID } from 'node:crypto'
+import { vi, beforeEach } from 'vitest'
+import { generateKeyPairSync, randomUUID } from 'node:crypto'
+import { CertManager } from '../certManager.js'
+import Logger from '../Logger.js'
+import { NodeForge } from '../NodeForge.js'
 import { devices } from '../devices.js'
 import { Environment } from '../utils/Environment.js'
 import {
@@ -14,11 +17,19 @@ import {
 } from './unconfiguration.js'
 import { config } from '../test/helper/Config.js'
 import { HttpHandler } from '../HttpHandler.js'
-import { type MachineImplementationsSimplified, createActor, fromPromise } from 'xstate'
+import { type MachineImplementationsSimplified, createActor, fromPromise, waitFor } from 'xstate'
 import { runMachineSegment } from '../test/helper/xstate.js'
 import { AMT, CIM, IPS } from '@device-management-toolkit/wsman-messages'
 
 import { HttpResponseError, coalesceMessage, isDigestRealmValid } from './common.js'
+
+// Keep every Unconfiguration from starting asynchronous database initialization that can outlive the
+// test environment.
+vi.mock('../Configurator.js', () => ({
+  Configurator: function () {
+    return { ready: Promise.resolve() }
+  }
+}))
 
 const invokeWsmanCallSpy = vi.hoisted(() => vi.fn<any>().mockResolvedValue({}))
 const invokeEnterpriseAssistantCallSpy = vi.hoisted(() => vi.fn())
@@ -1179,6 +1190,8 @@ describe('Unconfiguration State Machine', () => {
   })
 })
 
+const noTlsInventory = fromPromise(async () => ({ certificates: [], keys: [], contexts: [] }))
+
 describe('TLS cleanup read optimization', () => {
   afterEach(() => {
     delete devices[clientId]
@@ -1202,6 +1215,7 @@ describe('TLS cleanup read optimization', () => {
     const clearEnvironment = vi.fn(async () => ({}))
     const machine = new Unconfiguration().machine.provide({
       actors: {
+        readTlsInventory: noTlsInventory,
         enumerateTLSSettingData: fromPromise(enumerate),
         pullTLSSettingData: fromPromise(pull),
         deleteRemoteAccessService: fromPromise(removeMps),
@@ -1235,6 +1249,7 @@ describe('TLS cleanup read optimization', () => {
   ])('retains failure from %s', async (failedActor) => {
     devices[clientId] = { tlsEnforced: true, status: {} } as any
     const actors: any = {
+      readTlsInventory: noTlsInventory,
       deleteRemoteAccessService: fromPromise(async () => ({})),
       getEnvironmentDetectionSettings: fromPromise(async () => ({
         Envelope: { Body: { AMT_EnvironmentDetectionSettingData: { DetectionStrings: ['example'] } } }
@@ -1247,5 +1262,433 @@ describe('TLS cleanup read optimization', () => {
     const machine = new Unconfiguration().machine.provide({ actors })
     const snapshot = await runMachineSegment(machine, 'DELETE_MANAGEMENT_PRESENCE_REMOTE_SAP', { clientId }, [])
     expect(snapshot.value).toBe('FAILURE')
+  })
+})
+
+describe('Broad unconfiguration deletion failures', () => {
+  it.each([
+    [
+      'DELETE_PUBLIC_PRIVATE_KEY_PAIR',
+      'privateCerts',
+      'ENUMERATE_PUBLIC_KEY_CERTIFICATE'
+    ],
+    [
+      'DELETE_PUBLIC_KEY_CERTIFICATE',
+      'publicKeyCertificates',
+      'GET_ENVIRONMENT_DETECTION_SETTINGS'
+    ]
+  ])('advances past persistently rejected objects in %s', async (state, queue, terminal) => {
+    const entries = [{ InstanceID: 'first' }, { InstanceID: 'second' }]
+    const attempted: string[] = []
+    invokeWsmanCallSpy.mockImplementation(async (input: any) => {
+      attempted.push(input[queue][0].InstanceID)
+      throw { statusCode: 400 }
+    })
+    try {
+      const snapshot = await runMachineSegment(
+        new Unconfiguration().machine,
+        state,
+        {
+          clientId,
+          amt: new AMT.Messages(),
+          [queue]: entries
+        },
+        [terminal]
+      )
+      expect(snapshot.value).toBe(terminal)
+      expect(snapshot.context[queue]).toEqual([])
+      expect(attempted).toEqual(['first', 'second'])
+    } finally {
+      invokeWsmanCallSpy.mockReset().mockResolvedValue({})
+    }
+  })
+})
+
+describe('Abandoned TLS object cleanup on TLS-enforced devices', () => {
+  const certManager = new CertManager(new Logger('test'), new NodeForge())
+  const issuer = { CN: 'MPSRoot' }
+  const root = certManager.createCertificate(issuer)
+  const leaf = (handle: number): { entry: any; key: any } => {
+    const DERKey = generateKeyPairSync('rsa', { modulusLength: 2048 })
+      .publicKey.export({ type: 'spki', format: 'der' })
+      .toString('base64')
+    const { pem } = certManager.amtCertSignWithCAKey(
+      DERKey,
+      root.key,
+      { CN: 'AMT-device' },
+      issuer,
+      { name: 'extKeyUsage', serverAuth: true, clientAuth: false } as any,
+      root.pem
+    )
+    return {
+      entry: {
+        InstanceID: `Cert ${handle}`,
+        X509Certificate: pem,
+        TrustedRootCertficate: false,
+        ReadOnlyCertificate: false
+      },
+      key: { InstanceID: `Key ${handle}`, DERKey }
+    }
+  }
+  const unconfiguration = new Unconfiguration()
+  const active = leaf(0)
+  const orphan = leaf(1)
+  const inUse = {
+    ElementInContext: { Selector: { _: 'Cert 0' } },
+    ElementProvidingContext: { Selector: { _: 'test endpoint' } }
+  }
+
+  const run = async (
+    inventory: any,
+    failing?: string,
+    tlsEnforced = true,
+    afterDelete?: () => void
+  ): Promise<{ deleted: string[]; value: any; status: string | undefined; kept: unknown[] }> => {
+    devices[clientId] = {
+      tlsEnforced,
+      uuid: 'uuid-1',
+      status: { CIRAConnection: 'connected', TLSConfiguration: 'configured' }
+    } as any
+    const deleted: string[] = []
+    const remove = (name: string, list: 'privateCerts' | 'publicKeyCertificates'): any =>
+      fromPromise(async ({ input }: any) => {
+        if (failing === name) throw new Error('simulated delete failure')
+        deleted.push(input[list][0].InstanceID)
+        input[list] = input[list].slice(1)
+        afterDelete?.()
+      })
+    const machine = unconfiguration.machine.provide({
+      actors: {
+        readTlsInventory: fromPromise(async () => {
+          if (failing === 'read') throw new Error('simulated read failure')
+          return inventory
+        }),
+        deletePublicPrivateKeyPair: remove('key', 'privateCerts'),
+        deletePublicKeyCertificate: remove('certificate', 'publicKeyCertificates')
+      }
+    })
+    const snapshot = await runMachineSegment(
+      machine,
+      'REMOVE_ABANDONED_TLS_OBJECTS',
+      { clientId, privateCerts: [], publicKeyCertificates: [], tlsSettingData: [] },
+      []
+    )
+    const { Status, CIRAConnection, TLSConfiguration } = devices[clientId].status as any
+    return { deleted, value: snapshot.value, status: Status, kept: [CIRAConnection, TLSConfiguration] }
+  }
+  // readTlsInventory loads the signing key from Vault, so it arrives with the inventory on every route.
+  const full = {
+    certificates: [active.entry, orphan.entry],
+    keys: [active.key, orphan.key],
+    tlsContexts: [inUse],
+    otherContexts: [] as any[],
+    persistedLeafPem: active.entry.X509Certificate,
+    signingKey: root.key
+  }
+
+  afterEach(() => {
+    delete devices[clientId]
+  })
+
+  it('deletes the abandoned key, then its certificate, and keeps the active identity', async () => {
+    expect(await run(full)).toMatchObject({ deleted: ['Key 1', 'Cert 1'], value: 'SUCCESS' })
+  })
+
+  it('finishes the job on retry when only the certificate is left', async () => {
+    const retry = { ...full, keys: [active.key] }
+    expect(await run(retry)).toMatchObject({ deleted: ['Cert 1'], value: 'SUCCESS' })
+  })
+
+  it('does not delete an object that any association still uses', async () => {
+    const used = { ...full, otherContexts: [{ ...inUse, ElementInContext: { Selector: { _: 'Cert 1' } } }] }
+    expect((await run(used)).deleted).toEqual([])
+  })
+
+  it('does nothing on other devices', async () => {
+    expect(await run(full, undefined, false)).toMatchObject({ deleted: [], value: 'SUCCESS' })
+  })
+
+  it('deletes nothing while another request is activating the same device', async () => {
+    devices['other-request'] = { uuid: 'uuid-1' } as any
+    try {
+      expect((await run(full)).deleted).toEqual([])
+    } finally {
+      delete devices['other-request']
+    }
+  })
+
+  it('deletes nothing when Vault has no signing key', async () => {
+    expect(await run({ ...full, signingKey: undefined })).toMatchObject({ deleted: [], value: 'SUCCESS' })
+  })
+
+  it('can run on its own, without the broad Stage 6 pass', async () => {
+    devices[clientId] = { tlsEnforced: true, uuid: 'uuid-1', status: {} } as any
+    const enumerateEthernet = vi.fn(async () => ({}))
+    const machine = unconfiguration.machine.provide({
+      actors: { enumerateEthernetPortSettings: fromPromise(enumerateEthernet), readTlsInventory: noTlsInventory }
+    })
+    const actor = createActor(machine, {
+      input: { clientId, privateCerts: [], publicKeyCertificates: [], tlsSettingData: [] } as any
+    })
+    actor.start()
+    actor.send({ type: 'REMOVE_ABANDONED_TLS', clientId })
+    const snapshot = await waitFor(actor, (state) => state.status === 'done', { timeout: 1000 })
+    actor.stop()
+    expect(snapshot.value).toBe('SUCCESS')
+    expect(enumerateEthernet).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    'read',
+    'key',
+    'certificate'
+  ])('retries a digest challenge during %s without losing a queued object', async (step) => {
+    devices[clientId] = { tlsEnforced: true, uuid: 'uuid-1', status: { Status: 'ACM' }, connectionParams: {} } as any
+    const challenge = {
+      statusCode: 401,
+      headers: [{ name: 'Www-Authenticate', value: 'Digest realm="AMT", nonce="new-nonce", qop="auth"' }]
+    }
+    let challenged = false
+    const deleted: string[] = []
+    const read = vi.fn(async () => {
+      if (step === 'read' && !challenged) {
+        challenged = true
+        throw challenge
+      }
+      return full
+    })
+    invokeWsmanCallSpy.mockImplementation(async (input: any) => {
+      const kind = input.xmlMessage.includes('AMT_PublicPrivateKeyPair') ? 'key' : 'certificate'
+      const list = kind === 'key' ? input.privateCerts : input.publicKeyCertificates
+      if (step === kind && !challenged) {
+        challenged = true
+        throw challenge
+      }
+      deleted.push(list[0].InstanceID)
+      return {}
+    })
+    try {
+      const machine = unconfiguration.machine.provide({ actors: { readTlsInventory: fromPromise(read) } })
+      const snapshot = await runMachineSegment(
+        machine,
+        'REMOVE_ABANDONED_TLS_OBJECTS',
+        {
+          clientId,
+          retryCount: 0,
+          privateCerts: [],
+          publicKeyCertificates: [],
+          amt: new AMT.Messages()
+        },
+        []
+      )
+      expect(snapshot.value).toBe('SUCCESS')
+      expect(deleted).toEqual(['Key 1', 'Cert 1'])
+      expect(devices[clientId].connectionParams.digestChallenge.nonce).toBe('new-nonce')
+      expect(devices[clientId].status.Status).toBe('ACM')
+      expect(challenged).toBe(true)
+    } finally {
+      invokeWsmanCallSpy.mockReset().mockResolvedValue({})
+    }
+  })
+
+  it.each([
+    'read',
+    'key',
+    'certificate'
+  ])('stops after three rejected authentication attempts during %s', async (step) => {
+    devices[clientId] = { tlsEnforced: true, uuid: 'uuid-1', status: { Status: 'ACM' }, connectionParams: {} } as any
+    const challenge = { statusCode: 401, headers: [] }
+    const read = vi.fn(async () => {
+      if (step === 'read') throw challenge
+      return full
+    })
+    const attempts = vi.fn(async (input: any) => {
+      const kind = input.xmlMessage.includes('AMT_PublicPrivateKeyPair') ? 'key' : 'certificate'
+      if (step === kind) throw challenge
+      return {}
+    })
+    invokeWsmanCallSpy.mockImplementation(attempts)
+    try {
+      const machine = unconfiguration.machine.provide({ actors: { readTlsInventory: fromPromise(read) } })
+      const snapshot = await runMachineSegment(
+        machine,
+        'REMOVE_ABANDONED_TLS_OBJECTS',
+        {
+          clientId,
+          retryCount: 0,
+          privateCerts: [],
+          publicKeyCertificates: [],
+          amt: new AMT.Messages()
+        },
+        []
+      )
+      expect(snapshot.value).toBe('CLEANUP_FAILURE')
+      expect(step === 'read' ? read.mock.calls.length : attempts.mock.calls.length).toBe(step === 'certificate' ? 4 : 3)
+      if (step === 'key') expect(snapshot.context.privateCerts).toEqual([orphan.key])
+      if (step === 'certificate') expect(snapshot.context.publicKeyCertificates).toEqual([orphan.entry])
+      expect(devices[clientId].status.Status).toBe('ACM')
+    } finally {
+      invokeWsmanCallSpy.mockReset().mockResolvedValue({})
+    }
+  })
+
+  it('compares device UUIDs case-insensitively', async () => {
+    devices['other-request'] = { uuid: 'UUID-1' } as any
+    try {
+      expect((await run(full)).deleted).toEqual([])
+    } finally {
+      delete devices['other-request']
+    }
+  })
+
+  it('stops when another request for the device appears during cleanup', async () => {
+    try {
+      const result = await run(full, undefined, true, () => {
+        devices['late-request'] = { uuid: 'uuid-1' } as any
+      })
+      expect(result).toMatchObject({ deleted: ['Key 1'], value: 'SUCCESS' })
+    } finally {
+      delete devices['late-request']
+    }
+  })
+
+  it.each([
+    [
+      'read',
+      'Failed to read TLS inventory; abandoned objects were kept',
+      []
+    ],
+    [
+      'key',
+      'Failed to delete abandoned TLS key pair',
+      []
+    ],
+    [
+      'certificate',
+      'Failed to delete abandoned TLS certificate',
+      ['Key 1']
+    ]
+  ])(
+    'logs a %s failure, stops, and leaves activation, TLS and CIRA status alone',
+    async (failing, message, deleted) => {
+      const warning = vi.spyOn(unconfiguration.logger, 'warn')
+      expect(await run(full, failing)).toEqual({
+        deleted,
+        value: 'CLEANUP_FAILURE',
+        status: undefined,
+        kept: ['connected', 'configured']
+      })
+      expect(warning).toHaveBeenCalledWith(`Abandoned TLS object cleanup incomplete: ${message}`)
+      warning.mockRestore()
+    }
+  )
+})
+
+describe('readTlsInventory', () => {
+  const page = (items: any, paging: Record<string, string>): any => ({
+    Envelope: { Body: { PullResponse: { Items: items, ...paging } } }
+  })
+  const input = (): any => ({ clientId, amt: new AMT.Messages(), message: null })
+  const className = (xml: string): string => /ResourceURI>[^<]*\/([^</]+)</.exec(xml)?.[1] ?? ''
+  const serve = (pages: Record<string, any[]>): void => {
+    const served: Record<string, number> = {}
+    invokeWsmanCallSpy.mockImplementation(async (context: any) => {
+      const name = className(context.xmlMessage)
+      if (context.xmlMessage.includes('/Enumerate')) {
+        return { Envelope: { Body: { EnumerateResponse: { EnumerationContext: 'ctx' } } } }
+      }
+      served[name] = (served[name] ?? 0) + 1
+      return (pages[name] ?? [page('', { EndOfSequence: '' })])[served[name] - 1]
+    })
+  }
+
+  const nodeForge = new NodeForge()
+  const signingKey = new CertManager(new Logger('test'), nodeForge).createCertificate({ CN: 'MPSRoot' }).key
+  const secrets: Record<string, unknown> = {
+    MPSCerts: { root_key: nodeForge.privateKeyToPem(signingKey) }
+  }
+  const getSecretAtPath = vi.fn(
+    async (path: string) =>
+      secrets[path] ?? (path.startsWith('devices/') ? { TLS_ISSUED_CERTIFICATE: 'saved-leaf' } : null)
+  )
+  const unconfiguration = new Unconfiguration()
+  const readyConfigurator: any = { ready: Promise.resolve(), secretsManager: { getSecretAtPath } }
+
+  beforeEach(() => {
+    unconfiguration.configurator = readyConfigurator
+    devices[clientId] = { uuid: 'uuid-1', status: {} } as any
+  })
+
+  afterEach(() => {
+    delete devices[clientId]
+    invokeWsmanCallSpy.mockReset().mockResolvedValue({})
+  })
+
+  it('combines every page of certificates, keys and each kind of association', async () => {
+    serve({
+      AMT_PublicKeyCertificate: [
+        page({ AMT_PublicKeyCertificate: [{ InstanceID: 'Cert 0' }] }, { EnumerationContext: 'more' }),
+        page({ AMT_PublicKeyCertificate: { InstanceID: 'Cert 1' } }, { EndOfSequence: '' })
+      ],
+      AMT_TLSCredentialContext: [page({ AMT_TLSCredentialContext: { id: 'tls' } }, { EndOfSequence: '' })],
+      AMT_RemoteAccessCredentialContext: [
+        page({ AMT_RemoteAccessCredentialContext: { id: 'remote' } }, { EndOfSequence: '' })
+      ],
+      CIM_CredentialContext: [page({ CIM_CredentialContext: { id: 'wifi' } }, { EndOfSequence: '' })]
+    })
+    const inventory = await unconfiguration.readTlsInventory({ input: input() })
+    expect(inventory.certificates).toEqual([{ InstanceID: 'Cert 0' }, { InstanceID: 'Cert 1' }])
+    expect(inventory.tlsContexts).toEqual([{ id: 'tls' }])
+    expect(inventory.otherContexts).toEqual([{ id: 'wifi' }, { id: 'remote' }])
+    expect(inventory.persistedLeafPem).toBe('saved-leaf')
+    expect(getSecretAtPath).toHaveBeenCalledWith('devices/uuid-1')
+  })
+
+  it('loads the signing key from Vault, whichever provisioning route ran', async () => {
+    // No rootCertKey is set on the device, as on the TLS-reuse route where fetchMPSRootKey is skipped.
+    serve({})
+    const inventory = await unconfiguration.readTlsInventory({ input: input() })
+    expect(inventory.signingKey.n.toString(16)).toBe(signingKey.n.toString(16))
+    expect(getSecretAtPath).toHaveBeenCalledWith('MPSCerts')
+  })
+
+  it('has no signing key when Vault has none, so nothing can be selected', async () => {
+    getSecretAtPath.mockImplementationOnce(async () => ({ TLS_ISSUED_CERTIFICATE: 'saved-leaf' }))
+    getSecretAtPath.mockImplementationOnce(async () => null as any)
+    serve({})
+    expect((await unconfiguration.readTlsInventory({ input: input() })).signingKey).toBeUndefined()
+  })
+
+  it('waits for the Configurator to finish initializing before reading the saved leaf', async () => {
+    const late: any = {}
+    // Initialization finishes on a later timer, after the mocked WS-Man reads have all completed.
+    late.ready = new Promise<void>((resolve) =>
+      setTimeout(() => {
+        late.secretsManager = { getSecretAtPath }
+        resolve()
+      }, 20)
+    )
+    unconfiguration.configurator = late
+    serve({})
+    expect((await unconfiguration.readTlsInventory({ input: input() })).persistedLeafPem).toBe('saved-leaf')
+  })
+
+  it('fails the read when the Configurator could not initialize', async () => {
+    // A getter, so the rejection is created only when it is awaited.
+    unconfiguration.configurator = {
+      get ready() {
+        return Promise.reject(new Error('initialization failed'))
+      }
+    } as any
+    serve({})
+    await expect(unconfiguration.readTlsInventory({ input: input() })).rejects.toThrow('initialization failed')
+  })
+
+  it.each([
+    ['a page that neither ends nor continues', page({ AMT_PublicKeyCertificate: {} }, {})],
+    ['a page without items', page(undefined, { EndOfSequence: '' })]
+  ])('fails on %s so cleanup never uses a partial inventory', async (_name, bad) => {
+    serve({ AMT_PublicKeyCertificate: [bad] })
+    await expect(unconfiguration.readTlsInventory({ input: input() })).rejects.toThrow('Incomplete')
   })
 })
